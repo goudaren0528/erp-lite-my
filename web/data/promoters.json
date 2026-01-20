@@ -5,13 +5,24 @@
     "createdAt": "2026-01-19T09:31:46.859Z"
   },
   {
-    "id": "noumgq5",
-    "name": "test1123",
-    "phone": "",
+    "id": "98mximo",
+    "name": "就",
+    "phone": "1 ",
     "channels": [
-      "PART_TIME"
+      "RETAIL"
     ],
-    "creatorId": "32q93lp",
-    "createdAt": "2026-01-19T11:20:21.677Z"
+    "creatorId": "1",
+    "createdAt": "2026-01-20T08:04:13.038Z"
+  },
+  {
+    "id": "2jfvksn",
+    "name": "对对对",
+    "phone": "对对对",
+    "channels": [
+      "PEER",
+      "RETAIL"
+    ],
+    "creatorId": "1",
+    "createdAt": "2026-01-20T08:25:35.503Z"
   }
 ]

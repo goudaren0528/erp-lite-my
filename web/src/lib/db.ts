@@ -12,7 +12,7 @@ const CONFIGS_PATH = path.join(DATA_DIR, 'commission-configs.json');
 
 const INITIAL_DB: DB = {
   users: [
-    { id: '1', name: '管理员', username: 'admin', password: '123', role: 'ADMIN', permissions: ['orders', 'promoters', 'stats', 'products', 'commissions', 'users'] },
+    { id: '1', name: '管理员', username: 'admin', password: '123', role: 'ADMIN', permissions: ['orders', 'promoters', 'stats', 'products', 'commissions', 'users', 'backup'] },
     { id: '2', name: '发货员小张', username: 'shipping', password: '123', role: 'SHIPPING', permissions: ['orders'] },
   ],
   promoters: [

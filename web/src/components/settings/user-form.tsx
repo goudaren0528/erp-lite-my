@@ -18,6 +18,7 @@ const PERMISSIONS = [
     { key: 'orders', label: '订单列表' },
     { key: 'view_all_orders', label: '查看所有订单(管理员)' },
     { key: 'promoters', label: '推广人员' },
+    { key: 'view_all_promoters', label: '查看所有推广人员(管理员)' },
     { key: 'stats', label: '结算统计' },
     { key: 'products', label: '商品库管理' },
     { key: 'users', label: '账号权限管理' },

@@ -1,10 +1,17 @@
 "use client"
 
 import { useState } from "react"
-import { Promoter, OrderSource } from "@/types"
+import { Promoter, OrderSource, User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -29,34 +36,40 @@ import { toast } from "sonner"
 
 const CHANNEL_OPTIONS: { value: OrderSource; label: string }[] = [
     { value: 'RETAIL', label: '零售' },
-    { value: 'AGENT', label: '代理' },
     { value: 'PEER', label: '同行' },
-    { value: 'PART_TIME', label: '兼职' },
+    { value: 'PART_TIME_AGENT', label: '兼职代理' },
 ]
 
 interface PromoterListProps {
     promoters: Promoter[]
+    users?: User[]
 }
 
-export function PromoterList({ promoters }: PromoterListProps) {
+export function PromoterList({ promoters, users = [] }: PromoterListProps) {
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
     const [editingPromoter, setEditingPromoter] = useState<Promoter | null>(null)
     const [promoterToDelete, setPromoterToDelete] = useState<Promoter | null>(null)
     const [formData, setFormData] = useState<Partial<Promoter>>({})
+    const [creatorFilter, setCreatorFilter] = useState<string>("all")
+
+    const filteredPromoters = promoters.filter(p => {
+        if (creatorFilter === "all") return true
+        return p.creatorId === creatorFilter
+    })
 
     const handleEdit = (promoter: Promoter) => {
         setEditingPromoter(promoter)
         setFormData({
             ...promoter,
-            channels: promoter.channels || []
+            channel: promoter.channel || ((promoter as any).channels && (promoter as any).channels[0])
         })
         setIsDialogOpen(true)
     }
 
     const handleAdd = () => {
         setEditingPromoter(null)
-        setFormData({ channels: [] })
+        setFormData({})
         setIsDialogOpen(true)
     }
 
@@ -88,7 +101,7 @@ export function PromoterList({ promoters }: PromoterListProps) {
             id: editingPromoter?.id,
             name: formData.name || '',
             phone: formData.phone || '',
-            channels: formData.channels || [],
+            channel: formData.channel,
         }
         
         try {
@@ -106,23 +119,42 @@ export function PromoterList({ promoters }: PromoterListProps) {
         }
     }
 
-    const toggleChannel = (value: OrderSource) => {
-        const current = formData.channels || []
-        if (current.includes(value)) {
-            setFormData({ ...formData, channels: current.filter(c => c !== value) })
-        } else {
-            setFormData({ ...formData, channels: [...current, value] })
-        }
+    const getChannelLabel = (value: string) => {
+        const option = CHANNEL_OPTIONS.find(c => c.value === value)
+        if (option) return option.label
+        if (value === 'AGENT') return '代理'
+        if (value === 'PART_TIME') return '兼职'
+        return value
     }
 
-    const getChannelLabel = (value: string) => {
-        return CHANNEL_OPTIONS.find(c => c.value === value)?.label || value
+    const getUserName = (userId?: string) => {
+        if (!userId) return '-'
+        return users.find(u => u.id === userId)?.name || '未知用户'
     }
 
     return (
         <div className="space-y-4">
             <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold">推广人员列表</h2>
+                <div className="flex items-center space-x-4">
+                    <h2 className="text-xl font-bold">推广人员列表</h2>
+                    {users.length > 0 && (
+                        <div className="w-[200px]">
+                            <Select value={creatorFilter} onValueChange={setCreatorFilter}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="筛选创建人" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">所有创建人</SelectItem>
+                                    {users.map(user => (
+                                        <SelectItem key={user.id} value={user.id}>
+                                            {user.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
+                </div>
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                     <DialogTrigger asChild>
                         <Button onClick={handleAdd}>
@@ -152,21 +184,22 @@ export function PromoterList({ promoters }: PromoterListProps) {
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label>推广渠道 (可多选)</Label>
-                                <div className="grid grid-cols-2 gap-2 border p-3 rounded-md">
-                                    {CHANNEL_OPTIONS.map((option) => (
-                                        <div key={option.value} className="flex items-center space-x-2">
-                                            <Checkbox 
-                                                id={`channel-${option.value}`} 
-                                                checked={formData.channels?.includes(option.value)}
-                                                onCheckedChange={() => toggleChannel(option.value)}
-                                            />
-                                            <Label htmlFor={`channel-${option.value}`} className="cursor-pointer font-normal">
+                                <Label>渠道类型</Label>
+                                <Select 
+                                    value={formData.channel} 
+                                    onValueChange={(val: OrderSource) => setFormData({...formData, channel: val})}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="选择渠道类型" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {CHANNEL_OPTIONS.map((option) => (
+                                            <SelectItem key={option.value} value={option.value}>
                                                 {option.label}
-                                            </Label>
-                                        </div>
-                                    ))}
-                                </div>
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div className="flex justify-end space-x-2 pt-4">
                                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>取消</Button>
@@ -183,21 +216,26 @@ export function PromoterList({ promoters }: PromoterListProps) {
                         <TableRow>
                             <TableHead>姓名</TableHead>
                             <TableHead>联系方式</TableHead>
-                            <TableHead>推广渠道</TableHead>
+                            <TableHead>渠道类型</TableHead>
+                            <TableHead>创建人</TableHead>
                             <TableHead>创建时间</TableHead>
                             <TableHead className="w-[100px]">操作</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {promoters.map((promoter) => (
+                        {filteredPromoters.map((promoter) => (
                             <TableRow key={promoter.id}>
                                 <TableCell className="font-medium">{promoter.name}</TableCell>
                                 <TableCell>{promoter.phone || '-'}</TableCell>
                                 <TableCell>
-                                    {promoter.channels && promoter.channels.length > 0 
-                                        ? promoter.channels.map(c => getChannelLabel(c)).join(', ') 
-                                        : ((promoter as any).channel || '-') 
+                                    {promoter.channel ? getChannelLabel(promoter.channel) : 
+                                     ((promoter as any).channels && (promoter as any).channels.length > 0 
+                                        ? (promoter as any).channels.map((c: any) => getChannelLabel(c)).join(', ') 
+                                        : '-')
                                     }
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                    {getUserName(promoter.creatorId)}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground text-sm">
                                     {promoter.createdAt ? promoter.createdAt.split('T')[0] : '-'}
@@ -214,9 +252,9 @@ export function PromoterList({ promoters }: PromoterListProps) {
                                 </TableCell>
                             </TableRow>
                         ))}
-                        {promoters.length === 0 && (
+                        {filteredPromoters.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={5} className="text-center h-24">暂无推广人员</TableCell>
+                                <TableCell colSpan={6} className="text-center h-24">暂无推广人员</TableCell>
                             </TableRow>
                         )}
                     </TableBody>

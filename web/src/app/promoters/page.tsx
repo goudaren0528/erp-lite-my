@@ -7,14 +7,16 @@ export default async function PromotersPage() {
     const currentUser = await getCurrentUser()
 
     const isAdmin = currentUser?.role === 'ADMIN'
-    const filteredPromoters = isAdmin 
+    const canViewAll = isAdmin || currentUser?.permissions?.includes('view_all_promoters')
+    
+    const filteredPromoters = canViewAll 
         ? db.promoters 
         : db.promoters.filter(p => p.creatorId === currentUser?.id)
 
     return (
         <div className="p-8">
             <h1 className="text-2xl font-bold mb-6">推广人员管理</h1>
-            <PromoterList promoters={filteredPromoters} />
+            <PromoterList promoters={filteredPromoters} users={db.users} />
         </div>
     )
 }

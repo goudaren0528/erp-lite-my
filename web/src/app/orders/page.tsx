@@ -8,6 +8,7 @@ export default async function OrdersPage() {
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
   const canViewAllOrders = isAdmin || currentUser?.permissions?.includes('view_all_orders');
+  const canViewAllPromoters = isAdmin || currentUser?.permissions?.includes('view_all_promoters') || canViewAllOrders;
 
   // Filter orders
   let orders = [...db.orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -16,7 +17,7 @@ export default async function OrdersPage() {
   }
 
   // Filter promoters for dropdowns
-  const promoters = canViewAllOrders 
+  const promoters = canViewAllPromoters 
     ? db.promoters 
     : db.promoters.filter(p => p.creatorId === currentUser?.id);
 

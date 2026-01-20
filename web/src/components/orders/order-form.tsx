@@ -80,6 +80,101 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
   const [source, setSource] = useState<OrderSource>(initialData?.source || "RETAIL")
   const [platform, setPlatform] = useState<OrderPlatform>(initialData?.platform || "OTHER")
 
+  const [recipientName, setRecipientName] = useState(initialData?.recipientName || '')
+  const [recipientPhone, setRecipientPhone] = useState(initialData?.recipientPhone || '')
+  const [smartAddress, setSmartAddress] = useState('')
+
+  const handleSmartParse = () => {
+      const text = smartAddress.trim()
+      if (!text) return
+
+      // Phone
+      const phoneMatch = text.match(/(1\d{10})/)
+      const phone = phoneMatch ? phoneMatch[1] : ''
+      if (phone) setRecipientPhone(phone)
+      
+      // Clean text for region matching (remove all spaces and invisible chars to be robust)
+      const cleanText = text.replace(/[\s\u200B-\u200D\uFEFF]+/g, ''); 
+      
+      // Try to identify Province/City
+      let foundProv = ''
+      let foundCity = ''
+
+      for (const region of CHINA_REGIONS) {
+          // Check full name or short name (e.g. 广东 vs 广东省)
+          if (cleanText.includes(region.name) || (region.name.length > 2 && cleanText.includes(region.name.substring(0, 2)))) {
+             foundProv = region.name
+             break
+          }
+      }
+      
+      if (foundProv) {
+          setProvince(foundProv)
+          const region = CHINA_REGIONS.find(r => r.name === foundProv)
+          if (region) {
+              for (const c of region.cities) {
+                  // Check if the city name (or short name) exists in the clean text
+                  if (cleanText.includes(c) || (c.length > 2 && cleanText.includes(c.substring(0, 2)))) {
+                      foundCity = c
+                      break
+                  }
+              }
+          }
+      }
+      
+      if (foundCity) {
+          setCity(foundCity)
+      }
+      
+      // Name & Detail
+      // Use original text but with phone removed, to preserve spaces for splitting
+      let remaining = text.replace(/(1\d{10})/, ' ').trim()
+      
+      // Remove province/city from remaining string if they exist
+      if (foundProv) {
+          remaining = remaining.replace(new RegExp(foundProv, 'g'), ' ')
+          if (foundProv.length > 2) {
+             const shortName = foundProv.substring(0, 2)
+             remaining = remaining.replace(new RegExp(shortName, 'g'), ' ')
+          }
+      }
+      if (foundCity) {
+          remaining = remaining.replace(new RegExp(foundCity, 'g'), ' ')
+          if (foundCity.length > 2) {
+             const shortName = foundCity.substring(0, 2)
+             remaining = remaining.replace(new RegExp(shortName, 'g'), ' ')
+          }
+      }
+      
+      // Clean up common separators
+      remaining = remaining.replace(/[,，:：\-\s]+/g, ' ').trim()
+      
+      // Also remove "省" "市" suffix leftovers if any (standalone)
+      remaining = remaining.replace(/\s+[省市区县]\s+/g, ' ').replace(/\s+/g, ' ').trim()
+
+      const parts = remaining.split(' ').filter(s => s.length > 0)
+      
+      if (parts.length > 0) {
+          // Sort by length
+          const sorted = [...parts].sort((a, b) => a.length - b.length)
+          const nameCandidate = sorted[0]
+          
+          // Heuristic: Name should be short, and NOT end with common address suffixes
+          const isAddressPart = (str: string) => /.*[省市区县路街号室座园苑]$/.test(str) || str.includes('街道')
+          
+          if (nameCandidate.length <= 4 && !isAddressPart(nameCandidate)) {
+              setRecipientName(nameCandidate)
+              // The rest is address
+              setDetailAddress(parts.filter(p => p !== nameCandidate).join(''))
+          } else {
+              // Assume all is address
+              setDetailAddress(parts.join(''))
+          }
+      }
+      
+      toast.success("已尝试自动识别信息")
+  }
+
   const handleDurationSelect = (days: number) => {
       setDuration(days)
       if (rentStartDate) {
@@ -89,8 +184,13 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
   // Filter promoters based on selected source
   const filteredPromoters = promoters.filter(p => {
-      if (p.channels && p.channels.length > 0) {
-          return p.channels.includes(source)
+      if (p.channel) {
+          return p.channel === source
+      }
+      // Backward compatibility
+      const legacyChannels = (p as any).channels as OrderSource[] | undefined
+      if (legacyChannels && legacyChannels.length > 0) {
+          return legacyChannels.includes(source)
       }
       // If no channels defined, show by default (backward compatibility)
       return true
@@ -195,6 +295,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
               <SelectItem value="XIANYU">闲鱼</SelectItem>
               <SelectItem value="DOUYIN">抖音</SelectItem>
               <SelectItem value="OTHER">其他</SelectItem>
+              <SelectItem value="OFFLINE">线下</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -297,6 +398,11 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2 col-span-2">
+             <Label>设备SN码 (选填)</Label>
+             <Input name="sn" defaultValue={initialData?.sn} placeholder="请输入设备SN码" />
           </div>
         </div>
 
@@ -459,14 +565,28 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
       <div className="space-y-4 border p-4 rounded-md bg-gray-50">
         <h3 className="font-semibold text-sm">收货信息</h3>
+        
+        <div className="space-y-2 p-3 bg-blue-50 rounded border border-blue-100">
+             <Label className="text-blue-800">智能识别 (粘贴整段地址)</Label>
+             <div className="flex gap-2">
+                 <Textarea 
+                    value={smartAddress}
+                    onChange={e => setSmartAddress(e.target.value)}
+                    placeholder="例如: 张三 13800138000 广东省深圳市南山区xxx街道xxx号"
+                    className="h-20 text-xs bg-white"
+                 />
+                 <Button type="button" onClick={handleSmartParse} className="h-20">识别</Button>
+             </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
                 <Label>收件人姓名</Label>
-                <Input name="recipientName" defaultValue={initialData?.recipientName} placeholder="请输入收件人姓名" />
+                <Input name="recipientName" value={recipientName} onChange={e => setRecipientName(e.target.value)} placeholder="请输入收件人姓名" />
             </div>
             <div className="space-y-2">
                 <Label>收件人电话</Label>
-                <Input name="recipientPhone" defaultValue={initialData?.recipientPhone} placeholder="请输入收件人电话" />
+                <Input name="recipientPhone" value={recipientPhone} onChange={e => setRecipientPhone(e.target.value)} placeholder="请输入收件人电话" />
             </div>
         </div>
 
@@ -484,7 +604,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                 </SelectContent>
             </Select>
             
-            <Select value={city} onValueChange={setCity} disabled={!province}>
+            <Select key={province} value={city} onValueChange={setCity} disabled={!province}>
                 <SelectTrigger>
                     <SelectValue placeholder="城市" />
                 </SelectTrigger>

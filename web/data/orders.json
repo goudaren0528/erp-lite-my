@@ -2,8 +2,8 @@
   {
     "id": "2qk85cy",
     "orderNo": "ORD-1768810989040",
-    "source": "AGENT",
-    "status": "PENDING_REVIEW",
+    "source": "RETAIL",
+    "status": "CLOSED",
     "customerXianyuId": "卡看看",
     "contractSigner": "讲几句",
     "productName": "大疆pocket3",
@@ -12,10 +12,10 @@
     "rentPrice": 68,
     "deposit": 0,
     "insurancePrice": 30,
-    "totalAmount": 98,
+    "totalAmount": 188,
     "deliveryCity": "急急急",
-    "deliveryTime": "2026-01-16",
-    "returnDeadline": "2026-01-21",
+    "deliveryTime": "2026-01-20",
+    "returnDeadline": "2026-01-22",
     "remark": "会合后",
     "creatorId": "3",
     "creatorName": "推广员小李",
@@ -44,18 +44,67 @@
         "days": 1,
         "price": 0,
         "createdAt": "2026-01-20T04:06:32.270Z"
+      },
+      {
+        "id": "bf2q38k",
+        "days": 1,
+        "price": 0,
+        "createdAt": "2026-01-20T07:00:15.709Z"
       }
     ],
     "sourceContact": "推广员小李",
-    "address": "所发生的发生的",
+    "address": "天津市 天津市 发反反复复",
     "rentStartDate": "2026-01-18",
-    "miniProgramOrderNo": ""
+    "miniProgramOrderNo": "",
+    "trackingNumber": "1",
+    "logisticsCompany": "顺丰速运",
+    "logs": [
+      {
+        "action": "发货",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T06:40:38.058Z",
+        "details": "顺丰速运 1"
+      },
+      {
+        "action": "续租",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T07:00:15.709Z",
+        "details": "续租 1 天，费用 0 元"
+      },
+      {
+        "action": "状态变更",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T07:01:39.444Z",
+        "details": "PENDING_RECEIPT -> RENTING"
+      },
+      {
+        "action": "逾期补价",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T07:01:47.484Z",
+        "details": "增加违约金 90 元"
+      },
+      {
+        "action": "归还",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T08:24:01.325Z",
+        "details": "顺丰速运 哒哒哒哒哒"
+      },
+      {
+        "action": "关闭订单",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T08:44:57.553Z",
+        "details": "测试"
+      }
+    ],
+    "overdueFee": 90,
+    "returnTrackingNumber": "哒哒哒哒哒",
+    "returnLogisticsCompany": "顺丰速运"
   },
   {
     "id": "l1f64ea",
     "orderNo": "1001",
     "source": "RETAIL",
-    "status": "PENDING_REVIEW",
+    "status": "CLOSED",
     "customerXianyuId": "对对对",
     "sourceContact": "推广员小李",
     "miniProgramOrderNo": "",
@@ -74,15 +123,23 @@
     "creatorId": "1",
     "creatorName": "管理员",
     "createdAt": "2026-01-19T09:32:11.644Z",
-    "extensions": []
+    "extensions": [],
+    "logs": [
+      {
+        "action": "审核拒绝",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T08:47:08.747Z",
+        "details": "订单已关闭"
+      }
+    ]
   },
   {
     "id": "xgk4870",
     "orderNo": "1002",
     "source": "RETAIL",
-    "status": "PENDING_REVIEW",
+    "status": "RETURNING",
     "customerXianyuId": "山东潍坊人",
-    "sourceContact": "小林",
+    "sourceContact": "推广员小李",
     "miniProgramOrderNo": "",
     "productName": "大疆pocket3",
     "variantName": "长续航",
@@ -99,15 +156,29 @@
     "creatorId": "1",
     "creatorName": "管理员",
     "createdAt": "2026-01-19T11:19:36.104Z",
-    "extensions": []
+    "extensions": [],
+    "logs": [
+      {
+        "action": "审核通过",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T07:20:09.508Z"
+      },
+      {
+        "action": "状态变更",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T08:45:14.380Z",
+        "details": "PENDING_SHIPMENT -> RETURNING"
+      }
+    ],
+    "sn": ""
   },
   {
     "id": "bulhdrn",
     "orderNo": "1003",
-    "source": "PART_TIME",
-    "status": "PENDING_REVIEW",
+    "source": "PEER",
+    "status": "PENDING_SHIPMENT",
     "customerXianyuId": "sdfsd",
-    "sourceContact": "test1123",
+    "sourceContact": "对对对",
     "miniProgramOrderNo": "",
     "productName": "三星S23U",
     "variantName": "标准版",
@@ -124,24 +195,34 @@
     "creatorId": "32q93lp",
     "creatorName": "测试人员",
     "createdAt": "2026-01-19T11:20:43.133Z",
-    "extensions": []
+    "extensions": [],
+    "logs": [
+      {
+        "action": "审核通过",
+        "operator": "管理员",
+        "timestamp": "2026-01-20T06:27:14.654Z"
+      }
+    ],
+    "sn": "12345678",
+    "recipientName": "",
+    "recipientPhone": ""
   },
   {
     "id": "puv9t6z",
     "orderNo": "1004",
-    "source": "PART_TIME",
+    "source": "RETAIL",
     "platform": "DOUYIN",
     "status": "PENDING_REVIEW",
     "customerXianyuId": "222",
-    "sourceContact": "test1123",
+    "sourceContact": "推广员小李",
     "miniProgramOrderNo": "222",
     "productName": "三星S23U",
     "variantName": "标准版",
     "duration": 2,
-    "rentPrice": 89,
+    "rentPrice": 123,
     "deposit": 0,
     "insurancePrice": 30,
-    "totalAmount": 119,
+    "totalAmount": 153,
     "deliveryTime": "2026-01-18",
     "returnDeadline": "2026-01-22",
     "rentStartDate": "2026-01-20",
@@ -150,6 +231,9 @@
     "creatorId": "32q93lp",
     "creatorName": "测试人员",
     "createdAt": "2026-01-20T02:23:01.572Z",
-    "extensions": []
+    "extensions": [],
+    "sn": "",
+    "recipientName": "",
+    "recipientPhone": ""
   }
 ]

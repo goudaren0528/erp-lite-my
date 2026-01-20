@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, PlusCircle, List, Settings, BarChart, Users, LogOut, User as UserIcon, Package, Shield } from "lucide-react"
+import { LayoutDashboard, PlusCircle, List, Settings, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database } from "lucide-react"
 import { User } from "@/types"
 import { logout } from "@/lib/auth"
 
@@ -61,6 +61,13 @@ export function MainNav({ user }: MainNavProps) {
       active: pathname === "/users",
       permission: "users",
     },
+    {
+       href: "/backup",
+       label: "导出数据",
+       icon: Database,
+       active: pathname === "/backup",
+       permission: "backup",
+     },
   ]
 
   // Filter routes based on permissions
@@ -83,6 +90,7 @@ export function MainNav({ user }: MainNavProps) {
           <Link
             key={route.href}
             href={route.href}
+            prefetch={route.href.startsWith('/api') ? false : undefined}
           >
             <Button
               variant={route.active ? "secondary" : "ghost"}

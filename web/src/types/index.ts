@@ -23,7 +23,7 @@ export interface Product {
 }
 
 export type OrderSource = 'AGENT' | 'PEER' | 'RETAIL' | 'PART_TIME' | 'PART_TIME_AGENT';
-export type OrderPlatform = 'XIAOHONGSHU' | 'XIANYU' | 'DOUYIN' | 'OTHER';
+export type OrderPlatform = 'XIAOHONGSHU' | 'XIANYU' | 'DOUYIN' | 'OTHER' | 'OFFLINE';
 export type OrderStatus = 
   | 'PENDING_REVIEW' 
   | 'PENDING_SHIPMENT' 
@@ -57,12 +57,14 @@ export interface Order {
   // 设备信息
   productName: string;
   variantName: string;
+  sn?: string; // SN码
   
   // 租赁详情
   duration: number; // 天数
   rentPrice: number; // 租金
   deposit: number; // 租机费用/押金
   insurancePrice: number; // 保险费
+  overdueFee?: number; // 逾期违约金
   totalAmount: number; // 总金额
   
   // 物流与时间
@@ -71,6 +73,11 @@ export interface Order {
   recipientPhone?: string; // 收件人电话
   trackingNumber?: string; // 物流单号
   logisticsCompany?: string; // 物流公司
+  latestLogisticsInfo?: string; // 最新物流信息 (预留)
+
+  returnTrackingNumber?: string; // 归还物流单号
+  returnLogisticsCompany?: string; // 归还物流公司
+  returnLatestLogisticsInfo?: string; // 归还最新物流信息 (预留)
   
   rentStartDate: string; // 租期开始日期 (YYYY-MM-DD)
   deliveryTime: string; // 发货时间 (YYYY-MM-DD)
@@ -83,6 +90,15 @@ export interface Order {
   createdAt: string;
   
   extensions: OrderExtension[];
+  
+  logs?: OrderLog[];
+}
+
+export interface OrderLog {
+  action: string; // e.g., '创建', '发货', '关闭'
+  operator: string;
+  timestamp: string;
+  details?: string;
 }
 
 export interface CommissionConfig {
@@ -96,7 +112,7 @@ export interface Promoter {
   id: string;
   name: string;
   phone?: string;
-  channels?: OrderSource[]; // 推广渠道
+  channel?: OrderSource; // 推广渠道 (单选)
   creatorId?: string;
   createdAt: string;
 }

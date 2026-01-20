@@ -4,7 +4,7 @@
     "name": "管理员",
     "username": "admin",
     "password": "123",
-    "role": "SHIPPING",
+    "role": "ADMIN",
     "permissions": [
       "orders",
       "promoters",
@@ -12,7 +12,9 @@
       "products",
       "commissions",
       "users",
-      "view_all_orders"
+      "view_all_orders",
+      "view_all_promoters",
+      "backup"
     ]
   }
 ]
