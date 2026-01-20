@@ -30,9 +30,9 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, deleteOrder, shipOrder, returnOrder, approveOrder, rejectOrder, addOverdueFee } from "@/app/actions"
+import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, returnOrder, approveOrder, rejectOrder, addOverdueFee } from "@/app/actions"
 import { format, addDays } from "date-fns"
-import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp } from "lucide-react"
+import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy } from "lucide-react"
 import { closeOrder } from "@/app/actions"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { OrderForm } from "./order-form"
@@ -392,6 +392,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
               <TableHead className="w-[150px]">订单号/时间</TableHead>
               <TableHead>用户昵称（闲鱼等）</TableHead>
               <TableHead>小程序单号</TableHead>
+              <TableHead>闲鱼单号</TableHead>
               <TableHead>推广方式</TableHead>
               <TableHead>推广员</TableHead>
               <TableHead>物流信息</TableHead>
@@ -404,6 +405,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
               </TableHead>
               <TableHead>金额详情</TableHead>
               <TableHead>状态</TableHead>
+              <TableHead>截图</TableHead>
               <TableHead>备注</TableHead>
               </TableRow>
           </TableHeader>
@@ -413,7 +415,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
               ))}
               {paginatedOrders.length === 0 && (
               <TableRow>
-                  <TableCell colSpan={10} className="text-center h-24">
+                  <TableCell colSpan={11} className="text-center h-24">
                   暂无匹配订单
                   </TableCell>
               </TableRow>
@@ -617,6 +619,10 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
   const [mpNo, setMpNo] = useState(order.miniProgramOrderNo || '')
   const [isMpOpen, setIsMpOpen] = useState(false)
 
+  // Xianyu No Edit
+  const [xianyuNo, setXianyuNo] = useState(order.xianyuOrderNo || '')
+  const [isXianyuOpen, setIsXianyuOpen] = useState(false)
+
   const [isRejectOpen, setIsRejectOpen] = useState(false)
 
   const handleStatusChange = async (val: OrderStatus) => {
@@ -655,6 +661,21 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
           if (res?.success) {
               toast.success(res.message)
               setIsMpOpen(false)
+          } else {
+              toast.error(res?.message || "操作失败")
+          }
+      } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
+      }
+  }
+
+  const handleSaveXianyuNo = async () => {
+      try {
+          const res = await updateXianyuOrderNo(order.id, xianyuNo)
+          if (res?.success) {
+              toast.success(res.message)
+              setIsXianyuOpen(false)
           } else {
               toast.error(res?.message || "操作失败")
           }
@@ -742,11 +763,21 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
   const totalExtensionDays = (order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)
   const promoter = promoters.find(p => p.name === order.sourceContact)
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    toast.success("已复制")
+  }
+
   return (
     <>
     <TableRow className="border-b-0 group">
       <TableCell className="font-medium align-top">
-        <div className="text-sm font-bold">{order.orderNo}</div>
+        <div className="flex items-center gap-1">
+            <div className="text-sm font-bold">{order.orderNo}</div>
+            <Button variant="ghost" size="icon" className="h-4 w-4 text-gray-400 hover:text-blue-600" onClick={() => copyToClipboard(order.orderNo)}>
+                <Copy className="h-3 w-3" />
+            </Button>
+        </div>
         <div className="text-xs text-muted-foreground mt-1">{format(new Date(order.createdAt), 'MM-dd HH:mm')}</div>
         <div className="text-xs text-blue-600 mt-1">创建人: {order.creatorName}</div>
       </TableCell>
@@ -754,22 +785,54 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
         <div className="font-bold">{order.customerXianyuId}</div>
       </TableCell>
       <TableCell className="align-top">
-         <Popover open={isMpOpen} onOpenChange={setIsMpOpen}>
-            <PopoverTrigger asChild>
-                <div className="text-sm cursor-pointer hover:underline decoration-dashed underline-offset-4 text-green-700 font-mono">
-                    {order.miniProgramOrderNo || <span className="text-gray-300 italic text-xs">点击填写</span>}
-                </div>
-            </PopoverTrigger>
-            <PopoverContent className="w-64 p-3">
-                <div className="space-y-2">
-                    <Label className="text-xs">小程序订单号</Label>
-                    <div className="flex space-x-2">
-                        <Input value={mpNo} onChange={e => setMpNo(e.target.value)} className="h-8 text-xs" />
-                        <Button size="sm" className="h-8" onClick={handleSaveMpNo}>保存</Button>
+         <div className="flex items-center gap-1">
+            <Popover open={isMpOpen} onOpenChange={setIsMpOpen}>
+                <PopoverTrigger asChild>
+                    <div className="text-sm cursor-pointer hover:underline decoration-dashed underline-offset-4 text-green-700 font-mono break-all">
+                        {order.miniProgramOrderNo || <span className="text-gray-300 italic text-xs">点击填写</span>}
                     </div>
-                </div>
-            </PopoverContent>
-         </Popover>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-3">
+                    <div className="space-y-2">
+                        <Label className="text-xs">小程序订单号</Label>
+                        <div className="flex space-x-2">
+                            <Input value={mpNo} onChange={e => setMpNo(e.target.value)} className="h-8 text-xs" />
+                            <Button size="sm" className="h-8" onClick={handleSaveMpNo}>保存</Button>
+                        </div>
+                    </div>
+                </PopoverContent>
+            </Popover>
+            {order.miniProgramOrderNo && (
+                <Button variant="ghost" size="icon" className="h-4 w-4 shrink-0 text-gray-400 hover:text-blue-600" onClick={() => copyToClipboard(order.miniProgramOrderNo!)}>
+                    <Copy className="h-3 w-3" />
+                </Button>
+            )}
+         </div>
+      </TableCell>
+      <TableCell className="align-top">
+        <div className="flex items-center gap-1">
+            <Popover open={isXianyuOpen} onOpenChange={setIsXianyuOpen}>
+                <PopoverTrigger asChild>
+                    <div className="text-sm cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700 font-mono break-all">
+                        {order.xianyuOrderNo || <span className="text-gray-300 italic text-xs">点击填写</span>}
+                    </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-3">
+                    <div className="space-y-2">
+                        <Label className="text-xs">闲鱼订单号</Label>
+                        <div className="flex space-x-2">
+                            <Input value={xianyuNo} onChange={e => setXianyuNo(e.target.value)} className="h-8 text-xs" />
+                            <Button size="sm" className="h-8" onClick={handleSaveXianyuNo}>保存</Button>
+                        </div>
+                    </div>
+                </PopoverContent>
+            </Popover>
+            {order.xianyuOrderNo && (
+                <Button variant="ghost" size="icon" className="h-4 w-4 shrink-0 text-gray-400 hover:text-blue-600" onClick={() => copyToClipboard(order.xianyuOrderNo!)}>
+                    <Copy className="h-3 w-3" />
+                </Button>
+            )}
+        </div>
       </TableCell>
       <TableCell className="align-top">
          <Badge variant="secondary">{order.platform ? (platformMap[order.platform] || order.platform) : '-'}</Badge>
@@ -925,6 +988,30 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
         </Select>
       </TableCell>
       <TableCell className="align-top">
+        {order.screenshot ? (
+            <Dialog>
+                <DialogTrigger asChild>
+                    <div className="cursor-pointer hover:opacity-80 transition-opacity">
+                        <img 
+                            src={order.screenshot} 
+                            alt="截图" 
+                            className="w-12 h-12 object-cover rounded border border-gray-200" 
+                        />
+                    </div>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl w-auto p-0 overflow-hidden bg-transparent border-none shadow-none">
+                    <img 
+                        src={order.screenshot} 
+                        alt="截图大图" 
+                        className="w-auto h-auto max-h-[90vh] rounded-md shadow-2xl" 
+                    />
+                </DialogContent>
+            </Dialog>
+        ) : (
+            <span className="text-gray-300 text-xs">-</span>
+        )}
+      </TableCell>
+      <TableCell className="align-top">
         <Textarea 
             value={remark} 
             onChange={e => setRemark(e.target.value)} 
@@ -935,7 +1022,7 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
       </TableCell>
     </TableRow>
     <TableRow className="bg-gray-50/40 hover:bg-gray-50/60 border-b">
-        <TableCell colSpan={10} className="p-2">
+        <TableCell colSpan={11} className="p-2">
             <div className="flex items-center justify-start gap-2 flex-wrap">
                 {/* Logs - Moved to start */}
                 <Dialog open={isLogsOpen} onOpenChange={setIsLogsOpen}>
@@ -1143,7 +1230,7 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
                             <Edit2 className="h-3 w-3 mr-1" /> 修改
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                    <DialogContent className="max-w-[3200px] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>编辑订单</DialogTitle>
                         </DialogHeader>

@@ -16,11 +16,22 @@ interface ProductFormProps {
   onSuccess?: () => void
 }
 
-const DURATION_TIERS = ["1", "2", "3", "5", "7", "10", "15", "30", "60", "90"]
-
 export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const [name, setName] = useState(initialData?.name || "")
-  const [variants, setVariants] = useState<ProductVariant[]>(initialData?.variants || [])
+  
+  // Initialize variants with array-based priceRules for editing
+  const [variants, setVariants] = useState<any[]>(
+    initialData?.variants?.map(v => ({
+      ...v,
+      priceRules: Object.entries(v.priceRules)
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([days, price]) => ({
+            id: Math.random().toString(36).substring(2),
+            days,
+            price
+        }))
+    })) || []
+  )
 
   const handleAddVariant = () => {
     setVariants([
@@ -29,7 +40,10 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             name: "新版本", 
             accessories: "", 
             insurancePrice: 0, 
-            priceRules: {} 
+            priceRules: [
+                { id: Math.random().toString(36).substring(2), days: "3", price: 0 },
+                { id: Math.random().toString(36).substring(2), days: "7", price: 0 }
+            ] 
         }
     ])
   }
@@ -40,26 +54,64 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     setVariants(newVariants)
   }
 
-  const handleVariantChange = (index: number, field: keyof ProductVariant, value: any) => {
+  const handleVariantChange = (index: number, field: string, value: any) => {
     const newVariants = [...variants]
     newVariants[index] = { ...newVariants[index], [field]: value }
     setVariants(newVariants)
   }
 
-  const handlePriceRuleChange = (variantIndex: number, duration: string, price: number) => {
-    const newVariants = [...variants]
-    const rules = { ...newVariants[variantIndex].priceRules, [duration]: price }
-    newVariants[variantIndex] = { ...newVariants[variantIndex], priceRules: rules }
-    setVariants(newVariants)
+  // Rule Handlers
+  const handleAddRule = (vIndex: number) => {
+      const newVariants = [...variants]
+      if (newVariants[vIndex].priceRules.length >= 15) {
+          toast.error("最多支持15个价格规则")
+          return
+      }
+      newVariants[vIndex].priceRules.push({ 
+          id: Math.random().toString(36).substring(2), 
+          days: "", 
+          price: 0 
+      })
+      setVariants(newVariants)
+  }
+
+  const handleDeleteRule = (vIndex: number, rIndex: number) => {
+      const newVariants = [...variants]
+      newVariants[vIndex].priceRules.splice(rIndex, 1)
+      setVariants(newVariants)
+  }
+
+  const handleRuleChange = (vIndex: number, rIndex: number, field: 'days'|'price', value: any) => {
+      const newVariants = [...variants]
+      newVariants[vIndex].priceRules[rIndex][field] = value
+      setVariants(newVariants)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Convert back to Record
+    const finalVariants: ProductVariant[] = variants.map(v => {
+        const rules: Record<string, number> = {}
+        v.priceRules.forEach((r: any) => {
+            if (r.days && r.days.trim() !== '') {
+                rules[r.days] = Number(r.price)
+            }
+        })
+        return {
+            name: v.name,
+            accessories: v.accessories,
+            insurancePrice: Number(v.insurancePrice),
+            priceRules: rules
+        }
+    })
+
     const product: Product = {
         id: initialData?.id || Math.random().toString(36).substring(2, 9),
         name,
-        variants
+        variants: finalVariants
     }
+
     try {
         const res = await saveProduct(product)
         
@@ -133,17 +185,43 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                     </div>
 
                     <div className="space-y-2">
-                        <Label>阶梯价格表 (¥)</Label>
-                        <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
-                            {DURATION_TIERS.map(day => (
-                                <div key={day} className="space-y-1">
-                                    <Label className="text-xs text-gray-500">{day}天</Label>
-                                    <Input 
-                                        type="number" 
-                                        className="h-8 text-sm px-1 text-center"
-                                        value={variant.priceRules[day] || ''}
-                                        onChange={e => handlePriceRuleChange(index, day, Number(e.target.value))}
-                                    />
+                        <div className="flex justify-between items-center">
+                            <Label>阶梯价格表 (¥)</Label>
+                            <Button type="button" variant="outline" size="sm" onClick={() => handleAddRule(index)}>
+                                <Plus className="h-3 w-3 mr-1" /> 添加规则
+                            </Button>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                            {variant.priceRules.map((rule: any, rIndex: number) => (
+                                <div key={rule.id} className="flex items-center gap-2 p-2 border rounded bg-white">
+                                    <div className="flex items-center gap-1">
+                                        <Input 
+                                            value={rule.days}
+                                            onChange={e => handleRuleChange(index, rIndex, 'days', e.target.value)}
+                                            className="h-7 text-sm px-1 text-center w-14"
+                                            placeholder="天"
+                                        />
+                                        <span className="text-xs text-gray-500 whitespace-nowrap">天</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-1">
+                                        <span className="text-xs text-gray-500">¥</span>
+                                        <Input 
+                                            type="number"
+                                            value={rule.price}
+                                            onChange={e => handleRuleChange(index, rIndex, 'price', Number(e.target.value))}
+                                            className="h-7 text-sm px-1 text-center flex-1"
+                                            placeholder="价格"
+                                        />
+                                    </div>
+                                    <Button 
+                                        type="button" 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+                                        onClick={() => handleDeleteRule(index, rIndex)}
+                                    >
+                                        <Trash2 className="h-3 w-3" />
+                                    </Button>
                                 </div>
                             ))}
                         </div>

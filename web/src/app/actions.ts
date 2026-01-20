@@ -43,6 +43,7 @@ export async function createOrder(formData: FormData) {
         customerXianyuId: rawData.customerXianyuId as string,
         sourceContact: rawData.sourceContact as string,
         miniProgramOrderNo: rawData.miniProgramOrderNo as string,
+        xianyuOrderNo: rawData.xianyuOrderNo as string,
         
         productName: rawData.productName as string,
         variantName: rawData.variantName as string,
@@ -224,6 +225,7 @@ export async function updateOrder(orderId: string, formData: FormData) {
                 customerXianyuId: rawData.customerXianyuId as string,
                 sourceContact: rawData.sourceContact as string,
                 miniProgramOrderNo: rawData.miniProgramOrderNo as string,
+                xianyuOrderNo: rawData.xianyuOrderNo as string,
                 productName: rawData.productName as string,
                 variantName: rawData.variantName as string,
                 sn: rawData.sn as string,
@@ -342,6 +344,23 @@ export async function updateMiniProgramOrderNo(orderId: string, no: string) {
         });
     } catch (error: any) {
         return { success: false, message: error.message || "更新小程序单号失败" };
+    }
+}
+
+export async function updateXianyuOrderNo(orderId: string, no: string) {
+    try {
+        return await updateDb(async (db) => {
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+              order.xianyuOrderNo = no;
+              revalidatePath('/orders');
+              return { success: true, message: "闲鱼单号更新成功" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
+    } catch (error: any) {
+        return { success: false, message: error.message || "更新闲鱼单号失败" };
     }
 }
 

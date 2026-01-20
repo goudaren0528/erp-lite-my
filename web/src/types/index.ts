@@ -53,6 +53,7 @@ export interface Order {
   customerXianyuId: string;
   sourceContact: string;
   miniProgramOrderNo?: string; // 小程序订单号
+  xianyuOrderNo?: string; // 闲鱼订单号
   
   // 设备信息
   productName: string;
@@ -92,6 +93,7 @@ export interface Order {
   extensions: OrderExtension[];
   
   logs?: OrderLog[];
+  screenshot?: string;
 }
 
 export interface OrderLog {

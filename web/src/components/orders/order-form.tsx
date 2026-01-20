@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Order, Product, User, Promoter, OrderSource, OrderPlatform } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -37,6 +37,8 @@ interface OrderFormProps {
 
 export function OrderForm({ products, promoters = [], initialData, onSuccess }: OrderFormProps) {
   const isEdit = !!initialData
+  const safePromoters = Array.isArray(promoters) ? promoters : []
+  const screenshotInputRef = useRef<HTMLInputElement>(null)
   
   // Find initial product and variant if editing
   const initialProduct = isEdit ? products.find(p => p.name === initialData.productName) : undefined
@@ -77,12 +79,21 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
   const selectedProduct = products.find(p => p.id === selectedProductId)
   const selectedVariant = selectedProduct?.variants.find(v => v.name === selectedVariantName)
 
-  const [source, setSource] = useState<OrderSource>(initialData?.source || "RETAIL")
+  const [source, setSource] = useState<OrderSource>(initialData?.source || "PART_TIME_AGENT")
   const [platform, setPlatform] = useState<OrderPlatform>(initialData?.platform || "OTHER")
 
   const [recipientName, setRecipientName] = useState(initialData?.recipientName || '')
   const [recipientPhone, setRecipientPhone] = useState(initialData?.recipientPhone || '')
   const [smartAddress, setSmartAddress] = useState('')
+  const [sourceContact, setSourceContact] = useState(initialData?.sourceContact || "")
+
+  const [extensions, setExtensions] = useState(initialData?.extensions || [])
+
+  useEffect(() => {
+    if (source === 'RETAIL') {
+      setSourceContact("")
+    }
+  }, [source])
 
   const handleSmartParse = () => {
       const text = smartAddress.trim()
@@ -184,20 +195,6 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
       }
   }
 
-  // Filter promoters based on selected source
-  const filteredPromoters = promoters.filter(p => {
-      if (p.channel) {
-          return p.channel === source
-      }
-      // Backward compatibility
-      const legacyChannels = (p as any).channels as OrderSource[] | undefined
-      if (legacyChannels && legacyChannels.length > 0) {
-          return legacyChannels.includes(source)
-      }
-      // If no channels defined, show by default (backward compatibility)
-      return true
-  })
-
   const [isInitialized, setIsInitialized] = useState(false)
 
   // Calculate duration from dates
@@ -246,6 +243,15 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
               toast.error("租期结束日期不能早于开始日期")
               return
           }
+      }
+
+      // Validate Mini Program Order No
+      const miniProgramOrderNo = formData.get('miniProgramOrderNo') as string
+      if (miniProgramOrderNo) {
+        if (!/^SH\d{20}$/.test(miniProgramOrderNo)) {
+          toast.error("小程序订单号格式错误，应为 SH + 20位数字")
+          return
+        }
       }
 
       // Combine address
@@ -297,6 +303,50 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         </div>
 
         <div className="space-y-2">
+            <Label>推广员</Label>
+            <Select 
+              name="sourceContact" 
+              value={sourceContact} 
+              onValueChange={setSourceContact}
+              disabled={source === 'RETAIL'}
+              required={source !== 'RETAIL'}
+            >
+                <SelectTrigger>
+                <SelectValue placeholder={source === 'RETAIL' ? "零售无需填写" : "选择推广员"} />
+                </SelectTrigger>
+                <SelectContent>
+                {safePromoters.filter(p => {
+                  if (!p) return false
+                  if (source === 'RETAIL') return false
+                  // Strict filtering by channel, but allow backward compatibility if needed
+                  // or if user wants flexibility, we can relax this.
+                  // User specifically asked why "Xiao Li" (no channel) appears.
+                  // So we enforce strict matching.
+                  
+                  // Handle "No Channel" case: they shouldn't appear in specific lists unless we want them to.
+                  // Current decision: Only show promoters matching the selected source.
+                  // Note: p.channel might be undefined for old data.
+                  
+                  // If p.channel matches source, show it.
+                  if (p.channel === source) return true
+                  
+                  // Legacy support: check 'channels' array if it exists
+                  const legacyChannels = (p as any).channels as OrderSource[] | undefined
+                  if (legacyChannels && legacyChannels.includes(source)) return true
+
+                  return false
+                }).map(p => (
+                    <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                ))}
+                <SelectItem value="self">自主开发</SelectItem>
+                </SelectContent>
+            </Select>
+            {source === 'RETAIL' && <input type="hidden" name="sourceContact" value="" />}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
           <Label>推广方式</Label>
           <Select name="platform" value={platform} onValueChange={(v: OrderPlatform) => setPlatform(v)} required>
             <SelectTrigger>
@@ -311,32 +361,74 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             </SelectContent>
           </Select>
         </div>
-      </div>
 
-      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>咸鱼号/客户ID</Label>
-          <Input name="customerXianyuId" defaultValue={initialData?.customerXianyuId} placeholder="请输入客户标识" required />
+          <Label>用户昵称（闲鱼等） (选填)</Label>
+          <Input name="customerXianyuId" defaultValue={initialData?.customerXianyuId} placeholder="请输入用户昵称" />
         </div>
+
         <div className="space-y-2">
-            <Label>推广员</Label>
-            <Select name="sourceContact" defaultValue={initialData?.sourceContact || ""} required>
-                <SelectTrigger>
-                <SelectValue placeholder="选择推广员" />
-                </SelectTrigger>
-                <SelectContent>
-                {filteredPromoters.map(p => (
-                    <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
-                ))}
-                <SelectItem value="self">自主开发</SelectItem>
-                </SelectContent>
-            </Select>
-          </div>
-      
-          <div className="space-y-2">
-              <Label>小程序订单号 (选填)</Label>
-              <Input name="miniProgramOrderNo" defaultValue={initialData?.miniProgramOrderNo} placeholder="请输入小程序订单号" />
-          </div>
+            <Label>小程序订单号 (选填)</Label>
+            <Input name="miniProgramOrderNo" defaultValue={initialData?.miniProgramOrderNo} placeholder="请输入小程序订单号" />
+        </div>
+
+        <div className="space-y-2">
+            <Label>闲鱼订单号 (选填)</Label>
+            <Input name="xianyuOrderNo" defaultValue={initialData?.xianyuOrderNo} placeholder="请输入闲鱼订单号" />
+        </div>
+
+        <div className="space-y-2">
+            <Label>订单截图 (选填)</Label>
+            <Input 
+                type="file" 
+                accept="image/*"
+                onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    
+                    const formData = new FormData()
+                    formData.append('file', file)
+                    
+                    try {
+                        const res = await fetch('/api/upload', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        const data = await res.json()
+                        if (data.success) {
+                            // Create a hidden input to submit the URL
+                            // Or use state if we were submitting via JSON, but here we use form action?
+                            // Wait, the form action uses FormData directly from the form elements.
+                            // But we need to pass the URL, not the file object, because the server action might expect the URL string
+                            // OR we can handle file upload in the server action if we change it to use FormData.
+                            // However, the current 'createOrder' action likely takes an object.
+                            // Let's check how 'handleSubmit' works.
+                            
+                            // It uses 'action={handleSubmit}'.
+                            // Let's check 'createOrder' in actions.ts.
+                            // It takes 'Order'.
+                            
+                            // Strategy: Upload client-side, get URL, put URL in a hidden input.
+                            if (screenshotInputRef.current) {
+                                screenshotInputRef.current.value = data.url
+                            }
+                            toast.success("截图上传成功")
+                        } else {
+                            toast.error("上传失败")
+                        }
+                    } catch (err) {
+                        console.error(err)
+                        toast.error("上传出错")
+                    }
+                }}
+            />
+            <input type="hidden" name="screenshot" defaultValue={initialData?.screenshot || ''} ref={screenshotInputRef} />
+            {initialData?.screenshot && (
+                <div className="mt-1">
+                    <a href={initialData.screenshot} target="_blank" className="text-xs text-blue-500 underline">查看当前截图</a>
+                </div>
+            )}
+        </div>
       </div>
 
       <div className="space-y-4 border p-4 rounded-md bg-gray-50">
@@ -517,19 +609,18 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
               <div className="space-y-2 mb-4">
                   <Label className="text-xs text-gray-500">已续租记录</Label>
                   <div className="space-y-2">
-                      {initialData?.extensions && initialData.extensions.map((ext, idx) => (
+                      {extensions.map((ext, idx) => (
                           <div key={idx} className="flex gap-2 items-center bg-white p-2 rounded border">
                               <div className="flex-1 flex items-center gap-2">
                                   <Label className="text-xs whitespace-nowrap">天数:</Label>
                                   <Input 
                                     type="number" 
-                                    defaultValue={ext.days} 
+                                    value={ext.days} 
                                     className="h-7 text-xs w-20"
                                     onChange={(e) => {
-                                        // Update hidden JSON
-                                        const newExtensions = [...(initialData.extensions || [])];
+                                        const newExtensions = [...extensions];
                                         newExtensions[idx] = { ...newExtensions[idx], days: Number(e.target.value) };
-                                        (document.getElementById('extensionsJSON') as HTMLInputElement).value = JSON.stringify(newExtensions);
+                                        setExtensions(newExtensions);
                                     }}
                                   />
                               </div>
@@ -537,13 +628,12 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                                   <Label className="text-xs whitespace-nowrap">金额:</Label>
                                   <Input 
                                     type="number" 
-                                    defaultValue={ext.price} 
+                                    value={ext.price} 
                                     className="h-7 text-xs w-20"
                                     onChange={(e) => {
-                                        // Update hidden JSON
-                                        const newExtensions = [...(initialData.extensions || [])];
+                                        const newExtensions = [...extensions];
                                         newExtensions[idx] = { ...newExtensions[idx], price: Number(e.target.value) };
-                                        (document.getElementById('extensionsJSON') as HTMLInputElement).value = JSON.stringify(newExtensions);
+                                        setExtensions(newExtensions);
                                     }}
                                   />
                               </div>
@@ -552,11 +642,11 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                               </div>
                           </div>
                       ))}
-                      {(!initialData?.extensions || initialData.extensions.length === 0) && (
+                      {extensions.length === 0 && (
                           <div className="text-xs text-gray-400 italic">暂无续租记录</div>
                       )}
                   </div>
-                  <input type="hidden" id="extensionsJSON" name="extensionsJSON" defaultValue={JSON.stringify(initialData?.extensions || [])} />
+                  <input type="hidden" name="extensionsJSON" value={JSON.stringify(extensions)} />
               </div>
 
               <div className="border-t border-blue-200 pt-4 mt-4">
@@ -637,7 +727,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
       </div>
 
       <div className="space-y-2">
-        <Label>备注</Label>
+        <Label>备注 (选填)</Label>
         <Textarea name="remark" defaultValue={initialData?.remark} placeholder="填写其他注意事项..." className="h-20" />
       </div>
 

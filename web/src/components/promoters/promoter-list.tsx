@@ -167,27 +167,16 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                         </DialogHeader>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div className="space-y-2">
-                                <Label htmlFor="name">姓名</Label>
-                                <Input 
-                                    id="name" 
-                                    value={formData.name || ''} 
-                                    onChange={e => setFormData({...formData, name: e.target.value})}
-                                    required
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="phone">联系方式 (选填)</Label>
-                                <Input 
-                                    id="phone" 
-                                    value={formData.phone || ''} 
-                                    onChange={e => setFormData({...formData, phone: e.target.value})}
-                                />
-                            </div>
-                            <div className="space-y-2">
                                 <Label>渠道类型</Label>
                                 <Select 
                                     value={formData.channel} 
-                                    onValueChange={(val: OrderSource) => setFormData({...formData, channel: val})}
+                                    onValueChange={(val: OrderSource) => {
+                                        setFormData({
+                                            ...formData, 
+                                            channel: val,
+                                            name: val === 'RETAIL' ? '' : formData.name
+                                        })
+                                    }}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="选择渠道类型" />
@@ -200,6 +189,25 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                                         ))}
                                     </SelectContent>
                                 </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="name">姓名</Label>
+                                <Input 
+                                    id="name" 
+                                    value={formData.channel === 'RETAIL' ? '' : (formData.name || '')} 
+                                    onChange={e => setFormData({...formData, name: e.target.value})}
+                                    required={formData.channel !== 'RETAIL'}
+                                    disabled={formData.channel === 'RETAIL'}
+                                    placeholder={formData.channel === 'RETAIL' ? "零售无需填写" : "请输入姓名"}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="phone">联系方式 (选填)</Label>
+                                <Input 
+                                    id="phone" 
+                                    value={formData.phone || ''} 
+                                    onChange={e => setFormData({...formData, phone: e.target.value})}
+                                />
                             </div>
                             <div className="flex justify-end space-x-2 pt-4">
                                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>取消</Button>
