@@ -19,10 +19,13 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { savePromoter, deletePromoter } from "@/app/actions"
 import { Plus, Trash2, Edit2 } from "lucide-react"
+
+import { toast } from "sonner"
 
 const CHANNEL_OPTIONS: { value: OrderSource; label: string }[] = [
     { value: 'RETAIL', label: '零售' },
@@ -37,7 +40,9 @@ interface PromoterListProps {
 
 export function PromoterList({ promoters }: PromoterListProps) {
     const [isDialogOpen, setIsDialogOpen] = useState(false)
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
     const [editingPromoter, setEditingPromoter] = useState<Promoter | null>(null)
+    const [promoterToDelete, setPromoterToDelete] = useState<Promoter | null>(null)
     const [formData, setFormData] = useState<Partial<Promoter>>({})
 
     const handleEdit = (promoter: Promoter) => {
@@ -55,9 +60,25 @@ export function PromoterList({ promoters }: PromoterListProps) {
         setIsDialogOpen(true)
     }
 
-    const handleDelete = async (promoterId: string) => {
-        if (confirm('确定要删除这个推广人员吗？')) {
-            await deletePromoter(promoterId)
+    const confirmDelete = (promoter: Promoter) => {
+        setPromoterToDelete(promoter)
+        setIsDeleteDialogOpen(true)
+    }
+
+    const handleDelete = async () => {
+        if (!promoterToDelete) return
+
+        try {
+            const res = await deletePromoter(promoterToDelete.id)
+            if (res?.success) {
+                toast.success(res.message)
+                setIsDeleteDialogOpen(false)
+            } else {
+                toast.error(res?.message || "操作失败")
+            }
+        } catch (e: any) {
+            console.error(e)
+            toast.error("操作失败: 请刷新页面重试")
         }
     }
 
@@ -69,8 +90,20 @@ export function PromoterList({ promoters }: PromoterListProps) {
             phone: formData.phone || '',
             channels: formData.channels || [],
         }
-        await savePromoter(promoterToSave)
-        setIsDialogOpen(false)
+        
+        try {
+            const res = await savePromoter(promoterToSave)
+            
+            if (res?.success) {
+                toast.success(res.message)
+                setIsDialogOpen(false)
+            } else {
+                toast.error(res?.message || "操作失败")
+            }
+        } catch (e: any) {
+            console.error(e)
+            toast.error("操作失败: 请刷新页面重试")
+        }
     }
 
     const toggleChannel = (value: OrderSource) => {
@@ -174,7 +207,7 @@ export function PromoterList({ promoters }: PromoterListProps) {
                                         <Button variant="ghost" size="sm" onClick={() => handleEdit(promoter)}>
                                             <Edit2 className="h-4 w-4" />
                                         </Button>
-                                        <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleDelete(promoter.id)}>
+                                        <Button variant="ghost" size="sm" className="text-red-600" onClick={() => confirmDelete(promoter)}>
                                             <Trash2 className="h-4 w-4" />
                                         </Button>
                                     </div>
@@ -189,6 +222,23 @@ export function PromoterList({ promoters }: PromoterListProps) {
                     </TableBody>
                 </Table>
             </div>
+
+            <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>确认删除推广员?</DialogTitle>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <p className="text-sm text-gray-500">
+                            确定要删除推广员 {promoterToDelete?.name} 吗？此操作无法撤销。
+                        </p>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>取消</Button>
+                        <Button variant="destructive" onClick={handleDelete}>确认删除</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Plus, Trash2, Edit2 } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
 import { ProductForm } from "./product-form"
 import { deleteProduct } from "@/app/actions"
+import { toast } from "sonner"
 
 interface ProductListProps {
   products: Product[]
@@ -16,11 +17,29 @@ interface ProductListProps {
 
 export function ProductList({ products }: ProductListProps) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null)
 
-  const handleDelete = async (id: string) => {
-    if (confirm("确定要删除这个商品吗？这将影响关联的历史订单显示。")) {
-        await deleteProduct(id)
+  const confirmDelete = (product: Product) => {
+    setProductToDelete(product)
+    setIsDeleteOpen(true)
+  }
+
+  const handleDelete = async () => {
+    if (!productToDelete) return
+
+    try {
+        const res = await deleteProduct(productToDelete.id)
+        if (res?.success) {
+            toast.success(res.message)
+            setIsDeleteOpen(false)
+        } else {
+            toast.error(res?.message || "操作失败")
+        }
+    } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
     }
   }
 
@@ -68,7 +87,7 @@ export function ProductList({ products }: ProductListProps) {
                   <Button variant="ghost" size="sm" onClick={() => setEditingProduct(product)}>
                     <Edit2 className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => handleDelete(product.id)} className="text-red-600 hover:text-red-700">
+                  <Button variant="ghost" size="sm" onClick={() => confirmDelete(product)} className="text-red-600 hover:text-red-700">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </TableCell>
@@ -94,6 +113,27 @@ export function ProductList({ products }: ProductListProps) {
                         onSuccess={() => setEditingProduct(null)} 
                     />
                 )}
+            </DialogContent>
+        </Dialog>
+
+        {/* Delete Dialog */}
+        <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>确认删除商品?</DialogTitle>
+                </DialogHeader>
+                <div className="py-4">
+                    <p className="text-sm text-gray-500">
+                        确定要删除商品 "{productToDelete?.name}" 吗？
+                    </p>
+                    <p className="text-sm text-red-500 mt-2">
+                        注意: 这将影响关联的历史订单显示。
+                    </p>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>取消</Button>
+                    <Button variant="destructive" onClick={handleDelete}>确认删除</Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
       </CardContent>

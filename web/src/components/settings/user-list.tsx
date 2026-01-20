@@ -17,25 +17,52 @@ import {
     DialogHeader,
     DialogTitle,
     DialogTrigger,
+    DialogFooter,
 } from "@/components/ui/dialog"
 import { Plus, Pencil, Trash } from "lucide-react"
 import { UserForm } from "./user-form"
 import { deleteUser } from "@/app/actions"
 import { Badge } from "@/components/ui/badge"
+import { toast } from "sonner"
 
 interface UserListProps {
     users: User[]
 }
 
+const PERMISSIONS_MAP: Record<string, string> = {
+    'orders': '订单列表',
+    'view_all_orders': '查看所有订单(管理员)',
+    'promoters': '推广人员',
+    'stats': '结算统计',
+    'products': '商品库管理',
+    'users': '账号权限管理',
+}
+
 export function UserList({ users }: UserListProps) {
     const [open, setOpen] = useState(false)
+    const [isDeleteOpen, setIsDeleteOpen] = useState(false)
     const [editingUser, setEditingUser] = useState<User | null>(null)
+    const [userToDelete, setUserToDelete] = useState<User | null>(null)
 
-    const handleDelete = async (id: string) => {
-        if (confirm("确定要删除该用户吗？此操作不可撤销。")) {
-            if (confirm("请再次确认：删除用户后，该用户创建的历史订单数据将保留，但无法再登录系统。确定要继续吗？")) {
-                await deleteUser(id)
+    const confirmDelete = (user: User) => {
+        setUserToDelete(user)
+        setIsDeleteOpen(true)
+    }
+
+    const handleDelete = async () => {
+        if (!userToDelete) return
+
+        try {
+            const res = await deleteUser(userToDelete.id)
+            if (res?.success) {
+                toast.success(res.message)
+                setIsDeleteOpen(false)
+            } else {
+                toast.error(res?.message || "操作失败")
             }
+        } catch (e: any) {
+            console.error(e)
+            toast.error("操作失败: 请刷新页面重试")
         }
     }
 
@@ -77,9 +104,9 @@ export function UserList({ users }: UserListProps) {
                             <TableCell>{user.username}</TableCell>
                             <TableCell>
                                 <div className="flex flex-wrap gap-1">
-                                    {user.permissions?.map(p => (
+                                    {user.permissions?.filter(p => PERMISSIONS_MAP[p]).map(p => (
                                         <Badge key={p} variant="secondary" className="text-xs">
-                                            {p}
+                                            {PERMISSIONS_MAP[p]}
                                         </Badge>
                                     ))}
                                 </div>
@@ -100,7 +127,7 @@ export function UserList({ users }: UserListProps) {
                                         variant="ghost" 
                                         size="icon"
                                         className="text-red-500 hover:text-red-600"
-                                        onClick={() => handleDelete(user.id)}
+                                        onClick={() => confirmDelete(user)}
                                     >
                                         <Trash className="h-4 w-4" />
                                     </Button>
@@ -110,6 +137,26 @@ export function UserList({ users }: UserListProps) {
                     ))}
                 </TableBody>
             </Table>
+
+            <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>确认删除账号?</DialogTitle>
+                    </DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <p className="text-sm font-medium text-red-600">
+                            确定要删除用户 "{userToDelete?.name}" 吗？此操作不可撤销。
+                        </p>
+                        <p className="text-sm text-gray-500 bg-gray-50 p-3 rounded border">
+                            注意：删除用户后，该用户创建的历史订单数据将保留，但该账号将无法再登录系统。
+                        </p>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>取消</Button>
+                        <Button variant="destructive" onClick={handleDelete}>确认删除</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

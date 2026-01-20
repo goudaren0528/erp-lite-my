@@ -6,7 +6,7 @@ export interface User {
   role: Role; // Keeping for backward compatibility or high-level grouping
   username: string;
   password?: string; // Optional for existing users, but required for login
-  permissions: string[]; // List of allowed menu keys: 'orders', 'promoters', 'stats', 'products', 'commissions', 'users'
+  permissions: string[]; // List of allowed menu keys: 'orders', 'promoters', 'stats', 'products', 'users'
 }
 
 export interface ProductVariant {

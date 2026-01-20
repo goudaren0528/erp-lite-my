@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { saveUser } from "@/app/actions"
+import { toast } from "sonner"
 
 interface UserFormProps {
     initialData?: User
@@ -32,8 +33,19 @@ export function UserForm({ initialData, onSuccess }: UserFormProps) {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        await saveUser({ ...formData, id: initialData?.id })
-        onSuccess()
+        try {
+            const res = await saveUser({ ...formData, id: initialData?.id })
+            
+            if (res?.success) {
+                toast.success(res.message)
+                onSuccess()
+            } else {
+                toast.error(res?.message || "操作失败")
+            }
+        } catch (e: any) {
+            console.error(e)
+            toast.error("操作失败: 请刷新页面重试")
+        }
     }
 
     const togglePermission = (key: string) => {

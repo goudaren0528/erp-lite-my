@@ -56,5 +56,7 @@ EXPOSE 3000
 ENV PORT 3000
 # set hostname to localhost
 ENV HOSTNAME "0.0.0.0"
+# Ensure consistent Server Action IDs across builds/instances
+ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY "erp-lite-persistent-key-2024"
 
 CMD ["node", "server.js"]

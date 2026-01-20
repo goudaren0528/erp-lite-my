@@ -26,6 +26,8 @@ import { Check, ChevronsUpDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CHINA_REGIONS } from "@/lib/city-data"
 
+import { toast } from "sonner"
+
 interface OrderFormProps {
   products: Product[]
   promoters?: Promoter[]
@@ -141,13 +143,25 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
       
       formData.set('address', fullAddress)
 
-      if (isEdit && initialData) {
-          await updateOrder(initialData.id, formData)
-      } else {
-          await createOrder(formData)
-      }
-      if (onSuccess) {
-          onSuccess()
+      try {
+        let res;
+        if (isEdit && initialData) {
+            res = await updateOrder(initialData.id, formData)
+        } else {
+            res = await createOrder(formData)
+        }
+        
+        if (res?.success) {
+            toast.success(res.message)
+            if (onSuccess) {
+                onSuccess()
+            }
+        } else {
+            toast.error(res?.message || "操作失败")
+        }
+      } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
       }
   }
 
@@ -172,10 +186,10 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         </div>
 
         <div className="space-y-2">
-          <Label>客户来源/平台</Label>
+          <Label>推广方式</Label>
           <Select name="platform" value={platform} onValueChange={(v: OrderPlatform) => setPlatform(v)} required>
             <SelectTrigger>
-              <SelectValue placeholder="选择平台" />
+              <SelectValue placeholder="选择推广方式" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="XIAOHONGSHU">小红书</SelectItem>

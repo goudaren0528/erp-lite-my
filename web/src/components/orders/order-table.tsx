@@ -31,7 +31,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, deleteOrder } from "@/app/actions"
 import { format, addDays } from "date-fns"
-import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2 } from "lucide-react"
+import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2, Calendar, CircleDollarSign } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { OrderForm } from "./order-form"
 
@@ -79,11 +79,18 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 
+import { toast } from "sonner"
+
 export function OrderTable({ orders, products, users = [], promoters = [] }: OrderTableProps) {
-  const [filterText, setFilterText] = useState('')
+  const [filterOrderNo, setFilterOrderNo] = useState('')
+  const [filterCustomer, setFilterCustomer] = useState('')
+  const [filterPromoter, setFilterPromoter] = useState('')
+  const [filterProduct, setFilterProduct] = useState('')
+  const [filterCreator, setFilterCreator] = useState('')
+  
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
   const [filterSource, setFilterSource] = useState<string>('ALL')
-  const [filterCreator, setFilterCreator] = useState<string>('ALL')
+  const [filterPlatform, setFilterPlatform] = useState<string>('ALL')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc') // Default asc for status order
@@ -93,17 +100,26 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   const pageSize = 10
 
   const filteredOrders = orders.filter(order => {
-    const matchText = 
-        order.orderNo.toLowerCase().includes(filterText.toLowerCase()) ||
-        order.customerXianyuId.toLowerCase().includes(filterText.toLowerCase()) ||
-        order.sourceContact.toLowerCase().includes(filterText.toLowerCase()) ||
-        (promoters.find(p => p.name === order.sourceContact)?.phone?.includes(filterText)) ||
-        order.productName.toLowerCase().includes(filterText.toLowerCase()) ||
-        (order.creatorName && order.creatorName.toLowerCase().includes(filterText.toLowerCase()))
+    const matchOrderNo = !filterOrderNo || 
+        order.orderNo.toLowerCase().includes(filterOrderNo.toLowerCase()) || 
+        (order.miniProgramOrderNo && order.miniProgramOrderNo.toLowerCase().includes(filterOrderNo.toLowerCase()))
+
+    const matchCustomer = !filterCustomer || 
+        order.customerXianyuId.toLowerCase().includes(filterCustomer.toLowerCase())
+
+    const matchPromoter = !filterPromoter || 
+        order.sourceContact.toLowerCase().includes(filterPromoter.toLowerCase()) ||
+        (promoters.find(p => p.name === order.sourceContact)?.phone?.includes(filterPromoter))
+
+    const matchProduct = !filterProduct || 
+        order.productName.toLowerCase().includes(filterProduct.toLowerCase())
+
+    const matchCreator = !filterCreator || 
+        (users.find(u => u.id === order.creatorId)?.name || '').toLowerCase().includes(filterCreator.toLowerCase())
 
     const matchStatus = filterStatus === 'ALL' || order.status === filterStatus
     const matchSource = filterSource === 'ALL' || order.source === filterSource
-    const matchCreator = filterCreator === 'ALL' || order.creatorId === filterCreator
+    const matchPlatform = filterPlatform === 'ALL' || order.platform === filterPlatform
 
     let matchDate = true
     if (startDate) {
@@ -124,7 +140,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
         matchDate = matchDate && new Date(order.createdAt) < nextDay
     }
 
-    return matchText && matchStatus && matchSource && matchCreator && matchDate
+    return matchOrderNo && matchCustomer && matchPromoter && matchProduct && matchStatus && matchSource && matchPlatform && matchCreator && matchDate
   }).sort((a, b) => {
       // Primary Sort: Status Order
       const orderA = statusMap[a.status]?.order || 99
@@ -164,25 +180,53 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
       {/* Today Stats Banner */}
       <div className="flex gap-4 mb-2">
           <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-md border border-blue-100 text-sm font-medium flex items-center">
-             <span className="mr-2">📅 今日订单:</span>
+             <Calendar className="mr-2 h-4 w-4" />
+             <span className="mr-2">今日订单:</span>
              <span className="text-lg font-bold mr-1">{todayCount}</span> 单
           </div>
           <div className="bg-green-50 text-green-700 px-4 py-2 rounded-md border border-green-100 text-sm font-medium flex items-center">
-             <span className="mr-2">💰 今日金额:</span>
+             <CircleDollarSign className="mr-2 h-4 w-4" />
+             <span className="mr-2">今日金额:</span>
              <span className="text-lg font-bold mr-1">¥{todayAmount.toLocaleString()}</span>
           </div>
       </div>
 
       {/* Filters */}
       <div className="flex flex-col gap-4 bg-white p-4 rounded-md border">
-        <div className="flex flex-col sm:flex-row gap-4 justify-between">
-            <div className="flex flex-1 items-center space-x-2">
-                <Search className="w-4 h-4 text-gray-500" />
+        <div className="flex flex-col xl:flex-row gap-4 justify-between">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 flex-1">
+                <div className="flex items-center space-x-2">
+                    <Search className="w-4 h-4 text-gray-500" />
+                    <Input 
+                        placeholder="订单号/小程序单号" 
+                        value={filterOrderNo}
+                        onChange={e => setFilterOrderNo(e.target.value)}
+                        className="h-8 text-xs"
+                    />
+                </div>
                 <Input 
-                    placeholder="搜索订单号/客户/推广员/设备/创建人..." 
-                    value={filterText}
-                    onChange={e => setFilterText(e.target.value)}
-                    className="max-w-sm"
+                    placeholder="客户ID/昵称" 
+                    value={filterCustomer}
+                    onChange={e => setFilterCustomer(e.target.value)}
+                    className="h-8 text-xs"
+                />
+                <Input 
+                    placeholder="推广员/电话" 
+                    value={filterPromoter}
+                    onChange={e => setFilterPromoter(e.target.value)}
+                    className="h-8 text-xs"
+                />
+                <Input 
+                    placeholder="商品名称" 
+                    value={filterProduct}
+                    onChange={e => setFilterProduct(e.target.value)}
+                    className="h-8 text-xs"
+                />
+                <Input 
+                    placeholder="创建人" 
+                    value={filterCreator}
+                    onChange={e => setFilterCreator(e.target.value)}
+                    className="h-8 text-xs"
                 />
             </div>
             
@@ -211,18 +255,6 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
         </div>
 
         <div className="flex flex-wrap gap-2 items-center">
-            <Select value={filterCreator} onValueChange={setFilterCreator}>
-                <SelectTrigger className="w-[120px]">
-                    <SelectValue placeholder="创建人" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="ALL">所有创建人</SelectItem>
-                    {users.map(u => (
-                        <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-
             <Select value={filterStatus} onValueChange={setFilterStatus}>
                 <SelectTrigger className="w-[120px]">
                     <SelectValue placeholder="状态筛选" />
@@ -231,6 +263,18 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
                     <SelectItem value="ALL">所有状态</SelectItem>
                     {Object.entries(statusMap).map(([k, v]) => (
                         <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
+            <Select value={filterPlatform} onValueChange={setFilterPlatform}>
+                <SelectTrigger className="w-[120px]">
+                    <SelectValue placeholder="推广方式" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="ALL">所有方式</SelectItem>
+                    {Object.entries(platformMap).map(([k, v]) => (
+                        <SelectItem key={k} value={k}>{v}</SelectItem>
                     ))}
                 </SelectContent>
             </Select>
@@ -255,6 +299,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
             <TableRow>
               <TableHead className="w-[150px]">订单号/时间</TableHead>
               <TableHead>小程序单号</TableHead>
+              <TableHead>推广方式</TableHead>
               <TableHead>推广员</TableHead>
               <TableHead>客户信息</TableHead>
               <TableHead>设备信息</TableHead>
@@ -276,7 +321,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
             ))}
             {paginatedOrders.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="text-center h-24">
+                <TableCell colSpan={11} className="text-center h-24">
                   暂无匹配订单
                 </TableCell>
               </TableRow>
@@ -332,29 +377,79 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
   const [mpNo, setMpNo] = useState(order.miniProgramOrderNo || '')
   const [isMpOpen, setIsMpOpen] = useState(false)
 
-  const handleStatusChange = (val: OrderStatus) => {
-    updateOrderStatus(order.id, val)
+  const handleStatusChange = async (val: OrderStatus) => {
+    try {
+        const res = await updateOrderStatus(order.id, val)
+        if (res?.success) {
+            toast.success(res.message)
+        } else {
+            toast.error(res?.message || "操作失败")
+        }
+    } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
+    }
   }
 
-  const handleRemarkBlur = () => {
+  const handleRemarkBlur = async () => {
     if (remark !== order.remark) {
-      updateOrderRemark(order.id, remark)
+      try {
+          const res = await updateOrderRemark(order.id, remark)
+          if (res?.success) {
+            toast.success(res.message)
+          } else {
+            toast.error(res?.message || "操作失败")
+          }
+      } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
+      }
     }
   }
   
   const handleSaveMpNo = async () => {
-      await updateMiniProgramOrderNo(order.id, mpNo)
-      setIsMpOpen(false)
+      try {
+          const res = await updateMiniProgramOrderNo(order.id, mpNo)
+          if (res?.success) {
+              toast.success(res.message)
+              setIsMpOpen(false)
+          } else {
+              toast.error(res?.message || "操作失败")
+          }
+      } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
+      }
   }
 
   const handleExtend = async () => {
-    await extendOrder(order.id, extDays, extPrice)
-    setIsExtensionOpen(false)
+    try {
+        const res = await extendOrder(order.id, extDays, extPrice)
+        if (res?.success) {
+            toast.success(res.message)
+            setIsExtensionOpen(false)
+        } else {
+            toast.error(res?.message || "操作失败")
+        }
+    } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
+    }
   }
 
   const handleDelete = async () => {
-      await deleteOrder(order.id)
-      setIsDeleteOpen(false)
+      try {
+          const res = await deleteOrder(order.id)
+          if (res?.success) {
+              toast.success(res.message)
+              setIsDeleteOpen(false)
+          } else {
+              toast.error(res?.message || "操作失败")
+          }
+      } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
+      }
   }
 
   const totalAmountWithExtensions = order.totalAmount + (order.extensions || []).reduce((acc, curr) => acc + curr.price, 0)
@@ -386,11 +481,13 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
          </Popover>
       </TableCell>
       <TableCell className="align-top">
+         <Badge variant="secondary">{order.platform ? (platformMap[order.platform] || order.platform) : '-'}</Badge>
+      </TableCell>
+      <TableCell className="align-top">
         <Popover>
             <PopoverTrigger asChild>
                 <div className="cursor-pointer group">
                     <Badge variant="outline" className="mb-1">{sourceMap[order.source] || order.source}</Badge>
-                    {order.platform && <Badge variant="secondary" className="mb-1 ml-1 text-[10px]">{platformMap[order.platform] || order.platform}</Badge>}
                     <div className="text-xs text-gray-700 font-medium group-hover:text-blue-600 flex items-center gap-1">
                         {order.sourceContact}
                         <Info className="w-3 h-3 opacity-0 group-hover:opacity-50" />

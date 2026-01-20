@@ -32,6 +32,18 @@
         "days": 3,
         "price": 10,
         "createdAt": "2026-01-19T11:29:20.613Z"
+      },
+      {
+        "id": "mnmuyxc",
+        "days": 1,
+        "price": 0,
+        "createdAt": "2026-01-20T03:45:08.792Z"
+      },
+      {
+        "id": "oxrcev5",
+        "days": 1,
+        "price": 0,
+        "createdAt": "2026-01-20T04:06:32.270Z"
       }
     ],
     "sourceContact": "推广员小李",

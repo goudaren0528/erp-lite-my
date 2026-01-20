@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
 import { Plus, Trash2 } from "lucide-react"
 import { saveProduct } from "@/app/actions"
+import { toast } from "sonner"
 
 interface ProductFormProps {
   initialData?: Product
@@ -59,8 +60,19 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         name,
         variants
     }
-    await saveProduct(product)
-    if (onSuccess) onSuccess()
+    try {
+        const res = await saveProduct(product)
+        
+        if (res?.success) {
+            toast.success(res.message)
+            if (onSuccess) onSuccess()
+        } else {
+            toast.error(res?.message || "操作失败")
+        }
+    } catch (e: any) {
+        console.error(e)
+        toast.error("操作失败: 请刷新页面重试")
+    }
   }
 
   return (
