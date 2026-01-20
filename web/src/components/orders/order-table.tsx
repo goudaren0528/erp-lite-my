@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Order, OrderStatus, Product, User, OrderSource } from "@/types"
+import { Order, OrderStatus, Product, User, OrderSource, Promoter } from "@/types"
 import {
   Table,
   TableBody,
