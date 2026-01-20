@@ -82,13 +82,7 @@ export default async function Home() {
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">欢迎回来, {user?.name || '用户'}</h1>
           <p className="text-muted-foreground mt-2">这里是您的订单概览</p>
         </div>
-        <div className="flex gap-4">
-            <Link href="/orders/create">
-                <Button size="lg" className="shadow-lg hover:shadow-xl transition-all">
-                    <Plus className="mr-2 h-5 w-5" /> 快速建单
-                </Button>
-            </Link>
-        </div>
+
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
