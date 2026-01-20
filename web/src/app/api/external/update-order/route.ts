@@ -7,7 +7,6 @@ export const dynamic = 'force-dynamic';
 
 // Map external Chinese status to internal Enum
 const STATUS_MAP: Record<string, OrderStatus> = {
-  '待付款': 'PENDING_PAYMENT',
   '待发货': 'PENDING_SHIPMENT',
   '待收货': 'PENDING_RECEIPT',
   '已发货': 'PENDING_RECEIPT', // Alias
