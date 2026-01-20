@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getDb } from "@/lib/db"
 import { getCurrentUser } from "@/lib/auth"
 import { OrderStatus } from "@/types"
+import { calculateOrderRevenue } from "@/lib/utils"
 import { subDays, isAfter, parseISO } from "date-fns"
 import { CreditCard, FileText, Activity, ArrowRight, Plus } from "lucide-react"
 
@@ -37,11 +38,11 @@ export default async function Home() {
   const recentOrders = ordersToDisplay.filter(o => isAfter(parseISO(o.createdAt), sevenDaysAgo))
   
   const recentCount = recentOrders.length
-  const recentAmount = recentOrders.reduce((sum, o) => sum + o.totalAmount, 0)
+  const recentAmount = recentOrders.reduce((sum, o) => sum + calculateOrderRevenue(o), 0)
   
   // Calculate Cumulative Stats
   const totalCount = ordersToDisplay.length
-  const totalAmount = ordersToDisplay.reduce((sum, o) => sum + o.totalAmount, 0)
+  const totalAmount = ordersToDisplay.reduce((sum, o) => sum + calculateOrderRevenue(o), 0)
   
   // Calculate Status Counts
   const statusCounts = ordersToDisplay.reduce((acc, o) => {
@@ -57,7 +58,7 @@ export default async function Home() {
     OTHER: '其他',
   };
 
-  const statsByPlatform: Record<string, { name: string, count: number, totalRent: number }> = {};
+  const statsByPlatform: Record<string, { name: string, count: number, totalRevenue: number }> = {};
   
   ordersToDisplay.forEach(order => {
       const platformKey = order.platform || 'OTHER';
@@ -67,13 +68,13 @@ export default async function Home() {
           statsByPlatform[platformKey] = {
               name: platformName,
               count: 0,
-              totalRent: 0
+              totalRevenue: 0
           };
       }
       statsByPlatform[platformKey].count++;
-      statsByPlatform[platformKey].totalRent += order.rentPrice;
+      statsByPlatform[platformKey].totalRevenue += calculateOrderRevenue(order);
   });
-  const platformReport = Object.values(statsByPlatform).sort((a, b) => b.totalRent - a.totalRent);
+  const platformReport = Object.values(statsByPlatform).sort((a, b) => b.totalRevenue - a.totalRevenue);
 
   return (
     <div className="space-y-8 p-8 max-w-7xl mx-auto">
@@ -162,7 +163,7 @@ export default async function Home() {
                         <tr className="border-b bg-gray-50 text-left">
                             <th className="p-3 font-medium text-gray-500">来源平台</th>
                             <th className="p-3 font-medium text-gray-500">订单数</th>
-                            <th className="p-3 font-medium text-gray-500">总租金</th>
+                            <th className="p-3 font-medium text-gray-500">总营收</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -170,7 +171,7 @@ export default async function Home() {
                             <tr key={row.name} className="border-b last:border-0">
                                 <td className="p-3 font-medium">{row.name}</td>
                                 <td className="p-3">{row.count}</td>
-                                <td className="p-3">¥ {row.totalRent}</td>
+                                <td className="p-3">¥ {row.totalRevenue.toLocaleString()}</td>
                             </tr>
                         ))}
                          {platformReport.length === 0 && (

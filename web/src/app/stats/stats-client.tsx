@@ -12,11 +12,11 @@ interface StatsClientProps {
     userId: string
     userName: string
     orderCount: number
-    totalRent: number
+    totalRevenue: number
     promoters: {
       name: string
       count: number
-      rent: number
+      revenue: number
     }[]
   }[]
 }
@@ -32,7 +32,7 @@ export function StatsClient({ userStats }: StatsClientProps) {
               <TableRow>
                 <TableHead>账号名称</TableHead>
                 <TableHead>总订单数</TableHead>
-                <TableHead>总营收 (租金)</TableHead>
+                <TableHead>总营收 (不含押金)</TableHead>
                 <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -41,7 +41,7 @@ export function StatsClient({ userStats }: StatsClientProps) {
                 <TableRow key={stat.userId}>
                   <TableCell className="font-medium">{stat.userName}</TableCell>
                   <TableCell>{stat.orderCount}</TableCell>
-                  <TableCell>¥ {stat.totalRent}</TableCell>
+                  <TableCell>¥ {stat.totalRevenue.toLocaleString()}</TableCell>
                   <TableCell>
                     <Dialog>
                         <DialogTrigger asChild>
@@ -64,7 +64,7 @@ export function StatsClient({ userStats }: StatsClientProps) {
                                         <TableRow key={idx}>
                                             <TableCell>{p.name}</TableCell>
                                             <TableCell>{p.count}</TableCell>
-                                            <TableCell>¥ {p.rent}</TableCell>
+                                            <TableCell>¥ {p.revenue.toLocaleString()}</TableCell>
                                         </TableRow>
                                     ))}
                                     {stat.promoters.length === 0 && (

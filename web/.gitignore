@@ -42,3 +42,7 @@ next-env.d.ts
 
 # database lock
 db.lock
+
+# local data
+data/*.json
+data/db.json

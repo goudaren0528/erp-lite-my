@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
+import { calculateOrderRevenue } from "@/lib/utils";
 import { StatsClient } from "./stats-client";
 
 export default async function StatsPage() {
@@ -20,8 +21,8 @@ export default async function StatsPage() {
     userId: string,
     userName: string,
     orderCount: number,
-    totalRent: number,
-    promotersMap: Record<string, { name: string, count: number, rent: number }>
+    totalRevenue: number,
+    promotersMap: Record<string, { name: string, count: number, revenue: number }>
   }> = {};
 
   // Initialize with known users to ensure even empty ones might show up (optional, but good for completeness if requested. 
@@ -40,14 +41,16 @@ export default async function StatsPage() {
               userId: creatorId,
               userName: creatorName,
               orderCount: 0,
-              totalRent: 0,
+              totalRevenue: 0,
               promotersMap: {}
           };
       }
       
       const stats = userStatsMap[creatorId];
+      const revenue = calculateOrderRevenue(order);
+
       stats.orderCount++;
-      stats.totalRent += order.rentPrice; // Assuming Rent Price is the income metric
+      stats.totalRevenue += revenue;
       
       // Promoter Breakdown
       const promoterName = order.sourceContact || '未标记';
@@ -57,21 +60,21 @@ export default async function StatsPage() {
           stats.promotersMap[displayPromoterName] = {
               name: displayPromoterName,
               count: 0,
-              rent: 0
+              revenue: 0
           };
       }
       
       stats.promotersMap[displayPromoterName].count++;
-      stats.promotersMap[displayPromoterName].rent += order.rentPrice;
+      stats.promotersMap[displayPromoterName].revenue += revenue;
   });
 
   const userStats = Object.values(userStatsMap).map(u => ({
       userId: u.userId,
       userName: u.userName,
       orderCount: u.orderCount,
-      totalRent: u.totalRent,
-      promoters: Object.values(u.promotersMap).sort((a, b) => b.rent - a.rent)
-  })).sort((a, b) => b.totalRent - a.totalRent);
+      totalRevenue: u.totalRevenue,
+      promoters: Object.values(u.promotersMap).sort((a, b) => b.revenue - a.revenue)
+  })).sort((a, b) => b.totalRevenue - a.totalRevenue);
 
 
   return (
@@ -89,10 +92,10 @@ export default async function StatsPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">总营收 (租金)</CardTitle>
+            <CardTitle className="text-sm font-medium">总营收 (不含押金)</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">¥ {ordersToAnalyze.reduce((acc, o) => acc + o.rentPrice, 0)}</div>
+            <div className="text-2xl font-bold">¥ {ordersToAnalyze.reduce((acc, o) => acc + calculateOrderRevenue(o), 0).toLocaleString()}</div>
           </CardContent>
         </Card>
       </div>
