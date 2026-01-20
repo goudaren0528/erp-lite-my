@@ -1,0 +1,27 @@
+[
+  {
+    "id": "p1",
+    "name": "推广员小李",
+    "createdAt": "2026-01-19T09:31:46.859Z"
+  },
+  {
+    "id": "dnduveu",
+    "name": "小林",
+    "phone": "",
+    "channels": [
+      "RETAIL"
+    ],
+    "creatorId": "1",
+    "createdAt": "2026-01-19T11:18:57.592Z"
+  },
+  {
+    "id": "noumgq5",
+    "name": "test1123",
+    "phone": "",
+    "channels": [
+      "PART_TIME"
+    ],
+    "creatorId": "32q93lp",
+    "createdAt": "2026-01-19T11:20:21.677Z"
+  }
+]

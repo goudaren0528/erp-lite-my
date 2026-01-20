@@ -1,0 +1,14 @@
+[
+  {
+    "role": "PART_TIME",
+    "minCount": 0,
+    "maxCount": 10,
+    "percentage": 5
+  },
+  {
+    "role": "PART_TIME",
+    "minCount": 11,
+    "maxCount": 100,
+    "percentage": 8
+  }
+]

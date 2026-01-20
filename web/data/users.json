@@ -1,0 +1,30 @@
+[
+  {
+    "id": "1",
+    "name": "管理员",
+    "username": "admin",
+    "password": "123",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats",
+      "products",
+      "commissions",
+      "users",
+      "view_all_orders"
+    ]
+  },
+  {
+    "id": "32q93lp",
+    "name": "测试人员",
+    "username": "test",
+    "password": "123123",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "products",
+      "promoters"
+    ]
+  }
+]
