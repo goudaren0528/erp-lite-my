@@ -22,7 +22,7 @@ export interface Product {
   variants: ProductVariant[];
 }
 
-export type OrderSource = 'AGENT' | 'PEER' | 'RETAIL' | 'PART_TIME';
+export type OrderSource = 'AGENT' | 'PEER' | 'RETAIL' | 'PART_TIME' | 'PART_TIME_AGENT';
 export type OrderPlatform = 'XIAOHONGSHU' | 'XIANYU' | 'DOUYIN' | 'OTHER';
 export type OrderStatus = 
   | 'PENDING_REVIEW' 
@@ -67,6 +67,11 @@ export interface Order {
   
   // 物流与时间
   address: string; // 送达地址
+  recipientName?: string; // 收件人姓名
+  recipientPhone?: string; // 收件人电话
+  trackingNumber?: string; // 物流单号
+  logisticsCompany?: string; // 物流公司
+  
   rentStartDate: string; // 租期开始日期 (YYYY-MM-DD)
   deliveryTime: string; // 发货时间 (YYYY-MM-DD)
   returnDeadline: string; // 须寄回时间 (YYYY-MM-DD)

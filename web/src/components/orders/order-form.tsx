@@ -178,9 +178,8 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="RETAIL">零售</SelectItem>
-              <SelectItem value="AGENT">代理</SelectItem>
               <SelectItem value="PEER">同行</SelectItem>
-              <SelectItem value="PART_TIME">兼职</SelectItem>
+              <SelectItem value="PART_TIME_AGENT">兼职代理</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -458,9 +457,22 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
           </div>
       )}
 
-      <div className="space-y-2">
-        <Label>送达地址</Label>
-        <div className="grid grid-cols-2 gap-4 mb-2">
+      <div className="space-y-4 border p-4 rounded-md bg-gray-50">
+        <h3 className="font-semibold text-sm">收货信息</h3>
+        <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+                <Label>收件人姓名</Label>
+                <Input name="recipientName" defaultValue={initialData?.recipientName} placeholder="请输入收件人姓名" />
+            </div>
+            <div className="space-y-2">
+                <Label>收件人电话</Label>
+                <Input name="recipientPhone" defaultValue={initialData?.recipientPhone} placeholder="请输入收件人电话" />
+            </div>
+        </div>
+
+        <div className="space-y-2">
+            <Label>送达地址</Label>
+            <div className="grid grid-cols-2 gap-4 mb-2">
             <Select value={province} onValueChange={(val) => { setProvince(val); setCity(""); }}>
                 <SelectTrigger>
                     <SelectValue placeholder="省份" />
@@ -489,6 +501,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             placeholder="请输入详细地址（街道、小区、楼栋号等）" 
             className="min-h-[80px]"
         />
+      </div>
       </div>
 
       <div className="space-y-2">

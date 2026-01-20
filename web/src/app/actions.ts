@@ -310,6 +310,32 @@ export async function extendOrder(orderId: string, days: number, price: number) 
   }
 }
 
+export async function shipOrder(orderId: string, data: { trackingNumber: string, logisticsCompany?: string, recipientName?: string, recipientPhone?: string, address?: string }) {
+    try {
+        const db = await getDb();
+        const order = db.orders.find(o => o.id === orderId);
+        if (order) {
+            order.status = 'PENDING_RECEIPT';
+            order.trackingNumber = data.trackingNumber;
+            if (data.logisticsCompany) order.logisticsCompany = data.logisticsCompany;
+            if (data.recipientName) order.recipientName = data.recipientName;
+            if (data.recipientPhone) order.recipientPhone = data.recipientPhone;
+            if (data.address) order.address = data.address;
+            
+            // Set delivery time to today
+            order.deliveryTime = new Date().toISOString().split('T')[0];
+
+            await saveDb(db);
+            revalidatePath('/orders');
+            return { success: true, message: "发货成功" };
+        } else {
+            throw new Error("Order not found");
+        }
+    } catch (error: any) {
+        return { success: false, message: error.message || "发货失败" };
+    }
+}
+
 export async function deleteOrder(orderId: string) {
     try {
         const db = await getDb();

@@ -29,11 +29,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, deleteOrder } from "@/app/actions"
+import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, deleteOrder, shipOrder } from "@/app/actions"
 import { format, addDays } from "date-fns"
-import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2, Calendar, CircleDollarSign } from "lucide-react"
+import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2, Calendar, CircleDollarSign, Truck } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { OrderForm } from "./order-form"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface OrderTableProps {
   orders: Order[]
@@ -60,6 +61,7 @@ const sourceMap: Record<OrderSource, string> = {
   PEER: '同行',
   RETAIL: '零售',
   PART_TIME: '兼职',
+  PART_TIME_AGENT: '兼职代理',
 }
 
 const platformMap: Record<string, string> = {
@@ -191,177 +193,245 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
           </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col gap-4 bg-white p-4 rounded-md border">
-        <div className="flex flex-col xl:flex-row gap-4 justify-between">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 flex-1">
-                <div className="flex items-center space-x-2">
-                    <Search className="w-4 h-4 text-gray-500" />
-                    <Input 
-                        placeholder="订单号/小程序单号" 
-                        value={filterOrderNo}
-                        onChange={e => setFilterOrderNo(e.target.value)}
-                        className="h-8 text-xs"
-                    />
-                </div>
-                <Input 
-                    placeholder="客户ID/昵称" 
-                    value={filterCustomer}
-                    onChange={e => setFilterCustomer(e.target.value)}
-                    className="h-8 text-xs"
-                />
-                <Input 
-                    placeholder="推广员/电话" 
-                    value={filterPromoter}
-                    onChange={e => setFilterPromoter(e.target.value)}
-                    className="h-8 text-xs"
-                />
-                <Input 
-                    placeholder="商品名称" 
-                    value={filterProduct}
-                    onChange={e => setFilterProduct(e.target.value)}
-                    className="h-8 text-xs"
-                />
-                <Input 
-                    placeholder="创建人" 
-                    value={filterCreator}
-                    onChange={e => setFilterCreator(e.target.value)}
-                    className="h-8 text-xs"
-                />
-            </div>
-            
-            {/* Date Range Filter */}
-            <div className="flex items-center space-x-2">
-                <Label className="whitespace-nowrap text-sm text-gray-500">创建时间:</Label>
-                <Input 
-                    type="date" 
-                    value={startDate} 
-                    onChange={e => setStartDate(e.target.value)} 
-                    className="w-36"
-                />
-                <span className="text-gray-400">-</span>
-                <Input 
-                    type="date" 
-                    value={endDate} 
-                    onChange={e => setEndDate(e.target.value)} 
-                    className="w-36"
-                />
-                {(startDate || endDate) && (
-                    <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate('') }}>
-                        重置
-                    </Button>
-                )}
-            </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2 items-center">
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger className="w-[120px]">
-                    <SelectValue placeholder="状态筛选" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="ALL">所有状态</SelectItem>
-                    {Object.entries(statusMap).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>{v.label}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-
-            <Select value={filterPlatform} onValueChange={setFilterPlatform}>
-                <SelectTrigger className="w-[120px]">
-                    <SelectValue placeholder="推广方式" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="ALL">所有方式</SelectItem>
-                    {Object.entries(platformMap).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-
-            <Select value={filterSource} onValueChange={setFilterSource}>
-                <SelectTrigger className="w-[120px]">
-                    <SelectValue placeholder="渠道筛选" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="ALL">所有渠道</SelectItem>
-                    {Object.entries(sourceMap).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-        </div>
-      </div>
-
-      <div className="rounded-md border bg-white">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[150px]">订单号/时间</TableHead>
-              <TableHead>小程序单号</TableHead>
-              <TableHead>推广方式</TableHead>
-              <TableHead>推广员</TableHead>
-              <TableHead>客户信息</TableHead>
-              <TableHead>设备信息</TableHead>
-              <TableHead>
-                  <Button variant="ghost" size="sm" onClick={toggleSort} className="-ml-3 hover:bg-transparent">
-                    租期/时间
-                    <ArrowUpDown className="ml-2 h-4 w-4" />
-                  </Button>
-              </TableHead>
-              <TableHead>金额详情</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead>备注</TableHead>
-              <TableHead>操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {paginatedOrders.map((order) => (
-              <OrderRow key={order.id} order={order} products={products} users={users} promoters={promoters} />
-            ))}
-            {paginatedOrders.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={11} className="text-center h-24">
-                  暂无匹配订单
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {totalPages > 1 && (
-        <Pagination className="justify-end">
-            <PaginationContent>
-                <PaginationItem>
-                    <PaginationPrevious 
-                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
-                        className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                    />
-                </PaginationItem>
-                
-                {Array.from({ length: totalPages }).map((_, i) => (
-                    <PaginationItem key={i}>
-                        <PaginationLink 
-                            isActive={currentPage === i + 1}
-                            onClick={() => setCurrentPage(i + 1)}
-                            className="cursor-pointer"
-                        >
-                            {i + 1}
-                        </PaginationLink>
-                    </PaginationItem>
+      <Tabs defaultValue="ALL" value={filterStatus} onValueChange={setFilterStatus} className="w-full">
+        <div className="overflow-x-auto pb-2">
+            <TabsList>
+                <TabsTrigger value="ALL">全部</TabsTrigger>
+                {Object.entries(statusMap).sort((a, b) => a[1].order - b[1].order).map(([k, v]) => (
+                    <TabsTrigger key={k} value={k}>{v.label}</TabsTrigger>
                 ))}
+            </TabsList>
+        </div>
 
-                <PaginationItem>
-                    <PaginationNext 
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                    />
-                </PaginationItem>
-            </PaginationContent>
-        </Pagination>
-      )}
+        {['ALL', ...Object.keys(statusMap)].map(status => (
+            <TabsContent key={status} value={status} className="mt-4">
+                {/* Filters */}
+                <div className="flex flex-col gap-4 bg-white p-4 rounded-md border mb-4">
+                    <div className="flex flex-col xl:flex-row gap-4 justify-between">
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 flex-1">
+                            <div className="flex items-center space-x-2">
+                                <Search className="w-4 h-4 text-gray-500" />
+                                <Input 
+                                    placeholder="订单号/小程序单号" 
+                                    value={filterOrderNo}
+                                    onChange={e => setFilterOrderNo(e.target.value)}
+                                    className="h-8 text-xs"
+                                />
+                            </div>
+                            <Input 
+                                placeholder="客户ID/昵称" 
+                                value={filterCustomer}
+                                onChange={e => setFilterCustomer(e.target.value)}
+                                className="h-8 text-xs"
+                            />
+                            <Input 
+                                placeholder="推广员/电话" 
+                                value={filterPromoter}
+                                onChange={e => setFilterPromoter(e.target.value)}
+                                className="h-8 text-xs"
+                            />
+                            <Input 
+                                placeholder="商品名称" 
+                                value={filterProduct}
+                                onChange={e => setFilterProduct(e.target.value)}
+                                className="h-8 text-xs"
+                            />
+                            <Input 
+                                placeholder="创建人" 
+                                value={filterCreator}
+                                onChange={e => setFilterCreator(e.target.value)}
+                                className="h-8 text-xs"
+                            />
+                        </div>
+                        
+                        {/* Date Range Filter */}
+                        <div className="flex items-center space-x-2">
+                            <Label className="whitespace-nowrap text-sm text-gray-500">创建时间:</Label>
+                            <Input 
+                                type="date" 
+                                value={startDate} 
+                                onChange={e => setStartDate(e.target.value)} 
+                                className="w-36"
+                            />
+                            <span className="text-gray-400">-</span>
+                            <Input 
+                                type="date" 
+                                value={endDate} 
+                                onChange={e => setEndDate(e.target.value)} 
+                                className="w-36"
+                            />
+                            {(startDate || endDate) && (
+                                <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate('') }}>
+                                    重置
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 items-center">
+                        <Select value={filterPlatform} onValueChange={setFilterPlatform}>
+                            <SelectTrigger className="w-[120px]">
+                                <SelectValue placeholder="推广方式" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">所有方式</SelectItem>
+                                {Object.entries(platformMap).map(([k, v]) => (
+                                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select value={filterSource} onValueChange={setFilterSource}>
+                            <SelectTrigger className="w-[120px]">
+                                <SelectValue placeholder="渠道筛选" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">所有渠道</SelectItem>
+                                {Object.entries(sourceMap).map(([k, v]) => (
+                                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+
+                <div className="rounded-md border bg-white">
+                    <Table>
+                    <TableHeader>
+                        <TableRow>
+                        <TableHead className="w-[150px]">订单号/时间</TableHead>
+                        <TableHead>小程序单号</TableHead>
+                        <TableHead>推广方式</TableHead>
+                        <TableHead>推广员</TableHead>
+                        <TableHead>客户信息</TableHead>
+                        <TableHead>设备信息</TableHead>
+                        <TableHead>
+                            <Button variant="ghost" size="sm" onClick={toggleSort} className="-ml-3 hover:bg-transparent">
+                                租期/时间
+                                <ArrowUpDown className="ml-2 h-4 w-4" />
+                            </Button>
+                        </TableHead>
+                        <TableHead>金额详情</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead>备注</TableHead>
+                        <TableHead>操作</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {paginatedOrders.map((order) => (
+                        <OrderRow key={order.id} order={order} products={products} users={users} promoters={promoters} />
+                        ))}
+                        {paginatedOrders.length === 0 && (
+                        <TableRow>
+                            <TableCell colSpan={11} className="text-center h-24">
+                            暂无匹配订单
+                            </TableCell>
+                        </TableRow>
+                        )}
+                    </TableBody>
+                    </Table>
+                </div>
+
+                {totalPages > 1 && (
+                    <Pagination className="justify-end mt-4">
+                        <PaginationContent>
+                            <PaginationItem>
+                                <PaginationPrevious 
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                />
+                            </PaginationItem>
+                            
+                            {Array.from({ length: totalPages }).map((_, i) => (
+                                <PaginationItem key={i}>
+                                    <PaginationLink 
+                                        isActive={currentPage === i + 1}
+                                        onClick={() => setCurrentPage(i + 1)}
+                                        className="cursor-pointer"
+                                    >
+                                        {i + 1}
+                                    </PaginationLink>
+                                </PaginationItem>
+                            ))}
+
+                            <PaginationItem>
+                                <PaginationNext 
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                />
+                            </PaginationItem>
+                        </PaginationContent>
+                    </Pagination>
+                )}
+            </TabsContent>
+        ))}
+      </Tabs>
     </div>
+  )
+}
+
+function ShipForm({ order, onSuccess }: { order: Order, onSuccess: () => void }) {
+  const [trackingNumber, setTrackingNumber] = useState(order.trackingNumber || '')
+  const [logisticsCompany, setLogisticsCompany] = useState(order.logisticsCompany || '')
+  const [recipientName, setRecipientName] = useState(order.recipientName || '')
+  const [recipientPhone, setRecipientPhone] = useState(order.recipientPhone || '')
+  const [address, setAddress] = useState(order.address || '')
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!trackingNumber) {
+        toast.error("请输入物流单号")
+        return
+    }
+    
+    try {
+        const res = await shipOrder(order.id, {
+            trackingNumber,
+            logisticsCompany,
+            recipientName,
+            recipientPhone,
+            address
+        })
+        
+        if (res?.success) {
+            toast.success(res.message)
+            onSuccess()
+        } else {
+            toast.error(res?.message || "发货失败")
+        }
+    } catch (e: any) {
+        toast.error("操作失败")
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 py-2">
+        <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+                <Label>收件人</Label>
+                <Input value={recipientName} onChange={e => setRecipientName(e.target.value)} placeholder="收件人姓名" />
+            </div>
+             <div className="space-y-2">
+                <Label>电话</Label>
+                <Input value={recipientPhone} onChange={e => setRecipientPhone(e.target.value)} placeholder="收件人电话" />
+            </div>
+        </div>
+        <div className="space-y-2">
+            <Label>收货地址</Label>
+            <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="完整收货地址" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+                <Label>物流公司</Label>
+                <Input value={logisticsCompany} onChange={e => setLogisticsCompany(e.target.value)} placeholder="如: 顺丰速运" />
+            </div>
+            <div className="space-y-2">
+                <Label>物流单号 <span className="text-red-500">*</span></Label>
+                <Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} placeholder="请输入单号" required />
+            </div>
+        </div>
+        <Button type="submit" className="w-full">确认发货</Button>
+    </form>
   )
 }
 
@@ -370,6 +440,7 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
   const [isExtensionOpen, setIsExtensionOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const [isShipOpen, setIsShipOpen] = useState(false)
   const [extDays, setExtDays] = useState(1)
   const [extPrice, setExtPrice] = useState(0)
   
@@ -567,6 +638,22 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
       </TableCell>
       <TableCell className="align-top">
         <div className="flex space-x-2">
+            {order.status === 'PENDING_SHIPMENT' && (
+                <Dialog open={isShipOpen} onOpenChange={setIsShipOpen}>
+                    <DialogTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50" title="发货">
+                            <Truck className="h-4 w-4" />
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>订单发货</DialogTitle>
+                        </DialogHeader>
+                        <ShipForm order={order} onSuccess={() => setIsShipOpen(false)} />
+                    </DialogContent>
+                </Dialog>
+            )}
+
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
                 <DialogTrigger asChild>
                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
