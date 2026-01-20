@@ -53,7 +53,7 @@ export function ProductList({ products }: ProductListProps) {
                     <Plus className="mr-2 h-4 w-4" /> 添加商品
                 </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-[3200px] max-h-[90vh] overflow-y-auto">
+            <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>添加新商品</DialogTitle>
                 </DialogHeader>
@@ -103,7 +103,7 @@ export function ProductList({ products }: ProductListProps) {
 
         {/* Edit Dialog */}
         <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
-            <DialogContent className="max-w-[3200px] max-h-[90vh] overflow-y-auto">
+            <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>编辑商品</DialogTitle>
                 </DialogHeader>

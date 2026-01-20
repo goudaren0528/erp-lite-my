@@ -1230,7 +1230,7 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
                             <Edit2 className="h-3 w-3 mr-1" /> 修改
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-[3200px] max-h-[90vh] overflow-y-auto">
+                    <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>编辑订单</DialogTitle>
                         </DialogHeader>

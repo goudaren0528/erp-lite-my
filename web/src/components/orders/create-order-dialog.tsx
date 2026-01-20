@@ -28,7 +28,7 @@ export function CreateOrderDialog({ products, promoters = [] }: CreateOrderDialo
           <Plus className="mr-2 h-4 w-4" /> 新建订单
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-[3200px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>新建订单</DialogTitle>
         </DialogHeader>
