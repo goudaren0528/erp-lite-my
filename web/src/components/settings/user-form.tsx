@@ -22,6 +22,7 @@ const PERMISSIONS = [
     { key: 'stats', label: '结算统计' },
     { key: 'products', label: '商品库管理' },
     { key: 'users', label: '账号权限管理' },
+    { key: 'backup', label: '导出导入数据' },
 ]
 
 export function UserForm({ initialData, onSuccess }: UserFormProps) {

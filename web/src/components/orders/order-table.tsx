@@ -366,8 +366,10 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
                           <SelectValue placeholder="渠道筛选" />
                       </SelectTrigger>
                       <SelectContent>
-                          <SelectItem value="ALL">所有渠道</SelectItem>
-                          {Object.entries(sourceMap).map(([k, v]) => (
+                          <SelectItem value="ALL">推广渠道</SelectItem>
+                          {Object.entries(sourceMap)
+                              .filter(([k]) => k !== 'AGENT' && k !== 'PART_TIME')
+                              .map(([k, v]) => (
                               <SelectItem key={k} value={k}>{v}</SelectItem>
                           ))}
                       </SelectContent>

@@ -63,7 +63,7 @@ export function MainNav({ user }: MainNavProps) {
     },
     {
        href: "/backup",
-       label: "导出数据",
+       label: "导出导入数据",
        icon: Database,
        active: pathname === "/backup",
        permission: "backup",

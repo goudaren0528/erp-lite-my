@@ -135,14 +135,16 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
           remaining = remaining.replace(new RegExp(foundProv, 'g'), ' ')
           if (foundProv.length > 2) {
              const shortName = foundProv.substring(0, 2)
-             remaining = remaining.replace(new RegExp(shortName, 'g'), ' ')
+             // Protect short name if it's part of a longer region name (e.g. 县, 区, 旗)
+             remaining = remaining.replace(new RegExp(shortName + '(?!([县区旗]))', 'g'), ' ')
           }
       }
       if (foundCity) {
           remaining = remaining.replace(new RegExp(foundCity, 'g'), ' ')
           if (foundCity.length > 2) {
              const shortName = foundCity.substring(0, 2)
-             remaining = remaining.replace(new RegExp(shortName, 'g'), ' ')
+             // Protect short name if it's part of a longer region name (e.g. 县, 区, 旗)
+             remaining = remaining.replace(new RegExp(shortName + '(?!([县区旗]))', 'g'), ' ')
           }
       }
       
@@ -203,7 +205,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     if (rentStartDate && rentEndDate) {
         const start = new Date(rentStartDate)
         const end = new Date(rentEndDate)
-        const diffTime = Math.abs(end.getTime() - start.getTime())
+        const diffTime = end.getTime() - start.getTime()
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1 
         if (diffDays > 0) {
             setDuration(diffDays)
@@ -236,6 +238,16 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     : ""
 
   async function handleSubmit(formData: FormData) {
+      // Validate dates
+      if (rentStartDate && rentEndDate) {
+          const start = new Date(rentStartDate)
+          const end = new Date(rentEndDate)
+          if (end < start) {
+              toast.error("租期结束日期不能早于开始日期")
+              return
+          }
+      }
+
       // Combine address
       const fullAddress = province && city 
         ? `${province} ${city} ${detailAddress}`

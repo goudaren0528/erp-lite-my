@@ -37,6 +37,7 @@ const PERMISSIONS_MAP: Record<string, string> = {
     'stats': '结算统计',
     'products': '商品库管理',
     'users': '账号权限管理',
+    'backup': '导出导入数据',
 }
 
 export function UserList({ users }: UserListProps) {

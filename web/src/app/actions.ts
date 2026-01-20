@@ -1,75 +1,84 @@
 'use server'
 
-import { getDb, saveDb } from "@/lib/db";
+import { getDb, updateDb } from "@/lib/db";
 import { Order, OrderStatus, Product, User, Promoter } from "@/types";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 
 export async function createOrder(formData: FormData) {
   try {
-    const db = await getDb();
-    const currentUser = await getCurrentUser();
-    
-    const creatorId = currentUser?.id || 'system'; 
-    const creatorName = currentUser?.name || '系统';
+    return await updateDb(async (db) => {
+      const currentUser = await getCurrentUser();
+      
+      const creatorId = currentUser?.id || 'system'; 
+      const creatorName = currentUser?.name || '系统';
 
-    const orderId = Math.random().toString(36).substring(2, 9);
-    
-    // Simple sequence order number: find max existing numeric part or default to 1000
-    const maxOrderNo = db.orders.reduce((max, order) => {
-        const num = parseInt(order.orderNo)
-        return !isNaN(num) && num > max ? num : max
-    }, 1000)
-    const orderNo = String(maxOrderNo + 1)
+      const orderId = Math.random().toString(36).substring(2, 9);
+      
+      // Simple sequence order number: find max existing numeric part or default to 1000
+      const maxOrderNo = db.orders.reduce((max, order) => {
+          const num = parseInt(order.orderNo)
+          return !isNaN(num) && num > max ? num : max
+      }, 1000)
+      const orderNo = String(maxOrderNo + 1)
 
-    const rawData = Object.fromEntries(formData.entries());
-    
-    const newOrder: Order = {
-      id: orderId,
-      orderNo: orderNo,
-      source: rawData.source as any,
-      platform: rawData.platform as any,
-      status: 'PENDING_REVIEW',
+      const rawData = Object.fromEntries(formData.entries());
       
-      customerXianyuId: rawData.customerXianyuId as string,
-      sourceContact: rawData.sourceContact as string,
-      miniProgramOrderNo: rawData.miniProgramOrderNo as string,
-      
-      productName: rawData.productName as string,
-      variantName: rawData.variantName as string,
-      sn: rawData.sn as string,
-      
-      duration: Number(rawData.duration),
-      rentPrice: Number(rawData.rentPrice),
-      deposit: Number(rawData.deposit),
-      insurancePrice: Number(rawData.insurancePrice),
-      totalAmount: Number(rawData.totalAmount),
-      
-      deliveryTime: rawData.deliveryTime as string,
-      returnDeadline: rawData.returnDeadline as string,
-      rentStartDate: rawData.rentStartDate as string,
-      address: rawData.address as string,
-      recipientName: rawData.recipientName as string,
-      recipientPhone: rawData.recipientPhone as string,
-      
-      remark: rawData.remark as string,
-      
-      creatorId,
-      creatorName,
-      createdAt: new Date().toISOString(),
-      extensions: [],
-      logs: [{
-        action: '创建订单',
-        operator: creatorName,
-        timestamp: new Date().toISOString()
-      }]
-    };
+      // Validate dates
+      if (rawData.rentStartDate && rawData.returnDeadline) {
+          const start = new Date(rawData.rentStartDate as string);
+          const deadline = new Date(rawData.returnDeadline as string);
+          if (deadline <= start) {
+              throw new Error("租期结束日期不能早于开始日期");
+          }
+      }
 
-    db.orders.push(newOrder);
-    await saveDb(db);
-    
-    revalidatePath('/orders');
-    return { success: true, message: "订单创建成功", orderId };
+      const newOrder: Order = {
+        id: orderId,
+        orderNo: orderNo,
+        source: rawData.source as any,
+        platform: rawData.platform as any,
+        status: 'PENDING_REVIEW',
+        
+        customerXianyuId: rawData.customerXianyuId as string,
+        sourceContact: rawData.sourceContact as string,
+        miniProgramOrderNo: rawData.miniProgramOrderNo as string,
+        
+        productName: rawData.productName as string,
+        variantName: rawData.variantName as string,
+        sn: rawData.sn as string,
+        
+        duration: Number(rawData.duration),
+        rentPrice: Number(rawData.rentPrice),
+        deposit: Number(rawData.deposit),
+        insurancePrice: Number(rawData.insurancePrice),
+        totalAmount: Number(rawData.totalAmount),
+        
+        deliveryTime: rawData.deliveryTime as string,
+        returnDeadline: rawData.returnDeadline as string,
+        rentStartDate: rawData.rentStartDate as string,
+        address: rawData.address as string,
+        recipientName: rawData.recipientName as string,
+        recipientPhone: rawData.recipientPhone as string,
+        
+        remark: rawData.remark as string,
+        
+        creatorId,
+        creatorName,
+        createdAt: new Date().toISOString(),
+        extensions: [],
+        logs: [{
+          action: '创建订单',
+          operator: creatorName,
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      db.orders.push(newOrder);
+      
+      revalidatePath('/orders');
+      return { success: true, message: "订单创建成功", orderId };
+    });
   } catch (error: any) {
     return { success: false, message: error.message || "创建订单失败" };
   }
@@ -77,32 +86,31 @@ export async function createOrder(formData: FormData) {
 
 export async function saveUser(user: Partial<User> & { id?: string }) {
     try {
-        const db = await getDb()
-        
-        if (user.id) {
-            // Update
-            const index = db.users.findIndex(u => u.id === user.id)
-            if (index !== -1) {
-                db.users[index] = { ...db.users[index], ...user } as User
+        return await updateDb(async (db) => {
+            if (user.id) {
+                // Update
+                const index = db.users.findIndex(u => u.id === user.id)
+                if (index !== -1) {
+                    db.users[index] = { ...db.users[index], ...user } as User
+                } else {
+                    throw new Error("User not found");
+                }
             } else {
-                throw new Error("User not found");
+                // Create
+                const newUser: User = {
+                    id: Math.random().toString(36).substring(2, 9),
+                    name: user.name || '',
+                    username: user.username || '',
+                    password: user.password || '123456',
+                    role: user.role || 'SHIPPING', // Default to SHIPPING
+                    permissions: user.permissions || []
+                }
+                db.users.push(newUser)
             }
-        } else {
-            // Create
-            const newUser: User = {
-                id: Math.random().toString(36).substring(2, 9),
-                name: user.name || '',
-                username: user.username || '',
-                password: user.password || '123456',
-                role: user.role || 'SHIPPING', // Default to SHIPPING
-                permissions: user.permissions || []
-            }
-            db.users.push(newUser)
-        }
-        
-        await saveDb(db)
-        revalidatePath('/users')
-        return { success: true, message: user.id ? "用户更新成功" : "用户创建成功" };
+            
+            revalidatePath('/users')
+            return { success: true, message: user.id ? "用户更新成功" : "用户创建成功" };
+        })
     } catch (error: any) {
         return { success: false, message: error.message || "保存用户失败" };
     }
@@ -110,17 +118,17 @@ export async function saveUser(user: Partial<User> & { id?: string }) {
 
 export async function deleteUser(userId: string) {
     try {
-        const db = await getDb()
-        const userToDelete = db.users.find(u => u.id === userId)
-        
-        if (userToDelete?.username === 'admin') {
-            throw new Error("无法删除超级管理员")
-        }
+        return await updateDb(async (db) => {
+            const userToDelete = db.users.find(u => u.id === userId)
+            
+            if (userToDelete?.username === 'admin') {
+                throw new Error("无法删除超级管理员")
+            }
 
-        db.users = db.users.filter(u => u.id !== userId)
-        await saveDb(db)
-        revalidatePath('/users')
-        return { success: true, message: "用户删除成功" };
+            db.users = db.users.filter(u => u.id !== userId)
+            revalidatePath('/users')
+            return { success: true, message: "用户删除成功" };
+        })
     } catch (error: any) {
         return { success: false, message: error.message || "删除用户失败" };
     }
@@ -129,34 +137,34 @@ export async function deleteUser(userId: string) {
 
 export async function savePromoter(promoter: Partial<Promoter> & { id?: string }) {
     try {
-        const db = await getDb()
-        const currentUser = await getCurrentUser()
-        
-        if (promoter.id) {
-            // Update
-            const index = db.promoters.findIndex(p => p.id === promoter.id)
-            if (index !== -1) {
-                db.promoters[index] = { ...db.promoters[index], ...promoter } as Promoter
+        return await updateDb(async (db) => {
+            const currentUser = await getCurrentUser()
+            
+            if (promoter.id) {
+                // Update
+                const index = db.promoters.findIndex(p => p.id === promoter.id)
+                if (index !== -1) {
+                    db.promoters[index] = { ...db.promoters[index], ...promoter } as Promoter
+                } else {
+                    throw new Error("Promoter not found");
+                }
             } else {
-                throw new Error("Promoter not found");
+                // Create
+                const newPromoter: Promoter = {
+                    id: Math.random().toString(36).substring(2, 9),
+                    name: promoter.name || '',
+                    phone: promoter.phone || '',
+                    channel: promoter.channel,
+                    creatorId: currentUser?.id,
+                    createdAt: new Date().toISOString()
+                }
+                db.promoters.push(newPromoter)
             }
-        } else {
-            // Create
-            const newPromoter: Promoter = {
-                id: Math.random().toString(36).substring(2, 9),
-                name: promoter.name || '',
-                phone: promoter.phone || '',
-                channel: promoter.channel,
-                creatorId: currentUser?.id,
-                createdAt: new Date().toISOString()
-            }
-            db.promoters.push(newPromoter)
-        }
-        
-        await saveDb(db)
-        revalidatePath('/promoters')
-        revalidatePath('/orders') // Update order form dropdown
-        return { success: true, message: promoter.id ? "推广人员更新成功" : "推广人员创建成功" };
+            
+            revalidatePath('/promoters')
+            revalidatePath('/orders') // Update order form dropdown
+            return { success: true, message: promoter.id ? "推广人员更新成功" : "推广人员创建成功" };
+        })
     } catch (error: any) {
         return { success: false, message: error.message || "保存推广人员失败" };
     }
@@ -164,12 +172,12 @@ export async function savePromoter(promoter: Partial<Promoter> & { id?: string }
 
 export async function deletePromoter(promoterId: string) {
     try {
-        const db = await getDb()
-        db.promoters = db.promoters.filter(p => p.id !== promoterId)
-        await saveDb(db)
-        revalidatePath('/promoters')
-        revalidatePath('/orders')
-        return { success: true, message: "推广人员删除成功" };
+        return await updateDb(async (db) => {
+            db.promoters = db.promoters.filter(p => p.id !== promoterId)
+            revalidatePath('/promoters')
+            revalidatePath('/orders')
+            return { success: true, message: "推广人员删除成功" };
+        })
     } catch (error: any) {
         return { success: false, message: error.message || "删除推广人员失败" };
     }
@@ -189,73 +197,84 @@ const STATUS_LABELS: Record<string, string> = {
 
 export async function updateOrder(orderId: string, formData: FormData) {
     try {
-        const db = await getDb();
-        const orderIndex = db.orders.findIndex(o => o.id === orderId);
-        
-        if (orderIndex === -1) {
-            throw new Error("Order not found");
-        }
-
-        const rawData = Object.fromEntries(formData.entries());
-        const existingOrder = db.orders[orderIndex];
-
-        const updatedOrder: Order = {
-            ...existingOrder,
-            source: rawData.source as any,
-            platform: rawData.platform as any,
-            customerXianyuId: rawData.customerXianyuId as string,
-            sourceContact: rawData.sourceContact as string,
-            miniProgramOrderNo: rawData.miniProgramOrderNo as string,
-            productName: rawData.productName as string,
-            variantName: rawData.variantName as string,
-            sn: rawData.sn as string,
-            duration: Number(rawData.duration),
-            rentPrice: Number(rawData.rentPrice),
-            deposit: Number(rawData.deposit),
-            insurancePrice: Number(rawData.insurancePrice),
-            totalAmount: Number(rawData.totalAmount),
-            address: rawData.address as string,
-            recipientName: rawData.recipientName as string,
-            recipientPhone: rawData.recipientPhone as string,
-            rentStartDate: rawData.rentStartDate as string,
-            deliveryTime: rawData.deliveryTime as string,
-            returnDeadline: rawData.returnDeadline as string,
-            remark: rawData.remark as string,
-        };
-
-        // Handle extension modifications (Full replacement from JSON if present)
-        const extensionsJSON = rawData.extensionsJSON as string;
-        if (extensionsJSON) {
-            try {
-                const parsedExtensions = JSON.parse(extensionsJSON);
-                if (Array.isArray(parsedExtensions)) {
-                    updatedOrder.extensions = parsedExtensions;
-                }
-            } catch (e) {
-                console.error("Failed to parse extensions JSON", e);
-            }
-        }
-
-        // Handle NEW extension addition (merged into the list)
-        const extDays = Number(rawData.extensionDays)
-        const extPrice = Number(rawData.extensionPrice)
-        
-        if (extDays > 0) {
-            // Ensure extensions array exists
-            if (!updatedOrder.extensions) updatedOrder.extensions = [];
+        return await updateDb(async (db) => {
+            const orderIndex = db.orders.findIndex(o => o.id === orderId);
             
-            updatedOrder.extensions.push({
-                id: Math.random().toString(36).substring(2, 9),
-                days: extDays,
-                price: extPrice,
-                createdAt: new Date().toISOString()
-            })
-        }
+            if (orderIndex === -1) {
+                throw new Error("Order not found");
+            }
 
-        db.orders[orderIndex] = updatedOrder;
-        await saveDb(db);
-        revalidatePath('/orders');
-        return { success: true, message: "订单更新成功" };
+            const rawData = Object.fromEntries(formData.entries());
+            
+            // Validate dates
+            if (rawData.rentStartDate && rawData.returnDeadline) {
+                const start = new Date(rawData.rentStartDate as string);
+                const deadline = new Date(rawData.returnDeadline as string);
+                if (deadline <= start) {
+                    throw new Error("租期结束日期不能早于开始日期");
+                }
+            }
+
+            const existingOrder = db.orders[orderIndex];
+
+            const updatedOrder: Order = {
+                ...existingOrder,
+                source: rawData.source as any,
+                platform: rawData.platform as any,
+                customerXianyuId: rawData.customerXianyuId as string,
+                sourceContact: rawData.sourceContact as string,
+                miniProgramOrderNo: rawData.miniProgramOrderNo as string,
+                productName: rawData.productName as string,
+                variantName: rawData.variantName as string,
+                sn: rawData.sn as string,
+                duration: Number(rawData.duration),
+                rentPrice: Number(rawData.rentPrice),
+                deposit: Number(rawData.deposit),
+                insurancePrice: Number(rawData.insurancePrice),
+                totalAmount: Number(rawData.totalAmount),
+                address: rawData.address as string,
+                recipientName: rawData.recipientName as string,
+                recipientPhone: rawData.recipientPhone as string,
+                rentStartDate: rawData.rentStartDate as string,
+                deliveryTime: rawData.deliveryTime as string,
+                returnDeadline: rawData.returnDeadline as string,
+                remark: rawData.remark as string,
+            };
+
+            // Handle extension modifications (Full replacement from JSON if present)
+            const extensionsJSON = rawData.extensionsJSON as string;
+            if (extensionsJSON) {
+                try {
+                    const parsedExtensions = JSON.parse(extensionsJSON);
+                    if (Array.isArray(parsedExtensions)) {
+                        updatedOrder.extensions = parsedExtensions;
+                    }
+                } catch (e) {
+                    console.error("Failed to parse extensions JSON", e);
+                }
+            }
+
+            // Handle NEW extension addition (merged into the list)
+            const extDays = Number(rawData.extensionDays)
+            const extPrice = Number(rawData.extensionPrice)
+            
+            if (extDays > 0) {
+                // Ensure extensions array exists
+                if (!updatedOrder.extensions) updatedOrder.extensions = [];
+                
+                updatedOrder.extensions.push({
+                    id: Math.random().toString(36).substring(2, 9),
+                    days: extDays,
+                    price: extPrice,
+                    createdAt: new Date().toISOString()
+                })
+            }
+
+            db.orders[orderIndex] = updatedOrder;
+            
+            revalidatePath('/orders');
+            return { success: true, message: "订单更新成功" };
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "更新订单失败" };
     }
@@ -263,30 +282,30 @@ export async function updateOrder(orderId: string, formData: FormData) {
 
 export async function updateOrderStatus(orderId: string, newStatus: OrderStatus) {
   try {
-    const db = await getDb();
-    const currentUser = await getCurrentUser();
-    const order = db.orders.find(o => o.id === orderId);
-    if (order) {
-        const oldStatus = order.status;
-        order.status = newStatus;
-        
-        if (!order.logs) order.logs = [];
-        const oldStatusLabel = STATUS_LABELS[oldStatus] || oldStatus;
-        const newStatusLabel = STATUS_LABELS[newStatus] || newStatus;
-        
-        order.logs.push({
-            action: '状态变更',
-            operator: currentUser?.name || '系统',
-            timestamp: new Date().toISOString(),
-            details: `${oldStatusLabel} -> ${newStatusLabel}`
-        });
+    return await updateDb(async (db) => {
+        const currentUser = await getCurrentUser();
+        const order = db.orders.find(o => o.id === orderId);
+        if (order) {
+            const oldStatus = order.status;
+            order.status = newStatus;
+            
+            if (!order.logs) order.logs = [];
+            const oldStatusLabel = STATUS_LABELS[oldStatus] || oldStatus;
+            const newStatusLabel = STATUS_LABELS[newStatus] || newStatus;
+            
+            order.logs.push({
+                action: '状态变更',
+                operator: currentUser?.name || '系统',
+                timestamp: new Date().toISOString(),
+                details: `${oldStatusLabel} -> ${newStatusLabel}`
+            });
 
-        await saveDb(db);
-        revalidatePath('/orders');
-        return { success: true, message: "订单状态更新成功" };
-    } else {
-        throw new Error("Order not found");
-    }
+            revalidatePath('/orders');
+            return { success: true, message: "订单状态更新成功" };
+        } else {
+            throw new Error("Order not found");
+        }
+    });
   } catch (error: any) {
     return { success: false, message: error.message || "更新状态失败" };
   }
@@ -294,16 +313,16 @@ export async function updateOrderStatus(orderId: string, newStatus: OrderStatus)
 
 export async function updateOrderRemark(orderId: string, remark: string) {
     try {
-        const db = await getDb();
-        const order = db.orders.find(o => o.id === orderId);
-        if (order) {
-          order.remark = remark;
-          await saveDb(db);
-          revalidatePath('/orders');
-          return { success: true, message: "备注更新成功" };
-        } else {
-            throw new Error("Order not found");
-        }
+        return await updateDb(async (db) => {
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+              order.remark = remark;
+              revalidatePath('/orders');
+              return { success: true, message: "备注更新成功" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "更新备注失败" };
     }
@@ -311,16 +330,16 @@ export async function updateOrderRemark(orderId: string, remark: string) {
 
 export async function updateMiniProgramOrderNo(orderId: string, no: string) {
     try {
-        const db = await getDb();
-        const order = db.orders.find(o => o.id === orderId);
-        if (order) {
-          order.miniProgramOrderNo = no;
-          await saveDb(db);
-          revalidatePath('/orders');
-          return { success: true, message: "小程序单号更新成功" };
-        } else {
-            throw new Error("Order not found");
-        }
+        return await updateDb(async (db) => {
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+              order.miniProgramOrderNo = no;
+              revalidatePath('/orders');
+              return { success: true, message: "小程序单号更新成功" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "更新小程序单号失败" };
     }
@@ -328,38 +347,38 @@ export async function updateMiniProgramOrderNo(orderId: string, no: string) {
 
 export async function extendOrder(orderId: string, days: number, price: number) {
   try {
-    const db = await getDb();
-    const currentUser = await getCurrentUser();
-    const order = db.orders.find(o => o.id === orderId);
-    if (order) {
-        order.extensions.push({
-          id: Math.random().toString(36).substring(2, 9),
-          days,
-          price,
-          createdAt: new Date().toISOString()
-        });
-        
-        // Update returnDeadline
-        if (order.returnDeadline) {
-             const deadline = new Date(order.returnDeadline);
-             deadline.setDate(deadline.getDate() + days);
-             order.returnDeadline = deadline.toISOString().split('T')[0];
-        }
-        
-        if (!order.logs) order.logs = [];
-        order.logs.push({
-            action: '续租',
-            operator: currentUser?.name || '系统',
-            timestamp: new Date().toISOString(),
-            details: `续租 ${days} 天，费用 ${price} 元`
-        });
+    return await updateDb(async (db) => {
+        const currentUser = await getCurrentUser();
+        const order = db.orders.find(o => o.id === orderId);
+        if (order) {
+            order.extensions.push({
+              id: Math.random().toString(36).substring(2, 9),
+              days,
+              price,
+              createdAt: new Date().toISOString()
+            });
+            
+            // Update returnDeadline
+            if (order.returnDeadline) {
+                 const deadline = new Date(order.returnDeadline);
+                 deadline.setDate(deadline.getDate() + days);
+                 order.returnDeadline = deadline.toISOString().split('T')[0];
+            }
+            
+            if (!order.logs) order.logs = [];
+            order.logs.push({
+                action: '续租',
+                operator: currentUser?.name || '系统',
+                timestamp: new Date().toISOString(),
+                details: `续租 ${days} 天，费用 ${price} 元`
+            });
 
-        await saveDb(db);
-        revalidatePath('/orders');
-        return { success: true, message: "续租成功" };
-    } else {
-        throw new Error("Order not found");
-    }
+            revalidatePath('/orders');
+            return { success: true, message: "续租成功" };
+        } else {
+            throw new Error("Order not found");
+        }
+    });
   } catch (error: any) {
     return { success: false, message: error.message || "续租失败" };
   }
@@ -367,28 +386,28 @@ export async function extendOrder(orderId: string, days: number, price: number) 
 
 export async function addOverdueFee(orderId: string, fee: number) {
     try {
-        const db = await getDb();
-        const currentUser = await getCurrentUser();
-        const order = db.orders.find(o => o.id === orderId);
-        if (order) {
-            const oldFee = order.overdueFee || 0;
-            order.overdueFee = oldFee + fee;
-            order.totalAmount = (order.totalAmount || 0) + fee;
+        return await updateDb(async (db) => {
+            const currentUser = await getCurrentUser();
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+                const oldFee = order.overdueFee || 0;
+                order.overdueFee = oldFee + fee;
+                order.totalAmount = (order.totalAmount || 0) + fee;
 
-            if (!order.logs) order.logs = [];
-            order.logs.push({
-                action: '逾期补价',
-                operator: currentUser?.name || '系统',
-                timestamp: new Date().toISOString(),
-                details: `增加违约金 ${fee} 元`
-            });
+                if (!order.logs) order.logs = [];
+                order.logs.push({
+                    action: '逾期补价',
+                    operator: currentUser?.name || '系统',
+                    timestamp: new Date().toISOString(),
+                    details: `增加违约金 ${fee} 元`
+                });
 
-            await saveDb(db);
-            revalidatePath('/orders');
-            return { success: true, message: "补价成功" };
-        } else {
-            throw new Error("Order not found");
-        }
+                revalidatePath('/orders');
+                return { success: true, message: "补价成功" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "操作失败" };
     }
@@ -396,31 +415,31 @@ export async function addOverdueFee(orderId: string, fee: number) {
 
 export async function shipOrder(orderId: string, data: { trackingNumber?: string, logisticsCompany?: string }) {
     try {
-        const db = await getDb();
-        const currentUser = await getCurrentUser();
-        const order = db.orders.find(o => o.id === orderId);
-        if (order) {
-            order.status = 'PENDING_RECEIPT';
-            order.trackingNumber = data.trackingNumber || '';
-            order.logisticsCompany = data.logisticsCompany || '顺丰速运';
-            
-            // Set delivery time to today
-            order.deliveryTime = new Date().toISOString().split('T')[0];
+        return await updateDb(async (db) => {
+            const currentUser = await getCurrentUser();
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+                order.status = 'PENDING_RECEIPT';
+                order.trackingNumber = data.trackingNumber || '';
+                order.logisticsCompany = data.logisticsCompany || '顺丰速运';
+                
+                // Set delivery time to today
+                order.deliveryTime = new Date().toISOString().split('T')[0];
 
-            if (!order.logs) order.logs = [];
-            order.logs.push({
-                action: '发货',
-                operator: currentUser?.name || '系统',
-                timestamp: new Date().toISOString(),
-                details: `${order.logisticsCompany} ${order.trackingNumber}`
-            });
+                if (!order.logs) order.logs = [];
+                order.logs.push({
+                    action: '发货',
+                    operator: currentUser?.name || '系统',
+                    timestamp: new Date().toISOString(),
+                    details: `${order.logisticsCompany} ${order.trackingNumber}`
+                });
 
-            await saveDb(db);
-            revalidatePath('/orders');
-            return { success: true, message: "发货成功" };
-        } else {
-            throw new Error("Order not found");
-        }
+                revalidatePath('/orders');
+                return { success: true, message: "发货成功" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "发货失败" };
     }
@@ -428,28 +447,28 @@ export async function shipOrder(orderId: string, data: { trackingNumber?: string
 
 export async function returnOrder(orderId: string, data: { returnTrackingNumber?: string, returnLogisticsCompany?: string }) {
     try {
-        const db = await getDb();
-        const currentUser = await getCurrentUser();
-        const order = db.orders.find(o => o.id === orderId);
-        if (order) {
-            order.status = 'RETURNING';
-            order.returnTrackingNumber = data.returnTrackingNumber || '';
-            order.returnLogisticsCompany = data.returnLogisticsCompany || '顺丰速运';
-            
-            if (!order.logs) order.logs = [];
-            order.logs.push({
-                action: '归还',
-                operator: currentUser?.name || '系统',
-                timestamp: new Date().toISOString(),
-                details: `${order.returnLogisticsCompany} ${order.returnTrackingNumber}`
-            });
+        return await updateDb(async (db) => {
+            const currentUser = await getCurrentUser();
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+                order.status = 'RETURNING';
+                order.returnTrackingNumber = data.returnTrackingNumber || '';
+                order.returnLogisticsCompany = data.returnLogisticsCompany || '顺丰速运';
+                
+                if (!order.logs) order.logs = [];
+                order.logs.push({
+                    action: '归还',
+                    operator: currentUser?.name || '系统',
+                    timestamp: new Date().toISOString(),
+                    details: `${order.returnLogisticsCompany} ${order.returnTrackingNumber}`
+                });
 
-            await saveDb(db);
-            revalidatePath('/orders');
-            return { success: true, message: "归还操作成功" };
-        } else {
-            throw new Error("Order not found");
-        }
+                revalidatePath('/orders');
+                return { success: true, message: "归还操作成功" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "归还操作失败" };
     }
@@ -457,25 +476,25 @@ export async function returnOrder(orderId: string, data: { returnTrackingNumber?
 
 export async function approveOrder(orderId: string) {
     try {
-        const db = await getDb();
-        const currentUser = await getCurrentUser();
-        const order = db.orders.find(o => o.id === orderId);
-        if (order) {
-            order.status = 'PENDING_SHIPMENT';
-            
-            if (!order.logs) order.logs = [];
-            order.logs.push({
-                action: '审核通过',
-                operator: currentUser?.name || '系统',
-                timestamp: new Date().toISOString()
-            });
+        return await updateDb(async (db) => {
+            const currentUser = await getCurrentUser();
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+                order.status = 'PENDING_SHIPMENT';
+                
+                if (!order.logs) order.logs = [];
+                order.logs.push({
+                    action: '审核通过',
+                    operator: currentUser?.name || '系统',
+                    timestamp: new Date().toISOString()
+                });
 
-            await saveDb(db);
-            revalidatePath('/orders');
-            return { success: true, message: "审核通过" };
-        } else {
-            throw new Error("Order not found");
-        }
+                revalidatePath('/orders');
+                return { success: true, message: "审核通过" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "操作失败" };
     }
@@ -483,26 +502,26 @@ export async function approveOrder(orderId: string) {
 
 export async function rejectOrder(orderId: string) {
     try {
-        const db = await getDb();
-        const currentUser = await getCurrentUser();
-        const order = db.orders.find(o => o.id === orderId);
-        if (order) {
-            order.status = 'CLOSED';
-            
-            if (!order.logs) order.logs = [];
-            order.logs.push({
-                action: '审核拒绝',
-                operator: currentUser?.name || '系统',
-                timestamp: new Date().toISOString(),
-                details: '订单已关闭'
-            });
+        return await updateDb(async (db) => {
+            const currentUser = await getCurrentUser();
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+                order.status = 'CLOSED';
+                
+                if (!order.logs) order.logs = [];
+                order.logs.push({
+                    action: '审核拒绝',
+                    operator: currentUser?.name || '系统',
+                    timestamp: new Date().toISOString(),
+                    details: '订单已关闭'
+                });
 
-            await saveDb(db);
-            revalidatePath('/orders');
-            return { success: true, message: "已拒绝并关闭订单" };
-        } else {
-            throw new Error("Order not found");
-        }
+                revalidatePath('/orders');
+                return { success: true, message: "已拒绝并关闭订单" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "操作失败" };
     }
@@ -510,26 +529,26 @@ export async function rejectOrder(orderId: string) {
 
 export async function closeOrder(orderId: string, remark?: string) {
     try {
-        const db = await getDb();
-        const currentUser = await getCurrentUser();
-        const order = db.orders.find(o => o.id === orderId);
-        if (order) {
-            order.status = 'CLOSED';
-            
-            if (!order.logs) order.logs = [];
-            order.logs.push({
-                action: '关闭订单',
-                operator: currentUser?.name || '系统',
-                timestamp: new Date().toISOString(),
-                details: remark || '无备注'
-            });
+        return await updateDb(async (db) => {
+            const currentUser = await getCurrentUser();
+            const order = db.orders.find(o => o.id === orderId);
+            if (order) {
+                order.status = 'CLOSED';
+                
+                if (!order.logs) order.logs = [];
+                order.logs.push({
+                    action: '关闭订单',
+                    operator: currentUser?.name || '系统',
+                    timestamp: new Date().toISOString(),
+                    details: remark || '无备注'
+                });
 
-            await saveDb(db);
-            revalidatePath('/orders');
-            return { success: true, message: "订单已关闭" };
-        } else {
-            throw new Error("Order not found");
-        }
+                revalidatePath('/orders');
+                return { success: true, message: "订单已关闭" };
+            } else {
+                throw new Error("Order not found");
+            }
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "操作失败" };
     }
@@ -537,11 +556,11 @@ export async function closeOrder(orderId: string, remark?: string) {
 
 export async function deleteOrder(orderId: string) {
     try {
-        const db = await getDb();
-        db.orders = db.orders.filter(o => o.id !== orderId);
-        await saveDb(db);
-        revalidatePath('/orders');
-        return { success: true, message: "订单删除成功" };
+        return await updateDb(async (db) => {
+            db.orders = db.orders.filter(o => o.id !== orderId);
+            revalidatePath('/orders');
+            return { success: true, message: "订单删除成功" };
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "删除订单失败" };
     }
@@ -550,17 +569,17 @@ export async function deleteOrder(orderId: string) {
 // Product Management Actions
 export async function saveProduct(product: Product) {
     try {
-        const db = await getDb();
-        const index = db.products.findIndex(p => p.id === product.id);
-        if (index >= 0) {
-            db.products[index] = product;
-        } else {
-            db.products.push(product);
-        }
-        await saveDb(db);
-        revalidatePath('/products');
-        revalidatePath('/orders'); // Revalidate orders in case product name is used for new orders
-        return { success: true, message: "商品保存成功" };
+        return await updateDb(async (db) => {
+            const index = db.products.findIndex(p => p.id === product.id);
+            if (index >= 0) {
+                db.products[index] = product;
+            } else {
+                db.products.push(product);
+            }
+            revalidatePath('/products');
+            revalidatePath('/orders'); // Revalidate orders in case product name is used for new orders
+            return { success: true, message: "商品保存成功" };
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "保存商品失败" };
     }
@@ -568,11 +587,11 @@ export async function saveProduct(product: Product) {
 
 export async function deleteProduct(productId: string) {
     try {
-        const db = await getDb();
-        db.products = db.products.filter(p => p.id !== productId);
-        await saveDb(db);
-        revalidatePath('/products');
-        return { success: true, message: "商品删除成功" };
+        return await updateDb(async (db) => {
+            db.products = db.products.filter(p => p.id !== productId);
+            revalidatePath('/products');
+            return { success: true, message: "商品删除成功" };
+        });
     } catch (error: any) {
         return { success: false, message: error.message || "删除商品失败" };
     }

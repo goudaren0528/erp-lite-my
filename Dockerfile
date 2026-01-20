@@ -1,5 +1,8 @@
 FROM node:20-alpine AS base
 
+# Ensure consistent Server Action IDs across builds/instances
+ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY "erp-lite-persistent-key-2024"
+
 # Install dependencies only when needed
 FROM base AS deps
 # Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
@@ -56,7 +59,5 @@ EXPOSE 3000
 ENV PORT 3000
 # set hostname to localhost
 ENV HOSTNAME "0.0.0.0"
-# Ensure consistent Server Action IDs across builds/instances
-ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY "erp-lite-persistent-key-2024"
 
 CMD ["node", "server.js"]

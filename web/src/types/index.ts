@@ -117,10 +117,20 @@ export interface Promoter {
   createdAt: string;
 }
 
+export interface BackupLog {
+  id: string;
+  type: 'EXPORT' | 'IMPORT';
+  status: 'SUCCESS' | 'FAILED';
+  operator: string;
+  details: string;
+  timestamp: string;
+}
+
 export interface DB {
   users: User[];
   promoters: Promoter[];
   products: Product[];
   orders: Order[];
   commissionConfigs: CommissionConfig[];
+  backupLogs: BackupLog[];
 }

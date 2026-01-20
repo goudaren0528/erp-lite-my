@@ -1,7 +1,7 @@
 [
   {
     "id": "1",
-    "name": "管理员",
+    "name": "超级管理员",
     "username": "admin",
     "password": "123",
     "role": "ADMIN",

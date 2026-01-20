@@ -1,14 +1,17 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { DB, Product, User, CommissionConfig } from '@/types';
+import { DB, User, Product, Order, Promoter, CommissionConfig } from '@/types';
+import lockfile from 'proper-lockfile';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_PATH = path.join(DATA_DIR, 'db.json');
+const DB_PATH = path.join(DATA_DIR, 'db.json'); // Legacy single file
 const USERS_PATH = path.join(DATA_DIR, 'users.json');
 const PROMOTERS_PATH = path.join(DATA_DIR, 'promoters.json');
 const PRODUCTS_PATH = path.join(DATA_DIR, 'products.json');
 const ORDERS_PATH = path.join(DATA_DIR, 'orders.json');
 const CONFIGS_PATH = path.join(DATA_DIR, 'commission-configs.json');
+const BACKUP_LOGS_PATH = path.join(DATA_DIR, 'backup-logs.json');
+const LOCK_FILE = path.join(DATA_DIR, 'db.lock');
 
 const INITIAL_DB: DB = {
   users: [
@@ -23,7 +26,8 @@ const INITIAL_DB: DB = {
   commissionConfigs: [
     { role: 'PART_TIME', minCount: 0, maxCount: 10, percentage: 5 },
     { role: 'PART_TIME', minCount: 11, maxCount: 100, percentage: 8 },
-  ]
+  ],
+  backupLogs: []
 };
 
 // Seed initial products based on the user provided image/requirements
@@ -249,15 +253,16 @@ export async function getDb(): Promise<DB> {
         // Check if split files exist (using users.json as indicator)
         await fs.access(USERS_PATH);
         
-        const [users, promoters, products, orders, commissionConfigs] = await Promise.all([
+        const [users, promoters, products, orders, commissionConfigs, backupLogs] = await Promise.all([
             readJson(USERS_PATH, INITIAL_DB.users),
             readJson(PROMOTERS_PATH, INITIAL_DB.promoters),
             readJson(PRODUCTS_PATH, INITIAL_DB.products),
             readJson(ORDERS_PATH, INITIAL_DB.orders),
             readJson(CONFIGS_PATH, INITIAL_DB.commissionConfigs),
+            readJson(BACKUP_LOGS_PATH, INITIAL_DB.backupLogs),
         ]);
         
-        return { users, promoters, products, orders, commissionConfigs };
+        return { users, promoters, products, orders, commissionConfigs, backupLogs };
     } catch {
         // If split files don't exist, check for legacy db.json
         try {
@@ -267,6 +272,7 @@ export async function getDb(): Promise<DB> {
             // Auto-migrate: save to split files
             // Ensure promoters exist if legacy db didn't have them
             if (!legacyDb.promoters) legacyDb.promoters = INITIAL_DB.promoters;
+            if (!legacyDb.backupLogs) legacyDb.backupLogs = INITIAL_DB.backupLogs;
             
             await saveDb(legacyDb);
             
@@ -280,7 +286,7 @@ export async function getDb(): Promise<DB> {
     }
 }
 
-export async function saveDb(db: DB): Promise<void> {
+async function saveDb(db: DB): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
   
   await Promise.all([
@@ -289,5 +295,47 @@ export async function saveDb(db: DB): Promise<void> {
       fs.writeFile(PRODUCTS_PATH, JSON.stringify(db.products, null, 2), 'utf-8'),
       fs.writeFile(ORDERS_PATH, JSON.stringify(db.orders, null, 2), 'utf-8'),
       fs.writeFile(CONFIGS_PATH, JSON.stringify(db.commissionConfigs, null, 2), 'utf-8'),
+      fs.writeFile(BACKUP_LOGS_PATH, JSON.stringify(db.backupLogs || [], null, 2), 'utf-8'),
   ]);
+}
+
+// Ensure lock file exists
+async function ensureLockFile() {
+    try {
+        await fs.access(LOCK_FILE);
+    } catch {
+        await fs.writeFile(LOCK_FILE, '', 'utf-8');
+    }
+}
+
+/**
+ * Execute a write operation with a file lock to prevent race conditions.
+ * Usage:
+ * await updateDb(async (db) => {
+ *   db.orders.push(newOrder);
+ *   return { success: true };
+ * });
+ */
+export async function updateDb<T>(callback: (db: DB) => Promise<T> | T): Promise<T> {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await ensureLockFile();
+    
+    // Wait up to 10 seconds to acquire lock, checking every 100ms
+    const release = await lockfile.lock(LOCK_FILE, { 
+        retries: {
+            retries: 50,
+            factor: 1,
+            minTimeout: 100,
+            maxTimeout: 1000,
+        }
+    });
+    
+    try {
+        const db = await getDb();
+        const result = await callback(db);
+        await saveDb(db);
+        return result;
+    } finally {
+        await release();
+    }
 }

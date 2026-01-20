@@ -4,7 +4,7 @@
     "orderNo": "ORD-1768810989040",
     "source": "RETAIL",
     "status": "CLOSED",
-    "customerXianyuId": "卡看看",
+    "customerXianyuId": "卡测试123123",
     "contractSigner": "讲几句",
     "productName": "大疆pocket3",
     "variantName": "标准版",
@@ -118,7 +118,7 @@
     "deliveryTime": "2026-01-17",
     "returnDeadline": "2026-01-22",
     "rentStartDate": "2026-01-19",
-    "address": "按时",
+    "address": "null",
     "remark": "",
     "creatorId": "1",
     "creatorName": "管理员",
@@ -137,7 +137,11 @@
         "timestamp": "2026-01-20T09:18:50.542Z",
         "details": "已关闭 -> 待发货"
       }
-    ]
+    ],
+    "platform": "XIAOHONGSHU",
+    "sn": "",
+    "recipientName": "按时",
+    "recipientPhone": ""
   },
   {
     "id": "xgk4870",
@@ -217,13 +221,13 @@
     ],
     "sn": "12345678",
     "recipientName": "",
-    "recipientPhone": "",
+    "recipientPhone": "123456",
     "platform": "XIANYU"
   },
   {
     "id": "puv9t6z",
     "orderNo": "1004",
-    "source": "RETAIL",
+    "source": "PART_TIME_AGENT",
     "platform": "DOUYIN",
     "status": "PENDING_REVIEW",
     "customerXianyuId": "222",
@@ -232,10 +236,10 @@
     "productName": "三星S23U",
     "variantName": "标准版",
     "duration": 2,
-    "rentPrice": 123,
+    "rentPrice": 89,
     "deposit": 0,
     "insurancePrice": 30,
-    "totalAmount": 153,
+    "totalAmount": 119,
     "deliveryTime": "2026-01-18",
     "returnDeadline": "2026-01-22",
     "rentStartDate": "2026-01-20",
