@@ -32,10 +32,7 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={isPending}>
               {isPending ? "登录中..." : "登录"}
             </Button>
-            <div className="text-center text-sm text-gray-500 mt-4">
-                <p>默认账号: admin / 123</p>
-                <p>默认账号: shipping / 123</p>
-            </div>
+
           </form>
         </CardContent>
       </Card>
