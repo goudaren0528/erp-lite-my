@@ -32,7 +32,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, deleteOrder, shipOrder, returnOrder, approveOrder, rejectOrder, addOverdueFee } from "@/app/actions"
 import { format, addDays } from "date-fns"
-import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw } from "lucide-react"
+import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp } from "lucide-react"
 import { closeOrder } from "@/app/actions"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { OrderForm } from "./order-form"
@@ -96,6 +96,10 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   const [filterPromoter, setFilterPromoter] = useState('')
   const [filterProduct, setFilterProduct] = useState('')
   const [filterCreator, setFilterCreator] = useState('')
+  const [filterDuration, setFilterDuration] = useState('')
+  const [filterRecipientName, setFilterRecipientName] = useState('')
+  const [filterRecipientPhone, setFilterRecipientPhone] = useState('')
+  const [isFilterExpanded, setIsFilterExpanded] = useState(false)
   
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
   const [filterSource, setFilterSource] = useState<string>('ALL')
@@ -126,6 +130,14 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
     const matchCreator = !filterCreator || 
         (users.find(u => u.id === order.creatorId)?.name || '').toLowerCase().includes(filterCreator.toLowerCase())
 
+    const matchDuration = !filterDuration || order.duration?.toString() === filterDuration
+
+    const matchRecipientName = !filterRecipientName || 
+        (order.recipientName || '').toLowerCase().includes(filterRecipientName.toLowerCase())
+
+    const matchRecipientPhone = !filterRecipientPhone || 
+        (order.recipientPhone || '').includes(filterRecipientPhone)
+
     const matchStatus = filterStatus === 'ALL' || order.status === filterStatus
     const matchSource = filterSource === 'ALL' || order.source === filterSource
     const matchPlatform = filterPlatform === 'ALL' || order.platform === filterPlatform
@@ -140,7 +152,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
         matchDate = matchDate && new Date(order.createdAt) < nextDay
     }
 
-    return matchOrderNo && matchCustomer && matchPromoter && matchProduct && matchSource && matchPlatform && matchCreator && matchDate
+    return matchOrderNo && matchCustomer && matchPromoter && matchProduct && matchCreator && matchDuration && matchRecipientName && matchRecipientPhone && matchSource && matchPlatform && matchDate
   })
 
   const filteredOrders = baseFilteredOrders.filter(order => {
@@ -185,6 +197,9 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
     setFilterPromoter('')
     setFilterProduct('')
     setFilterCreator('')
+    setFilterDuration('')
+    setFilterRecipientName('')
+    setFilterRecipientPhone('')
     setFilterStatus('ALL')
     setFilterSource('ALL')
     setFilterPlatform('ALL')
@@ -232,8 +247,9 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
       </Tabs>
 
       <div className="flex flex-col gap-4 bg-white p-4 rounded-md border mb-4">
-          <div className="flex flex-col xl:flex-row gap-4 justify-between">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 flex-1">
+          <div className="flex flex-col gap-4">
+              {/* Row 1: Primary Filters */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                   <div className="flex items-center space-x-2">
                       <Search className="w-4 h-4 text-gray-500" />
                       <Input 
@@ -250,80 +266,120 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
                       className="h-8 text-xs"
                   />
                   <Input 
-                      placeholder="推广员/电话" 
-                      value={filterPromoter}
-                      onChange={e => setFilterPromoter(e.target.value)}
+                      placeholder="收货人姓名" 
+                      value={filterRecipientName}
+                      onChange={e => setFilterRecipientName(e.target.value)}
                       className="h-8 text-xs"
                   />
                   <Input 
+                      placeholder="收货人手机" 
+                      value={filterRecipientPhone}
+                      onChange={e => setFilterRecipientPhone(e.target.value)}
+                      className="h-8 text-xs"
+                  />
+                   <Input 
                       placeholder="商品名称" 
                       value={filterProduct}
                       onChange={e => setFilterProduct(e.target.value)}
                       className="h-8 text-xs"
                   />
-                  <Input 
-                      placeholder="创建人" 
-                      value={filterCreator}
-                      onChange={e => setFilterCreator(e.target.value)}
-                      className="h-8 text-xs"
-                  />
               </div>
-              
-              {/* Date Range Filter */}
-              <div className="flex items-center space-x-2">
-                  <Label className="whitespace-nowrap text-sm text-gray-500">创建时间:</Label>
-                  <Input 
-                      type="date" 
-                      value={startDate} 
-                      onChange={e => setStartDate(e.target.value)} 
-                      className="w-36"
-                  />
-                  <span className="text-gray-400">-</span>
-                  <Input 
-                      type="date" 
-                      value={endDate} 
-                      onChange={e => setEndDate(e.target.value)} 
-                      className="w-36"
-                  />
-                  {(startDate || endDate) && (
-                      <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate('') }}>
-                          重置
-                      </Button>
-                  )}
-              </div>
+
+              {/* Collapsible Filters */}
+              {isFilterExpanded && (
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-2 border-t border-dashed">
+                      <Input 
+                          placeholder="推广员/电话" 
+                          value={filterPromoter}
+                          onChange={e => setFilterPromoter(e.target.value)}
+                          className="h-8 text-xs"
+                      />
+                      <Input 
+                          placeholder="创建人" 
+                          value={filterCreator}
+                          onChange={e => setFilterCreator(e.target.value)}
+                          className="h-8 text-xs"
+                      />
+                      <Input 
+                          type="number"
+                          placeholder="租期 (天)" 
+                          value={filterDuration}
+                          onChange={e => setFilterDuration(e.target.value)}
+                          className="h-8 text-xs"
+                      />
+                      
+                      {/* Date Range Filter */}
+                      <div className="flex items-center space-x-2 col-span-2">
+                          <Label className="whitespace-nowrap text-sm text-gray-500">创建时间:</Label>
+                          <Input 
+                              type="date" 
+                              value={startDate} 
+                              onChange={e => setStartDate(e.target.value)} 
+                              className="h-8 w-32 text-xs"
+                          />
+                          <span className="text-gray-400">-</span>
+                          <Input 
+                              type="date" 
+                              value={endDate} 
+                              onChange={e => setEndDate(e.target.value)} 
+                              className="h-8 w-32 text-xs"
+                          />
+                          {(startDate || endDate) && (
+                              <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate('') }} className="h-8">
+                                  重置
+                              </Button>
+                          )}
+                      </div>
+                  </div>
+              )}
           </div>
-
-          <div className="flex flex-wrap gap-2 items-center">
-              <Button variant="outline" size="sm" onClick={resetFilters} className="h-9 px-3 text-gray-600">
-                  <RotateCcw className="mr-2 h-4 w-4" /> 重置筛选
+          
+          <div className="flex flex-wrap gap-2 items-center justify-between border-t pt-4">
+               <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setIsFilterExpanded(!isFilterExpanded)} 
+                  className="h-9 px-3 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+              >
+                  {isFilterExpanded ? (
+                      <><ChevronUp className="mr-2 h-4 w-4" /> 收起筛选</>
+                  ) : (
+                      <><ChevronDown className="mr-2 h-4 w-4" /> 更多筛选</>
+                  )}
               </Button>
-              <Button variant="outline" size="sm" onClick={refreshList} className="h-9 px-3 text-gray-600">
-                  <RefreshCw className="mr-2 h-4 w-4" /> 刷新列表
-              </Button>
-              
-              <Select value={filterPlatform} onValueChange={setFilterPlatform}>
-                  <SelectTrigger className="w-[120px]">
-                      <SelectValue placeholder="推广方式" />
-                  </SelectTrigger>
-                  <SelectContent>
-                      <SelectItem value="ALL">所有方式</SelectItem>
-                      {Object.entries(platformMap).map(([k, v]) => (
-                          <SelectItem key={k} value={k}>{v}</SelectItem>
-                      ))}
-                  </SelectContent>
-              </Select>
 
-              <Select value={filterSource} onValueChange={setFilterSource}>
-                  <SelectTrigger className="w-[120px]">
-                      <SelectValue placeholder="渠道筛选" />
-                  </SelectTrigger>
-                  <SelectContent>
-                      <SelectItem value="ALL">所有渠道</SelectItem>
-                      {Object.entries(sourceMap).map(([k, v]) => (
-                          <SelectItem key={k} value={k}>{v}</SelectItem>
-                      ))}
-                  </SelectContent>
-              </Select>
+              <div className="flex gap-2 items-center">
+                  <Select value={filterPlatform} onValueChange={setFilterPlatform}>
+                      <SelectTrigger className="w-[120px] h-8 text-xs">
+                          <SelectValue placeholder="推广方式" />
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="ALL">所有方式</SelectItem>
+                          {Object.entries(platformMap).map(([k, v]) => (
+                              <SelectItem key={k} value={k}>{v}</SelectItem>
+                          ))}
+                      </SelectContent>
+                  </Select>
+
+                  <Select value={filterSource} onValueChange={setFilterSource}>
+                      <SelectTrigger className="w-[120px] h-8 text-xs">
+                          <SelectValue placeholder="渠道筛选" />
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="ALL">所有渠道</SelectItem>
+                          {Object.entries(sourceMap).map(([k, v]) => (
+                              <SelectItem key={k} value={k}>{v}</SelectItem>
+                          ))}
+                      </SelectContent>
+                  </Select>
+
+                  <Button variant="outline" size="sm" onClick={resetFilters} className="h-8 px-3 text-gray-600 text-xs">
+                      <RotateCcw className="mr-2 h-3 w-3" /> 重置
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={refreshList} className="h-8 px-3 text-gray-600 text-xs">
+                      <RefreshCw className="mr-2 h-3 w-3" /> 刷新
+                  </Button>
+              </div>
           </div>
       </div>
 
