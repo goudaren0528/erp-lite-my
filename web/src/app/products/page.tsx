@@ -1,10 +1,16 @@
 import { prisma } from "@/lib/db"
 import { ProductList } from "@/components/settings/product-list"
 
+type ProductRaw = {
+  id: string;
+  name: string;
+  variants: string;
+};
+
 export default async function ProductsPage() {
     const products = await prisma.product.findMany()
     
-    const parsedProducts = products.map(p => ({
+    const parsedProducts = products.map((p: ProductRaw) => ({
         ...p,
         variants: JSON.parse(p.variants)
     }))
