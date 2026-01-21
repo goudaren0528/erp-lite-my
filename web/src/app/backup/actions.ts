@@ -1,8 +1,11 @@
 'use server'
 
 import { prisma } from "@/lib/db";
+import type { PrismaClient } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+
+type TransactionClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
 
 export async function getBackupLogs() {
     const logs = await prisma.backupLog.findMany({
@@ -29,7 +32,7 @@ export async function importData(formData: FormData) {
         const currentUser = await getCurrentUser();
         const importedTypes: string[] = [];
 
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: TransactionClient) => {
             // 1. Users
             if (data.users && Array.isArray(data.users)) {
                 let count = 0;
