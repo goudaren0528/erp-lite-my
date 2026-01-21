@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
+type OrderWithMiniProgram = {
+  miniProgramOrderNo: string | null;
+};
+
 // Force dynamic to ensure we always get the latest data
 export const dynamic = 'force-dynamic';
 
@@ -19,8 +23,8 @@ export async function GET() {
     
     // Filter orders that have a miniProgramOrderNo
     const ordersToSync = orders
-      .filter(order => order.miniProgramOrderNo && order.miniProgramOrderNo.trim() !== '')
-      .map(order => order.miniProgramOrderNo as string);
+      .filter((order: OrderWithMiniProgram) => order.miniProgramOrderNo && order.miniProgramOrderNo.trim() !== '')
+      .map((order: OrderWithMiniProgram) => order.miniProgramOrderNo as string);
 
     return NextResponse.json({
       code: 200,
