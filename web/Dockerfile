@@ -36,6 +36,10 @@ COPY --from=builder /app/public ./public
 # Ensure uploads directory exists
 RUN mkdir -p ./public/uploads
 
+# Copy data folder for initialization (if it exists in repo)
+# Important: Users should mount a volume to /app/data for persistence
+# COPY --from=builder --chown=nextjs:nodejs /app/data ./data
+
 # Copy built application
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
