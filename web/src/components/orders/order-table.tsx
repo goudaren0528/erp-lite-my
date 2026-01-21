@@ -400,7 +400,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
                       <SelectContent>
                           <SelectItem value="ALL">推广渠道</SelectItem>
                           {Object.entries(sourceMap)
-                              .filter(([k]) => k !== 'AGENT' && k !== 'PART_TIME' && k !== 'RETAIL')
+                              .filter(([k]) => k !== 'AGENT' && k !== 'PART_TIME')
                               .map(([k, v]) => (
                               <SelectItem key={k} value={k}>{v}</SelectItem>
                           ))}

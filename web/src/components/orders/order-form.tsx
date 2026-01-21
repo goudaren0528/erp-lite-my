@@ -374,6 +374,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             <SelectContent>
               <SelectItem value="PEER">同行</SelectItem>
               <SelectItem value="PART_TIME_AGENT">兼职代理</SelectItem>
+              <SelectItem value="RETAIL">零售</SelectItem>
             </SelectContent>
           </Select>
         </div>
