@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { format } from "date-fns";
+import { Prisma } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest) {
 
     if (shouldExport('users')) {
         const users = await prisma.user.findMany();
-        exportData.users = users.map(u => ({
+        exportData.users = users.map((u: Prisma.UserGetPayload<Prisma.UserDefaultArgs>) => ({
             ...u,
             permissions: JSON.parse(u.permissions)
         }));
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
 
     if (shouldExport('products')) {
         const products = await prisma.product.findMany();
-        exportData.products = products.map(p => ({
+        exportData.products = products.map((p: Prisma.ProductGetPayload<Prisma.ProductDefaultArgs>) => ({
             ...p,
             variants: JSON.parse(p.variants)
         }));
