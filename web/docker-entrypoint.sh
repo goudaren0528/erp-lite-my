@@ -10,8 +10,11 @@ if [ "$SEED_DB" = "true" ]; then
   echo "Seeding database..."
   if [ -f "scripts/import-data.ts" ]; then
       npx tsx scripts/import-data.ts
+  elif [ -f "scripts/seed-basic.ts" ]; then
+      echo "Running basic seed..."
+      npx tsx scripts/seed-basic.ts
   else
-      echo "Warning: scripts/import-data.ts not found. Skipping seed."
+      echo "Warning: No seed script found. Skipping seed."
   fi
 fi
 
