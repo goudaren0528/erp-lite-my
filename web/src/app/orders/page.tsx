@@ -20,6 +20,15 @@ type ProductRaw = {
   variants: string;
 };
 
+type UserRaw = {
+  id: string;
+  name: string;
+  username: string;
+  role: string;
+  password: string | null;
+  permissions: string;
+};
+
 export default async function OrdersPage() {
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -57,7 +66,7 @@ export default async function OrdersPage() {
   }));
   
   const usersRaw = await prisma.user.findMany();
-  const users = usersRaw.map(u => ({
+  const users = usersRaw.map((u: UserRaw) => ({
     ...u,
     role: u.role as Role,
     password: u.password ?? undefined,
