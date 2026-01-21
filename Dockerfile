@@ -50,7 +50,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 # Copy data folder for initialization (if it exists in repo)
 # Important: Users should mount a volume to /app/data for persistence
-COPY --from=builder --chown=nextjs:nodejs /app/data ./data
+# COPY --from=builder --chown=nextjs:nodejs /app/data ./data
 
 USER nextjs
 
