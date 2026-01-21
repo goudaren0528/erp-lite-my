@@ -14,6 +14,12 @@ type PromoterRaw = {
   updatedAt: Date;
 };
 
+type ProductRaw = {
+  id: string;
+  name: string;
+  variants: string;
+};
+
 export default async function OrdersPage() {
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -45,7 +51,7 @@ export default async function OrdersPage() {
   }));
 
   const productsRaw = await prisma.product.findMany();
-  const products = productsRaw.map(p => ({
+  const products = productsRaw.map((p: ProductRaw) => ({
     ...p,
     variants: JSON.parse(p.variants)
   }));
