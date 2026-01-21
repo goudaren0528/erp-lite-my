@@ -45,11 +45,11 @@ export default async function Home() {
   const recentOrders = ordersToDisplay.filter(o => isAfter(o.createdAt, sevenDaysAgo))
   
   const recentCount = recentOrders.length
-  const recentAmount = recentOrders.reduce((sum: number, o) => sum + calculateOrderRevenue(o), 0)
+  const recentAmount = recentOrders.reduce((sum: number, o: any) => sum + calculateOrderRevenue(o), 0)
   
   // Calculate Cumulative Stats
   const totalCount = ordersToDisplay.length
-  const totalAmount = ordersToDisplay.reduce((sum: number, o) => sum + calculateOrderRevenue(o), 0)
+  const totalAmount = ordersToDisplay.reduce((sum: number, o: any) => sum + calculateOrderRevenue(o), 0)
   
   // Calculate Status Counts
   const statusCounts = ordersToDisplay.reduce((acc, o) => {

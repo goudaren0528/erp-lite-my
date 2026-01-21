@@ -25,7 +25,7 @@ export async function createOrder(formData: FormData) {
       // For now, let's use a simpler approach or fetch recent ones?
       // fetching all orders ids/orderNos is better than full objects.
       const allOrders = await prisma.order.findMany({ select: { orderNo: true } });
-      const maxOrderNo = allOrders.reduce((max: number, o) => {
+      const maxOrderNo = allOrders.reduce((max: number, o: { orderNo: string }) => {
           const num = parseInt(o.orderNo)
           return !isNaN(num) && num > max ? num : max
       }, 1000)

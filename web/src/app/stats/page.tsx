@@ -100,7 +100,7 @@ export default async function StatsPage() {
             <CardTitle className="text-sm font-medium">总营收 (不含押金)</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">¥ {ordersToAnalyze.reduce((acc: number, o) => acc + calculateOrderRevenue(o), 0).toLocaleString()}</div>
+            <div className="text-2xl font-bold">¥ {ordersToAnalyze.reduce((acc: number, o: any) => acc + calculateOrderRevenue(o), 0).toLocaleString()}</div>
           </CardContent>
         </Card>
       </div>
