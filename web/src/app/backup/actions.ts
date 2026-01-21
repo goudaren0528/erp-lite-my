@@ -9,7 +9,7 @@ export async function getBackupLogs() {
         orderBy: { timestamp: 'desc' },
         take: 50
     });
-    return logs.map(log => ({
+    return logs.map((log: { id: string; operator: string; details: string; type: string; status: string; timestamp: Date }) => ({
         ...log,
         type: log.type as 'EXPORT' | 'IMPORT',
         status: log.status as 'SUCCESS' | 'FAILED',

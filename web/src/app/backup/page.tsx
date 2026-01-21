@@ -81,6 +81,7 @@ export default function BackupPage() {
                 toast.error(result.message)
             }
         } catch (error) {
+            console.error(error)
             toast.error("导入发生错误")
         } finally {
             setIsImporting(false)

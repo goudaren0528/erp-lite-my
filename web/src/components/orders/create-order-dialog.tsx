@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Product, User, Promoter } from "@/types"
+import { Product, Promoter } from "@/types"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,

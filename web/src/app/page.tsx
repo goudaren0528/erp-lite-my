@@ -4,10 +4,9 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { prisma } from "@/lib/db"
 import { getCurrentUser } from "@/lib/auth"
-import { OrderStatus } from "@/types"
 import { calculateOrderRevenue } from "@/lib/utils"
-import { subDays, isAfter, parseISO } from "date-fns"
-import { CreditCard, FileText, Activity, ArrowRight, Plus } from "lucide-react"
+import { subDays, isAfter } from "date-fns"
+import { CreditCard, FileText, Activity, ArrowRight } from "lucide-react"
 
 const statusMap: Record<string, { label: string; color: string; order: number }> = {
   PENDING_REVIEW: { label: '待审核', color: 'text-orange-600 bg-orange-50 border-orange-200', order: 2 },
@@ -45,11 +44,11 @@ export default async function Home() {
   const recentOrders = ordersToDisplay.filter(o => isAfter(o.createdAt, sevenDaysAgo))
   
   const recentCount = recentOrders.length
-  const recentAmount = recentOrders.reduce((sum: number, o: any) => sum + calculateOrderRevenue(o), 0)
+  const recentAmount = recentOrders.reduce((sum, o) => sum + calculateOrderRevenue(o), 0)
   
   // Calculate Cumulative Stats
   const totalCount = ordersToDisplay.length
-  const totalAmount = ordersToDisplay.reduce((sum: number, o: any) => sum + calculateOrderRevenue(o), 0)
+  const totalAmount = ordersToDisplay.reduce((sum, o) => sum + calculateOrderRevenue(o), 0)
   
   // Calculate Status Counts
   const statusCounts = ordersToDisplay.reduce((acc, o) => {

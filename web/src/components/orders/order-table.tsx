@@ -201,7 +201,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   const today = new Date().toISOString().split('T')[0]
   const todayOrders = orders.filter(o => o.createdAt.startsWith(today))
   const todayCount = todayOrders.length
-  const todayAmount = todayOrders.reduce((sum: number, o: any) => sum + o.totalAmount, 0)
+  const todayAmount = todayOrders.reduce((sum, o) => sum + o.totalAmount, 0)
 
   const toggleSort = () => {
       if (sortBy === 'status') {
@@ -992,8 +992,8 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
     }
   }
 
-  const totalAmountWithExtensions = order.totalAmount + (order.extensions || []).reduce((acc: number, curr: any) => acc + curr.price, 0)
-  const totalExtensionDays = (order.extensions || []).reduce((acc: number, curr: any) => acc + curr.days, 0)
+  const totalAmountWithExtensions = order.totalAmount + (order.extensions || []).reduce((acc, curr) => acc + curr.price, 0)
+  const totalExtensionDays = (order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -1156,7 +1156,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         {(order.extensions || []).length > 0 && (
             <div className="mt-1">
                 <Badge variant="secondary" className="text-xs">
-                    + 续租 {(order.extensions || []).reduce((acc: number, curr: any) => acc + curr.days, 0)} 天
+                    + 续租 {(order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)} 天
                 </Badge>
             </div>
         )}
@@ -1181,7 +1181,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         </div>
         {(order.extensions || []).length > 0 && (
              <div className="text-xs text-red-400 mt-1">
-                (+ 续租 ¥{(order.extensions || []).reduce((acc: number, curr: any) => acc + curr.price, 0)})
+                (+ 续租 ¥{(order.extensions || []).reduce((acc, curr) => acc + curr.price, 0)})
              </div>
         )}
         {order.overdueFee && order.overdueFee > 0 ? (

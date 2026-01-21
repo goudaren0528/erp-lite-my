@@ -11,7 +11,7 @@ export function calculateOrderRevenue(order: {
   overdueFee?: number | null;
   extensions?: { price: number }[];
 }): number {
-  const extensionsTotal = order.extensions?.reduce((acc: number, ext: any) => acc + (ext.price || 0), 0) || 0;
+  const extensionsTotal = order.extensions?.reduce((acc, ext) => acc + (ext.price || 0), 0) || 0;
   return (order.rentPrice || 0) 
        + (order.insurancePrice || 0) 
        + extensionsTotal 

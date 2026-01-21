@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, PlusCircle, List, Settings, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database } from "lucide-react"
+import { LayoutDashboard, List, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database } from "lucide-react"
 import { User } from "@/types"
 import { logout } from "@/lib/auth"
 

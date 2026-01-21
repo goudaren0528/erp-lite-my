@@ -21,7 +21,7 @@ async function readJson(filePath: string) {
     try {
         const data = await fs.readFile(filePath, 'utf-8');
         return JSON.parse(data);
-    } catch (e) {
+    } catch {
         console.warn(`Could not read ${filePath}, skipping...`);
         return [];
     }
