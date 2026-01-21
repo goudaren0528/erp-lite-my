@@ -1,0 +1,188 @@
+[
+  {
+    "id": "1",
+    "username": "admin",
+    "password": "admin123.",
+    "name": "管理员",
+    "role": "ADMIN",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats",
+      "products",
+      "commissions",
+      "users",
+      "backup",
+      "view_all_promoters",
+      "view_all_orders"
+    ],
+    "createdAt": "2026-01-20T14:36:02.292Z",
+    "updatedAt": "2026-01-21T11:52:12.897Z"
+  },
+  {
+    "id": "3vkp5u9",
+    "username": "唐永聪",
+    "password": "a123456",
+    "name": "唐永聪",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "users",
+      "stats",
+      "view_all_orders",
+      "view_all_promoters",
+      "products"
+    ],
+    "createdAt": "2026-01-20T14:36:02.303Z",
+    "updatedAt": "2026-01-21T11:52:12.902Z"
+  },
+  {
+    "id": "b7z1b0s",
+    "username": "吴慧云",
+    "password": "123456",
+    "name": "吴慧云",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats"
+    ],
+    "createdAt": "2026-01-20T14:36:02.314Z",
+    "updatedAt": "2026-01-21T11:52:12.903Z"
+  },
+  {
+    "id": "3zzjihr",
+    "username": "潘佳静",
+    "password": "123456",
+    "name": "潘佳静",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats",
+      "users",
+      "products",
+      "view_all_orders",
+      "view_all_promoters"
+    ],
+    "createdAt": "2026-01-20T14:36:02.317Z",
+    "updatedAt": "2026-01-21T11:52:12.905Z"
+  },
+  {
+    "id": "uzxhez6",
+    "username": "汪之蒙",
+    "password": "123456",
+    "name": "汪之蒙",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "stats",
+      "promoters",
+      "users",
+      "view_all_orders",
+      "view_all_promoters",
+      "products"
+    ],
+    "createdAt": "2026-01-20T14:36:02.322Z",
+    "updatedAt": "2026-01-21T11:52:12.907Z"
+  },
+  {
+    "id": "hq2h71f",
+    "username": "邱晓琳",
+    "password": "123456",
+    "name": "邱晓琳",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats"
+    ],
+    "createdAt": "2026-01-20T14:36:02.326Z",
+    "updatedAt": "2026-01-21T11:52:12.908Z"
+  },
+  {
+    "id": "pf6dkh8",
+    "username": "杨美雪",
+    "password": "123456",
+    "name": "杨美雪",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats"
+    ],
+    "createdAt": "2026-01-20T14:36:02.329Z",
+    "updatedAt": "2026-01-21T11:52:12.909Z"
+  },
+  {
+    "id": "sk2u11g",
+    "username": "陈植义",
+    "password": "123456",
+    "name": "陈植义",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats"
+    ],
+    "createdAt": "2026-01-21T09:01:11.287Z",
+    "updatedAt": "2026-01-21T11:52:12.910Z"
+  },
+  {
+    "id": "a9y0gr4",
+    "username": "刘小欣",
+    "password": "123456",
+    "name": "刘小欣",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "stats",
+      "promoters"
+    ],
+    "createdAt": "2026-01-21T09:01:11.288Z",
+    "updatedAt": "2026-01-21T11:52:12.912Z"
+  },
+  {
+    "id": "hccn9r6",
+    "username": "许玥",
+    "password": "123456",
+    "name": "许玥",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats"
+    ],
+    "createdAt": "2026-01-21T09:01:11.288Z",
+    "updatedAt": "2026-01-21T11:52:12.913Z"
+  },
+  {
+    "id": "v92ixjj",
+    "username": "黄雄慧",
+    "password": "123456",
+    "name": "黄雄慧",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats"
+    ],
+    "createdAt": "2026-01-21T09:01:11.289Z",
+    "updatedAt": "2026-01-21T11:52:12.916Z"
+  },
+  {
+    "id": "7ivrvbj",
+    "username": "肖姗",
+    "password": "123456",
+    "name": "肖姗",
+    "role": "SHIPPING",
+    "permissions": [
+      "orders",
+      "promoters",
+      "stats"
+    ],
+    "createdAt": "2026-01-21T09:01:11.290Z",
+    "updatedAt": "2026-01-21T11:52:12.920Z"
+  }
+]

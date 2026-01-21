@@ -1,0 +1,122 @@
+[
+  {
+    "id": "dl7p63n",
+    "type": "IMPORT",
+    "status": "SUCCESS",
+    "operator": "超级管理员",
+    "details": "Imported: Users(+6/~1), Products(+1/~16), Promoters(+1/~0), Orders(+1/~0), CommissionConfigs(Replaced)",
+    "timestamp": "2026-01-20T11:59:00.426Z"
+  },
+  {
+    "id": "nvkyueg",
+    "type": "IMPORT",
+    "status": "SUCCESS",
+    "operator": "超级管理员",
+    "details": "Imported: Orders(+0/~5)",
+    "timestamp": "2026-01-20T11:58:22.452Z"
+  },
+  {
+    "id": "4rt1vo6",
+    "type": "EXPORT",
+    "status": "SUCCESS",
+    "operator": "超级管理员",
+    "details": "Exported: orders",
+    "timestamp": "2026-01-20T10:41:42.898Z"
+  },
+  {
+    "id": "cforivo",
+    "type": "IMPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Imported: Users(+0/~1), Products(+0/~16), Promoters(+0/~3), Orders(+0/~5), CommissionConfigs(Replaced)",
+    "timestamp": "2026-01-20T09:52:45.310Z"
+  },
+  {
+    "id": "00j2bdk",
+    "type": "EXPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Exported: orders, products, promoters, users, commissionConfigs",
+    "timestamp": "2026-01-20T09:51:55.850Z"
+  },
+  {
+    "id": "z4id0oe",
+    "type": "EXPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Exported: orders, products, promoters, users, commissionConfigs",
+    "timestamp": "2026-01-20T09:49:21.943Z"
+  },
+  {
+    "id": "ar0ogj5",
+    "type": "IMPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Imported: Orders(+0/~5)",
+    "timestamp": "2026-01-20T09:47:51.075Z"
+  },
+  {
+    "id": "jmazgm3",
+    "type": "EXPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Exported: orders",
+    "timestamp": "2026-01-20T09:47:28.570Z"
+  },
+  {
+    "id": "fxd7lp5",
+    "type": "EXPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Exported: orders, products, promoters, users, commissionConfigs",
+    "timestamp": "2026-01-20T09:46:55.463Z"
+  },
+  {
+    "id": "6d31373b-094c-4183-b0fa-1d25f987840e",
+    "type": "EXPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Exported: orders, products, promoters, users, commissionConfigs",
+    "timestamp": "2026-01-21T03:04:26.487Z"
+  },
+  {
+    "id": "2fe4d959-daab-4186-a39e-deb9088937b5",
+    "type": "EXPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Exported: orders, products, promoters, users, commissionConfigs",
+    "timestamp": "2026-01-21T03:18:12.673Z"
+  },
+  {
+    "id": "eef7d504-8d54-41ef-87fa-488445e49c5c",
+    "type": "IMPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Imported: Promoters(5), Products(17), Orders(31)",
+    "timestamp": "2026-01-21T07:07:16.192Z"
+  },
+  {
+    "id": "976e4ce5-30fa-4c85-a9ce-fc23f3899cf8",
+    "type": "IMPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Imported: Users(12), Promoters(6), Products(17), CommissionConfigs(2), Orders(133)",
+    "timestamp": "2026-01-21T09:01:11.649Z"
+  },
+  {
+    "id": "d6409e6d-dbc9-4a24-a95c-e2fd483652c5",
+    "type": "IMPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Imported: Users(12), Promoters(6), Products(17), CommissionConfigs(2), Orders(133)",
+    "timestamp": "2026-01-21T11:00:23.114Z"
+  },
+  {
+    "id": "93404d2c-40b7-4516-b465-c65a480c6b48",
+    "type": "IMPORT",
+    "status": "SUCCESS",
+    "operator": "管理员",
+    "details": "Imported: Users(12), Promoters(6), Products(17), CommissionConfigs(2), Orders(133)",
+    "timestamp": "2026-01-21T11:52:13.327Z"
+  }
+]

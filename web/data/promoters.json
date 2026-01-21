@@ -1,0 +1,65 @@
+[
+  {
+    "id": "4d5nw8p",
+    "name": "陈燕平",
+    "phone": "178",
+    "channel": "PART_TIME_AGENT",
+    "creatorId": "b7z1b0s",
+    "createdAt": "2026-01-20T11:19:36.122Z",
+    "updatedAt": "2026-01-20T14:40:03.093Z"
+  },
+  {
+    "id": "8olxk52",
+    "name": "皮蛋",
+    "phone": "",
+    "channel": "PEER",
+    "creatorId": "sk2u11g",
+    "createdAt": "2026-01-20T13:33:49.353Z",
+    "updatedAt": "2026-01-21T11:52:12.922Z"
+  },
+  {
+    "id": "40dd7q3",
+    "name": "大山",
+    "phone": "",
+    "channel": "PEER",
+    "creatorId": "sk2u11g",
+    "createdAt": "2026-01-20T13:33:59.475Z",
+    "updatedAt": "2026-01-21T11:52:12.924Z"
+  },
+  {
+    "id": "w9yt17l",
+    "name": "无忧",
+    "phone": "",
+    "channel": "PEER",
+    "creatorId": "sk2u11g",
+    "createdAt": "2026-01-20T13:34:06.938Z",
+    "updatedAt": "2026-01-21T11:52:12.925Z"
+  },
+  {
+    "id": "uqgs6ic",
+    "name": "顾宪晟",
+    "phone": "",
+    "channel": "PEER",
+    "creatorId": "sk2u11g",
+    "createdAt": "2026-01-20T13:34:15.245Z",
+    "updatedAt": "2026-01-21T11:52:12.926Z"
+  },
+  {
+    "id": "m4ucv07",
+    "name": "施映娜",
+    "phone": "",
+    "channel": "PART_TIME_AGENT",
+    "creatorId": "3zzjihr",
+    "createdAt": "2026-01-20T14:35:35.578Z",
+    "updatedAt": "2026-01-21T11:52:12.927Z"
+  },
+  {
+    "id": "dkcpaiy",
+    "name": "陈燕美",
+    "phone": "13035768191",
+    "channel": "PART_TIME_AGENT",
+    "creatorId": "b7z1b0s",
+    "createdAt": "2026-01-21T07:58:19.287Z",
+    "updatedAt": "2026-01-21T11:52:12.928Z"
+  }
+]
