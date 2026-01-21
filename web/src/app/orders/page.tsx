@@ -29,6 +29,61 @@ type UserRaw = {
   permissions: string;
 };
 
+type OrderExtensionRaw = {
+  id: string;
+  days: number;
+  price: number;
+  createdAt: Date;
+};
+
+type OrderLogRaw = {
+  action: string;
+  operator: string;
+  desc?: string | null;
+  createdAt: Date;
+};
+
+type OrderRaw = {
+  id: string;
+  orderNo: string;
+  source: string;
+  platform?: string | null;
+  status: string;
+  customerXianyuId: string;
+  sourceContact: string;
+  miniProgramOrderNo?: string | null;
+  xianyuOrderNo?: string | null;
+  productName: string;
+  variantName: string;
+  sn?: string | null;
+  duration: number;
+  rentPrice: number;
+  deposit: number;
+  insurancePrice: number;
+  overdueFee?: number | null;
+  totalAmount: number;
+  address: string;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
+  trackingNumber?: string | null;
+  logisticsCompany?: string | null;
+  latestLogisticsInfo?: string | null;
+  returnTrackingNumber?: string | null;
+  returnLogisticsCompany?: string | null;
+  returnLatestLogisticsInfo?: string | null;
+  rentStartDate?: Date | null;
+  deliveryTime?: Date | null;
+  returnDeadline?: Date | null;
+  remark?: string | null;
+  creatorId?: string | null;
+  creatorName?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  extensions: OrderExtensionRaw[];
+  logs: OrderLogRaw[];
+  screenshot?: string | null;
+};
+
 export default async function OrdersPage() {
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -86,18 +141,18 @@ export default async function OrdersPage() {
   // OrderTable is likely a client component (it has interactive bits).
   // So I should convert Date objects to ISO strings.
 
-  const formattedOrders = orders.map(o => ({
+  const formattedOrders = orders.map((o: OrderRaw) => ({
     ...o,
     createdAt: o.createdAt.toISOString(),
     updatedAt: o.updatedAt.toISOString(),
     rentStartDate: o.rentStartDate?.toISOString() || null,
     deliveryTime: o.deliveryTime?.toISOString() || null,
     returnDeadline: o.returnDeadline?.toISOString() || null,
-    extensions: o.extensions.map(e => ({
+    extensions: o.extensions.map((e: OrderExtensionRaw) => ({
         ...e,
         createdAt: e.createdAt.toISOString()
     })),
-    logs: o.logs.map(l => ({
+    logs: o.logs.map((l: OrderLogRaw) => ({
         ...l,
         timestamp: l.createdAt.toISOString(),
         details: l.desc || undefined,
