@@ -4,6 +4,16 @@ import { getCurrentUser } from "@/lib/auth";
 import { calculateOrderRevenue } from "@/lib/utils";
 import { StatsClient } from "./stats-client";
 
+type StatsOrder = {
+  creatorId: string | null;
+  creatorName: string | null;
+  sourceContact: string;
+  rentPrice: number;
+  insurancePrice: number;
+  overdueFee: number | null;
+  extensions: { price: number }[];
+}
+
 export default async function StatsPage() {
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -33,8 +43,8 @@ export default async function StatsPage() {
   // Actually, let's prepopulate with users if we want to show all accounts even with 0 orders? 
   // User didn't specify, but "statistical different account income" usually implies showing active ones.
   // Let's just iterate orders.
-
-  ordersToAnalyze.forEach(order => {
+  
+  ordersToAnalyze.forEach((order: StatsOrder) => {
       const creatorId = order.creatorId || 'unknown';
       const creatorName = order.creatorName || 'Unknown';
       
@@ -100,7 +110,7 @@ export default async function StatsPage() {
             <CardTitle className="text-sm font-medium">总营收 (不含押金)</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">¥ {ordersToAnalyze.reduce((acc, o) => acc + calculateOrderRevenue(o), 0).toLocaleString()}</div>
+            <div className="text-2xl font-bold">¥ {ordersToAnalyze.reduce((acc: number, o: StatsOrder) => acc + calculateOrderRevenue(o), 0).toLocaleString()}</div>
           </CardContent>
         </Card>
       </div>

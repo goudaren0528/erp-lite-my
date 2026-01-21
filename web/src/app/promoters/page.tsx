@@ -3,6 +3,25 @@ import { PromoterList } from "@/components/promoters/promoter-list"
 import { getCurrentUser } from "@/lib/auth"
 import { OrderSource, Role } from "@/types"
 
+type PromoterRaw = {
+  id: string;
+  name: string;
+  phone: string | null;
+  channel: string | null;
+  creatorId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+type UserRaw = {
+  id: string;
+  name: string;
+  role: string;
+  username: string;
+  password?: string | null;
+  permissions: string;
+};
+
 export default async function PromotersPage() {
     const currentUser = await getCurrentUser()
 
@@ -15,14 +34,14 @@ export default async function PromotersPage() {
     });
     
     const usersRaw = await prisma.user.findMany();
-    const users = usersRaw.map(u => ({
+    const users = usersRaw.map((u: UserRaw) => ({
         ...u,
         role: u.role as Role,
         password: u.password ?? undefined,
         permissions: JSON.parse(u.permissions)
     }));
 
-    const formattedPromoters = promoters.map(p => ({
+    const formattedPromoters = promoters.map((p: PromoterRaw) => ({
         ...p,
         phone: p.phone ?? undefined,
         channel: (p.channel as OrderSource) ?? undefined,

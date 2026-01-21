@@ -8,6 +8,16 @@ import { calculateOrderRevenue } from "@/lib/utils"
 import { subDays, isAfter } from "date-fns"
 import { CreditCard, FileText, Activity, ArrowRight } from "lucide-react"
 
+type DashboardOrder = {
+  createdAt: Date;
+  status: string;
+  platform: string | null;
+  rentPrice: number;
+  insurancePrice: number;
+  overdueFee: number | null;
+  extensions: { price: number }[];
+}
+
 const statusMap: Record<string, { label: string; color: string; order: number }> = {
   PENDING_REVIEW: { label: '待审核', color: 'text-orange-600 bg-orange-50 border-orange-200', order: 2 },
   PENDING_SHIPMENT: { label: '待发货', color: 'text-blue-600 bg-blue-50 border-blue-200', order: 5 },
@@ -41,17 +51,17 @@ export default async function Home() {
   // but if we treat them as strings (from JSON era) we might need care.
   // In Prisma, createdAt is DateTime -> Date object.
   // isAfter(date, date) works with Date objects.
-  const recentOrders = ordersToDisplay.filter(o => isAfter(o.createdAt, sevenDaysAgo))
+  const recentOrders = ordersToDisplay.filter((o: DashboardOrder) => isAfter(o.createdAt, sevenDaysAgo))
   
   const recentCount = recentOrders.length
-  const recentAmount = recentOrders.reduce((sum, o) => sum + calculateOrderRevenue(o), 0)
+  const recentAmount = recentOrders.reduce((sum: number, o: DashboardOrder) => sum + calculateOrderRevenue(o), 0)
   
   // Calculate Cumulative Stats
   const totalCount = ordersToDisplay.length
-  const totalAmount = ordersToDisplay.reduce((sum, o) => sum + calculateOrderRevenue(o), 0)
+  const totalAmount = ordersToDisplay.reduce((sum: number, o: DashboardOrder) => sum + calculateOrderRevenue(o), 0)
   
   // Calculate Status Counts
-  const statusCounts = ordersToDisplay.reduce((acc, o) => {
+  const statusCounts = ordersToDisplay.reduce((acc: Record<string, number>, o: DashboardOrder) => {
     acc[o.status] = (acc[o.status] || 0) + 1
     return acc
   }, {} as Record<string, number>)
@@ -66,7 +76,7 @@ export default async function Home() {
 
   const statsByPlatform: Record<string, { name: string, count: number, totalRevenue: number }> = {};
   
-  ordersToDisplay.forEach(order => {
+  ordersToDisplay.forEach((order: DashboardOrder) => {
       const platformKey = order.platform || 'OTHER';
       const platformName = platformMap[platformKey] || platformKey;
       

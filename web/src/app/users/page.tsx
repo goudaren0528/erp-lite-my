@@ -4,6 +4,15 @@ import { getCurrentUser } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { Role } from "@/types"
 
+type UserRaw = {
+  id: string;
+  name: string;
+  role: string;
+  username: string;
+  password?: string | null;
+  permissions: string;
+};
+
 export default async function UsersPage() {
     const user = await getCurrentUser()
     
@@ -15,7 +24,7 @@ export default async function UsersPage() {
     }
 
     const usersRaw = await prisma.user.findMany();
-    const users = usersRaw.map(u => ({
+    const users = usersRaw.map((u: UserRaw) => ({
         ...u,
         role: u.role as Role,
         password: u.password ?? undefined,
