@@ -996,8 +996,38 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
   const totalExtensionDays = (order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)
 
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success("已复制")
+    if (!text) return
+
+    const fallbackCopy = (text: string) => {
+      try {
+        const textArea = document.createElement("textarea")
+        textArea.value = text
+        textArea.style.position = "fixed"
+        textArea.style.left = "-9999px"
+        document.body.appendChild(textArea)
+        textArea.focus()
+        textArea.select()
+        
+        const successful = document.execCommand('copy')
+        document.body.removeChild(textArea)
+        
+        if (successful) {
+            toast.success("已复制")
+        } else {
+            toast.error("复制失败")
+        }
+      } catch (err) {
+          toast.error("复制失败")
+      }
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text)
+            .then(() => toast.success("已复制"))
+            .catch(() => fallbackCopy(text))
+    } else {
+        fallbackCopy(text)
+    }
   }
 
   return (
