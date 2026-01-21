@@ -40,7 +40,11 @@ RUN mkdir -p ./public/uploads
 # Important: Users should mount a volume to /app/data for persistence
 # COPY --from=builder --chown=nextjs:nodejs /app/data ./data
 
-# Copy built application
+# Persist uploaded files
+# Users should mount a volume to /app/public/uploads to persist images
+VOLUME ["/app/public/uploads"]
+
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prismabuilt application
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
