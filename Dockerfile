@@ -52,6 +52,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Important: Users should mount a volume to /app/data for persistence
 # COPY --from=builder --chown=nextjs:nodejs /app/data ./data
 
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/docker-entrypoint.sh ./
+
+RUN chmod +x ./docker-entrypoint.sh
+
 USER nextjs
 
 EXPOSE 3000
@@ -60,4 +66,4 @@ ENV PORT 3000
 # set hostname to localhost
 ENV HOSTNAME "0.0.0.0"
 
-CMD ["node", "server.js"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
