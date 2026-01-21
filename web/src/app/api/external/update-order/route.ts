@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { Prisma } from '@prisma/client';
 
 // Force dynamic to prevent caching
 export const dynamic = 'force-dynamic';
@@ -15,6 +14,24 @@ const STATUS_MAP: Record<string, 'PENDING_SHIPMENT' | 'PENDING_RECEIPT' | 'RENTI
   '已完成': 'COMPLETED',
   '已关闭': 'CLOSED',
   '已取消': 'CLOSED', // Alias
+};
+
+type StatusValue = typeof STATUS_MAP[keyof typeof STATUS_MAP];
+
+type OrderLogCreateInput = {
+  action: string;
+  operator: string;
+  desc: string;
+};
+
+type OrderUpdateData = {
+  status?: StatusValue;
+  logisticsCompany?: string;
+  trackingNumber?: string;
+  latestLogisticsInfo?: string;
+  logs?: {
+    create: OrderLogCreateInput[];
+  };
 };
 
 export async function POST(request: Request) {
@@ -44,8 +61,8 @@ export async function POST(request: Request) {
     }
 
     let updated = false;
-    const dataToUpdate: Prisma.OrderUpdateInput = {};
-    const logsToCreate: Prisma.OrderLogCreateWithoutOrderInput[] = [];
+    const dataToUpdate: OrderUpdateData = {};
+    const logsToCreate: OrderLogCreateInput[] = [];
 
     // Update status if provided and valid
     if (status && STATUS_MAP[status]) {
