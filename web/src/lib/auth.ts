@@ -2,10 +2,11 @@
 
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
-import { getDb } from "./db"
-import { User } from "@/types"
+import { prisma } from "./db"
+import { Role, User } from "@/types"
 
-export async function login(prevState: any, formData: FormData) {
+export async function login(_prevState: unknown, formData: FormData) {
+  void _prevState
   const username = formData.get("username") as string
   const password = formData.get("password") as string
 
@@ -13,10 +14,11 @@ export async function login(prevState: any, formData: FormData) {
     return { error: "请输入用户名和密码" }
   }
 
-  const db = await getDb()
-  const user = db.users.find((u) => u.username === username && u.password === password)
+  const user = await prisma.user.findUnique({
+    where: { username },
+  })
 
-  if (!user) {
+  if (!user || user.password !== password) {
     return { error: "用户名或密码错误" }
   }
 
@@ -45,8 +47,18 @@ export async function getCurrentUser(): Promise<User | null> {
     return null
   }
 
-  const db = await getDb()
-  const user = db.users.find((u) => u.id === userId)
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  })
 
-  return user || null
+  if (!user) {
+    return null
+  }
+
+  return {
+    ...user,
+    role: user.role as Role,
+    password: user.password ?? undefined,
+    permissions: JSON.parse(user.permissions || '[]'),
+  }
 }

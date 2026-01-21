@@ -1,10 +1,10 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Promoter, OrderSource, User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -35,7 +35,6 @@ import { Plus, Trash2, Edit2 } from "lucide-react"
 import { toast } from "sonner"
 
 const CHANNEL_OPTIONS: { value: OrderSource; label: string }[] = [
-    { value: 'RETAIL', label: '零售' },
     { value: 'PEER', label: '同行' },
     { value: 'PART_TIME_AGENT', label: '兼职代理' },
 ]
@@ -45,7 +44,10 @@ interface PromoterListProps {
     users?: User[]
 }
 
+type LegacyPromoter = Promoter & { channels?: OrderSource[] }
+
 export function PromoterList({ promoters, users = [] }: PromoterListProps) {
+    const router = useRouter()
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
     const [editingPromoter, setEditingPromoter] = useState<Promoter | null>(null)
@@ -60,9 +62,10 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
 
     const handleEdit = (promoter: Promoter) => {
         setEditingPromoter(promoter)
+        const legacyChannels = (promoter as LegacyPromoter).channels
         setFormData({
             ...promoter,
-            channel: promoter.channel || ((promoter as any).channels && (promoter as any).channels[0])
+            channel: promoter.channel || legacyChannels?.[0]
         })
         setIsDialogOpen(true)
     }
@@ -89,8 +92,8 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
             } else {
                 toast.error(res?.message || "操作失败")
             }
-        } catch (e: any) {
-            console.error(e)
+        } catch (error) {
+            console.error(error)
             toast.error("操作失败: 请刷新页面重试")
         }
     }
@@ -110,11 +113,12 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
             if (res?.success) {
                 toast.success(res.message)
                 setIsDialogOpen(false)
+                router.refresh()
             } else {
                 toast.error(res?.message || "操作失败")
             }
-        } catch (e: any) {
-            console.error(e)
+        } catch (error) {
+            console.error(error)
             toast.error("操作失败: 请刷新页面重试")
         }
     }
@@ -173,8 +177,7 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                                     onValueChange={(val: OrderSource) => {
                                         setFormData({
                                             ...formData, 
-                                            channel: val,
-                                            name: val === 'RETAIL' ? '' : formData.name
+                                            channel: val
                                         })
                                     }}
                                 >
@@ -194,11 +197,10 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                                 <Label htmlFor="name">姓名</Label>
                                 <Input 
                                     id="name" 
-                                    value={formData.channel === 'RETAIL' ? '' : (formData.name || '')} 
+                                    value={formData.name || ''} 
                                     onChange={e => setFormData({...formData, name: e.target.value})}
-                                    required={formData.channel !== 'RETAIL'}
-                                    disabled={formData.channel === 'RETAIL'}
-                                    placeholder={formData.channel === 'RETAIL' ? "零售无需填写" : "请输入姓名"}
+                                    required
+                                    placeholder="请输入姓名"
                                 />
                             </div>
                             <div className="space-y-2">
@@ -237,8 +239,8 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                                 <TableCell>{promoter.phone || '-'}</TableCell>
                                 <TableCell>
                                     {promoter.channel ? getChannelLabel(promoter.channel) : 
-                                     ((promoter as any).channels && (promoter as any).channels.length > 0 
-                                        ? (promoter as any).channels.map((c: any) => getChannelLabel(c)).join(', ') 
+                                     ((promoter as LegacyPromoter).channels && (promoter as LegacyPromoter).channels?.length 
+                                        ? (promoter as LegacyPromoter).channels?.map(c => getChannelLabel(c)).join(', ') 
                                         : '-')
                                     }
                                 </TableCell>

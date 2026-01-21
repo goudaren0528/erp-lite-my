@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,6 +27,7 @@ const PERMISSIONS = [
 ]
 
 export function UserForm({ initialData, onSuccess }: UserFormProps) {
+    const router = useRouter()
     const [formData, setFormData] = useState<Partial<User>>({
         name: initialData?.name || '',
         username: initialData?.username || '',
@@ -40,12 +42,13 @@ export function UserForm({ initialData, onSuccess }: UserFormProps) {
             
             if (res?.success) {
                 toast.success(res.message)
+                router.refresh()
                 onSuccess()
             } else {
                 toast.error(res?.message || "操作失败")
             }
-        } catch (e: any) {
-            console.error(e)
+        } catch (error) {
+            console.error(error)
             toast.error("操作失败: 请刷新页面重试")
         }
     }

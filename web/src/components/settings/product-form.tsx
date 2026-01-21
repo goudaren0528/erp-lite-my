@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Product, ProductVariant } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,11 +17,20 @@ interface ProductFormProps {
   onSuccess?: () => void
 }
 
+type PriceRuleDraft = { id: string; days: string; price: number }
+type VariantDraft = {
+  name: string
+  accessories: string
+  insurancePrice: number
+  priceRules: PriceRuleDraft[]
+}
+
 export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
+  const router = useRouter()
   const [name, setName] = useState(initialData?.name || "")
   
   // Initialize variants with array-based priceRules for editing
-  const [variants, setVariants] = useState<any[]>(
+  const [variants, setVariants] = useState<VariantDraft[]>(
     initialData?.variants?.map(v => ({
       ...v,
       priceRules: Object.entries(v.priceRules)
@@ -54,7 +64,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     setVariants(newVariants)
   }
 
-  const handleVariantChange = (index: number, field: string, value: any) => {
+  const handleVariantChange = <K extends keyof VariantDraft>(index: number, field: K, value: VariantDraft[K]) => {
     const newVariants = [...variants]
     newVariants[index] = { ...newVariants[index], [field]: value }
     setVariants(newVariants)
@@ -81,9 +91,13 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       setVariants(newVariants)
   }
 
-  const handleRuleChange = (vIndex: number, rIndex: number, field: 'days'|'price', value: any) => {
+  const handleRuleChange = (vIndex: number, rIndex: number, field: 'days'|'price', value: string | number) => {
       const newVariants = [...variants]
-      newVariants[vIndex].priceRules[rIndex][field] = value
+      if (field === 'days') {
+          newVariants[vIndex].priceRules[rIndex][field] = String(value)
+      } else {
+          newVariants[vIndex].priceRules[rIndex][field] = Number(value)
+      }
       setVariants(newVariants)
   }
 
@@ -93,7 +107,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     // Convert back to Record
     const finalVariants: ProductVariant[] = variants.map(v => {
         const rules: Record<string, number> = {}
-        v.priceRules.forEach((r: any) => {
+        v.priceRules.forEach(r => {
             if (r.days && r.days.trim() !== '') {
                 rules[r.days] = Number(r.price)
             }
@@ -106,10 +120,12 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         }
     })
 
-    const product: Product = {
-        id: initialData?.id || Math.random().toString(36).substring(2, 9),
+    const product: { id?: string; name: string; variants: ProductVariant[] } = {
         name,
         variants: finalVariants
+    }
+    if (initialData?.id) {
+        product.id = initialData.id
     }
 
     try {
@@ -117,12 +133,13 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         
         if (res?.success) {
             toast.success(res.message)
+            router.refresh()
             if (onSuccess) onSuccess()
         } else {
             toast.error(res?.message || "操作失败")
         }
-    } catch (e: any) {
-        console.error(e)
+    } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
     }
   }
@@ -192,7 +209,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                             </Button>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                            {variant.priceRules.map((rule: any, rIndex: number) => (
+                            {variant.priceRules.map((rule, rIndex) => (
                                 <div key={rule.id} className="flex items-center gap-2 p-2 border rounded bg-white">
                                     <div className="flex items-center gap-1">
                                         <Input 

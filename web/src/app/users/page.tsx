@@ -1,10 +1,10 @@
-import { getDb } from "@/lib/db"
+import { prisma } from "@/lib/db"
 import { UserList } from "@/components/settings/user-list"
 import { getCurrentUser } from "@/lib/auth"
 import { redirect } from "next/navigation"
+import { Role } from "@/types"
 
 export default async function UsersPage() {
-    const db = await getDb()
     const user = await getCurrentUser()
     
     // Double check permission on server side, though middleware/layout might handle it
@@ -14,10 +14,18 @@ export default async function UsersPage() {
         redirect('/')
     }
 
+    const usersRaw = await prisma.user.findMany();
+    const users = usersRaw.map(u => ({
+        ...u,
+        role: u.role as Role,
+        password: u.password ?? undefined,
+        permissions: JSON.parse(u.permissions)
+    }));
+
     return (
         <div className="space-y-6 p-8">
             <h2 className="text-3xl font-bold tracking-tight">账号权限管理</h2>
-            <UserList users={db.users} />
+            <UserList users={users} />
         </div>
     )
 }

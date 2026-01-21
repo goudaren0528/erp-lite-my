@@ -1,17 +1,24 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { prisma } from '@/lib/db';
 
 // Force dynamic to ensure we always get the latest data
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const db = await getDb();
+    const orders = await prisma.order.findMany({
+        where: {
+            miniProgramOrderNo: {
+                not: null
+            }
+        },
+        select: {
+            miniProgramOrderNo: true
+        }
+    });
     
     // Filter orders that have a miniProgramOrderNo
-    // You might want to filter out completed/closed orders if synchronization isn't needed for them
-    // For now, we return all orders with a mapped SN to ensure full coverage
-    const ordersToSync = db.orders
+    const ordersToSync = orders
       .filter(order => order.miniProgramOrderNo && order.miniProgramOrderNo.trim() !== '')
       .map(order => order.miniProgramOrderNo as string);
 
@@ -19,10 +26,11 @@ export async function GET() {
       code: 200,
       data: ordersToSync
     });
-  } catch (error: any) {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({
       code: 500,
-      message: error.message || 'Internal Server Error'
+      message: message || 'Internal Server Error'
     }, { status: 500 });
   }
 }

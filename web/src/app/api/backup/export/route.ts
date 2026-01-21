@@ -1,7 +1,6 @@
-import { getDb, updateDb } from "@/lib/db";
+import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { BackupLog } from "@/types";
 import { format } from "date-fns";
 
 export async function GET(req: NextRequest) {
@@ -11,37 +10,56 @@ export async function GET(req: NextRequest) {
     const types = typesParam ? typesParam.split(',') : null;
     
     const currentUser = await getCurrentUser();
-    const db = await getDb();
     
-    let exportData: any = {};
+    const exportData: Record<string, unknown> = {};
     
-    if (types && types.length > 0) {
-        types.forEach(key => {
-            if (key in db) {
-                exportData[key] = (db as any)[key];
-            }
+    // Helper to check if type is requested
+    const shouldExport = (type: string) => !types || types.includes(type);
+
+    if (shouldExport('users')) {
+        const users = await prisma.user.findMany();
+        exportData.users = users.map(u => ({
+            ...u,
+            permissions: JSON.parse(u.permissions)
+        }));
+    }
+
+    if (shouldExport('promoters')) {
+        exportData.promoters = await prisma.promoter.findMany();
+    }
+
+    if (shouldExport('products')) {
+        const products = await prisma.product.findMany();
+        exportData.products = products.map(p => ({
+            ...p,
+            variants: JSON.parse(p.variants)
+        }));
+    }
+
+    if (shouldExport('orders')) {
+        const orders = await prisma.order.findMany({
+            include: { extensions: true, logs: true }
         });
-    } else {
-        // If no specific types requested, export all (or default behavior)
-        exportData = db;
+        exportData.orders = orders;
+    }
+
+    if (shouldExport('commissionConfigs')) {
+        exportData.commissionConfigs = await prisma.commissionConfig.findMany();
+    }
+
+    if (shouldExport('backupLogs')) {
+        exportData.backupLogs = await prisma.backupLog.findMany();
     }
 
     // Log the export operation
-    await updateDb(async (db) => {
-        const log: BackupLog = {
-            id: Math.random().toString(36).substring(2, 9),
+    await prisma.backupLog.create({
+        data: {
             type: 'EXPORT',
             status: 'SUCCESS',
             operator: currentUser?.name || 'Unknown',
             details: types ? `Exported: ${types.join(', ')}` : 'Full Export',
-            timestamp: new Date().toISOString()
-        };
-        // Ensure backupLogs exists
-        if (!db.backupLogs) db.backupLogs = [];
-        db.backupLogs.unshift(log); // Add to beginning
-        // Keep only last 50 logs
-        if (db.backupLogs.length > 50) db.backupLogs = db.backupLogs.slice(0, 50);
-        return log;
+            timestamp: new Date()
+        }
     });
 
     const data = JSON.stringify(exportData, null, 2);

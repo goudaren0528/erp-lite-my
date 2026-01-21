@@ -1,18 +1,20 @@
-import { getDb } from "@/lib/db";
+import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateOrderRevenue } from "@/lib/utils";
 import { StatsClient } from "./stats-client";
 
 export default async function StatsPage() {
-  const db = await getDb();
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
   const canViewAllOrders = isAdmin || currentUser?.permissions?.includes('view_all_orders');
 
-  const ordersToAnalyze = canViewAllOrders 
-    ? db.orders 
-    : db.orders.filter(o => o.creatorId === currentUser?.id);
+  const ordersToAnalyze = await prisma.order.findMany({
+      where: canViewAllOrders ? {} : { creatorId: currentUser?.id },
+      include: {
+          extensions: true
+      }
+  });
   
   // Group by Creator (User)
   // Map CreatorId -> { name, orders: [], promoters: Map<name, {count, rent}> }
@@ -47,6 +49,9 @@ export default async function StatsPage() {
       }
       
       const stats = userStatsMap[creatorId];
+      // calculateOrderRevenue expects Order type from types/index.ts.
+      // Prisma Order includes extensions, which matches expectation.
+      // But Dates are Date objects in Prisma result, while types/index.ts might imply strings (from JSON).
       const revenue = calculateOrderRevenue(order);
 
       stats.orderCount++;

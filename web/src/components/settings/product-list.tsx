@@ -37,8 +37,8 @@ export function ProductList({ products }: ProductListProps) {
         } else {
             toast.error(res?.message || "操作失败")
         }
-    } catch (e: any) {
-        console.error(e)
+    } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
     }
   }
@@ -124,7 +124,7 @@ export function ProductList({ products }: ProductListProps) {
                 </DialogHeader>
                 <div className="py-4">
                     <p className="text-sm text-gray-500">
-                        确定要删除商品 "{productToDelete?.name}" 吗？
+                        确定要删除商品 &quot;{productToDelete?.name}&quot; 吗？
                     </p>
                     <p className="text-sm text-red-500 mt-2">
                         注意: 这将影响关联的历史订单显示。

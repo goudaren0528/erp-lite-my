@@ -62,8 +62,8 @@ export function UserList({ users }: UserListProps) {
             } else {
                 toast.error(res?.message || "操作失败")
             }
-        } catch (e: any) {
-            console.error(e)
+        } catch (error) {
+            console.error(error)
             toast.error("操作失败: 请刷新页面重试")
         }
     }
@@ -147,7 +147,7 @@ export function UserList({ users }: UserListProps) {
                     </DialogHeader>
                     <div className="py-4 space-y-4">
                         <p className="text-sm font-medium text-red-600">
-                            确定要删除用户 "{userToDelete?.name}" 吗？此操作不可撤销。
+                            确定要删除用户 &quot;{userToDelete?.name}&quot; 吗？此操作不可撤销。
                         </p>
                         <p className="text-sm text-gray-500 bg-gray-50 p-3 rounded border">
                             注意：删除用户后，该用户创建的历史订单数据将保留，但该账号将无法再登录系统。

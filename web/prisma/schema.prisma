@@ -1,0 +1,128 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  password    String?
+  name        String
+  role        String
+  permissions String   // Stored as JSON string
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Promoter {
+  id        String   @id @default(uuid())
+  name      String
+  phone     String?
+  channel   String?
+  creatorId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CommissionConfig {
+  id         String @id @default(uuid())
+  role       String
+  minCount   Int
+  maxCount   Int
+  percentage Float
+}
+
+model BackupLog {
+  id        String   @id @default(uuid())
+  type      String
+  status    String
+  operator  String
+  details   String
+  timestamp DateTime @default(now())
+}
+
+model Product {
+  id        String   @id @default(uuid())
+  name      String
+  variants  String   // Stored as JSON string
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id          String   @id @default(uuid())
+  orderNo     String   @unique
+  source      String
+  platform    String?
+  status      String
+  
+  customerXianyuId String
+  sourceContact    String
+  miniProgramOrderNo String?
+  xianyuOrderNo    String?
+  
+  productName String
+  variantName String
+  sn          String?
+  
+  duration        Int
+  rentPrice       Float
+  deposit         Float
+  insurancePrice  Float
+  overdueFee      Float?
+  totalAmount     Float
+  
+  address           String
+  recipientName     String?
+  recipientPhone    String?
+  trackingNumber    String?
+  logisticsCompany  String?
+  latestLogisticsInfo String?
+  
+  returnTrackingNumber    String?
+  returnLogisticsCompany  String?
+  returnLatestLogisticsInfo String?
+  
+  rentStartDate   DateTime?
+  deliveryTime    DateTime?
+  returnDeadline  DateTime?
+  
+  remark          String?
+  screenshot      String?
+  
+  creatorId       String
+  creatorName     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  extensions      OrderExtension[]
+  logs            OrderLog[]
+}
+
+model OrderExtension {
+  id        String   @id @default(uuid())
+  days      Int
+  price     Float
+  createdAt DateTime @default(now())
+  
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model OrderLog {
+  id        String   @id @default(uuid())
+  action    String
+  desc      String?
+  operator  String
+  createdAt DateTime @default(now())
+  
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}

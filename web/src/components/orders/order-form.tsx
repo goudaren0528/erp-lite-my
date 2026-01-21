@@ -1,7 +1,9 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { Order, Product, User, Promoter, OrderSource, OrderPlatform } from "@/types"
+import { useState } from "react"
+import Image from "next/image"
+import { compressImage } from "@/lib/image-utils"
+import { Order, Product, Promoter, OrderSource, OrderPlatform } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,7 +24,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Check, ChevronsUpDown } from "lucide-react"
+import { Check, ChevronsUpDown, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CHINA_REGIONS } from "@/lib/city-data"
 
@@ -35,30 +37,50 @@ interface OrderFormProps {
   onSuccess?: () => void
 }
 
+// Helper to remove leading zeros (e.g., "020" -> "20", "0" -> "0", "0.5" -> "0.5")
+const handleNumberInput = (value: string) => {
+  if (value === '') return value
+  if (value === '0') return value
+  if (value.startsWith('0.')) return value
+  return value.replace(/^0+(?=\d)/, '')
+}
+
 export function OrderForm({ products, promoters = [], initialData, onSuccess }: OrderFormProps) {
   const isEdit = !!initialData
   const safePromoters = Array.isArray(promoters) ? promoters : []
-  const screenshotInputRef = useRef<HTMLInputElement>(null)
+  // Parse comma-separated screenshots
+  const [screenshots, setScreenshots] = useState<string[]>(
+      initialData?.screenshot ? initialData.screenshot.split(',').filter(Boolean) : []
+  )
+  const [isDragOver, setIsDragOver] = useState(false)
   
   // Find initial product and variant if editing
   const initialProduct = isEdit ? products.find(p => p.name === initialData.productName) : undefined
-  const initialVariant = isEdit && initialProduct ? initialProduct.variants.find(v => v.name === initialData.variantName) : undefined
-
   const [selectedProductId, setSelectedProductId] = useState<string>(initialProduct?.id || "")
   const [selectedVariantName, setSelectedVariantName] = useState<string>(initialData?.variantName || "")
   const [duration, setDuration] = useState<number>(initialData?.duration || 3)
   
   // Date Logic
-  const [rentStartDate, setRentStartDate] = useState<string>(initialData?.rentStartDate || format(new Date(), "yyyy-MM-dd"))
+  const [rentStartDate, setRentStartDate] = useState<string>(
+      initialData?.rentStartDate 
+        ? format(new Date(initialData.rentStartDate), "yyyy-MM-dd") 
+        : format(new Date(), "yyyy-MM-dd")
+  )
   const [rentEndDate, setRentEndDate] = useState<string>(
     initialData?.rentStartDate && initialData?.duration
       ? format(addDays(new Date(initialData.rentStartDate), initialData.duration - 1), "yyyy-MM-dd")
       : format(addDays(new Date(), 2), "yyyy-MM-dd") // Default 3 days (today + 2)
   )
   
-  const [rentPrice, setRentPrice] = useState<number>(initialData?.rentPrice || 0)
-  const [insurancePrice, setInsurancePrice] = useState<number>(initialData?.insurancePrice || 0)
-  const [deposit, setDeposit] = useState<number>(initialData?.deposit || 0)
+  const [rentPrice, setRentPrice] = useState<string>(
+    initialData?.rentPrice !== undefined ? String(initialData.rentPrice) : ""
+  )
+  const [insurancePrice, setInsurancePrice] = useState<string>(
+    initialData?.insurancePrice !== undefined ? String(initialData.insurancePrice) : ""
+  )
+  const [deposit, setDeposit] = useState<string>(
+    initialData?.deposit !== undefined ? String(initialData.deposit) : "0"
+  )
 
   // Address State
   // Try to parse existing address: "Province City Detail"
@@ -88,12 +110,6 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
   const [sourceContact, setSourceContact] = useState(initialData?.sourceContact || "")
 
   const [extensions, setExtensions] = useState(initialData?.extensions || [])
-
-  useEffect(() => {
-    if (source === 'RETAIL') {
-      setSourceContact("")
-    }
-  }, [source])
 
   const handleSmartParse = () => {
       const text = smartAddress.trim()
@@ -195,37 +211,18 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
       }
   }
 
-  const [isInitialized, setIsInitialized] = useState(false)
-
-  // Calculate duration from dates
-  useEffect(() => {
-    if (rentStartDate && rentEndDate) {
-        const start = new Date(rentStartDate)
-        const end = new Date(rentEndDate)
-        const diffTime = end.getTime() - start.getTime()
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1 
-        if (diffDays > 0) {
-            setDuration(diffDays)
-        }
+  const updateDurationFromDates = (start: string, end: string) => {
+    if (!start || !end) return
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    const diffTime = endDate.getTime() - startDate.getTime()
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
+    if (diffDays > 0) {
+        setDuration(diffDays)
     }
-  }, [rentStartDate, rentEndDate])
+  }
 
-  useEffect(() => {
-    if (isEdit && !isInitialized) {
-        setIsInitialized(true)
-        return
-    }
-
-    if (selectedVariant && duration) {
-      const exactPrice = selectedVariant.priceRules[String(duration)]
-      if (exactPrice) {
-          setRentPrice(exactPrice)
-      }
-      setInsurancePrice(selectedVariant.insurancePrice)
-    }
-  }, [selectedVariant, duration, isEdit, isInitialized])
-
-  const totalAmount = (rentPrice || 0) + (insurancePrice || 0) + (deposit || 0)
+  const totalAmount = (Number(rentPrice) || 0) + (Number(insurancePrice) || 0) + (Number(deposit) || 0)
   
   // Date Calculations
   const deliveryTime = rentStartDate ? format(subDays(new Date(rentStartDate), 2), "yyyy-MM-dd") : ""
@@ -246,13 +243,15 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
       }
 
       // Validate Mini Program Order No
-      const miniProgramOrderNo = formData.get('miniProgramOrderNo') as string
+      const miniProgramOrderNoRaw = formData.get('miniProgramOrderNo') as string
+      const miniProgramOrderNo = miniProgramOrderNoRaw?.trim()
       if (miniProgramOrderNo) {
         if (!/^SH\d{20}$/.test(miniProgramOrderNo)) {
           toast.error("小程序订单号格式错误，应为 SH + 20位数字")
           return
         }
       }
+      formData.set('miniProgramOrderNo', miniProgramOrderNo || '')
 
       // Combine address
       const fullAddress = province && city 
@@ -277,25 +276,102 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         } else {
             toast.error(res?.message || "操作失败")
         }
-      } catch (e: any) {
-        console.error(e)
+      } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
       }
   }
 
   const cities = CHINA_REGIONS.find(r => r.name === province)?.cities || []
 
-  return (
+  const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newDate = e.target.value
+      setRentStartDate(newDate)
+      if (newDate && duration > 0) {
+           const newEndDate = format(addDays(new Date(newDate), duration - 1), "yyyy-MM-dd")
+           setRentEndDate(newEndDate)
+           updateDurationFromDates(newDate, newEndDate)
+       } else {
+           updateDurationFromDates(newDate, rentEndDate)
+       }
+   }
+
+  const handleFileUpload = async (file: File) => {
+    if (screenshots.length >= 2) {
+        toast.error("最多上传2张截图")
+        return
+    }
+
+    try {
+        const compressedFile = await compressImage(file)
+        
+        const formData = new FormData()
+        formData.append('file', compressedFile)
+        
+        const toastId = toast.loading("正在压缩上传...")
+        const res = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        })
+        const data = await res.json()
+        
+        if (data.success) {
+            setScreenshots(prev => [...prev, data.url])
+            toast.success("截图上传成功", { id: toastId })
+        } else {
+            toast.error("上传失败", { id: toastId })
+        }
+    } catch (err) {
+        console.error(err)
+        toast.error("上传出错")
+    }
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragOver(false)
+      
+      const files = e.dataTransfer.files
+      if (files && files.length > 0) {
+          const file = files[0]
+          if (file.type === 'image/jpeg' || file.type === 'image/png') {
+              await handleFileUpload(file)
+          } else {
+              toast.error("仅支持 JPEG 或 PNG 格式")
+          }
+      }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragOver(false)
+  }
+ 
+   return (
     <form action={handleSubmit} className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>渠道类型</Label>
-          <Select name="source" value={source} onValueChange={(v: OrderSource) => setSource(v)} required>
+          <Select 
+            name="source" 
+            value={source} 
+            onValueChange={(v: OrderSource) => {
+              setSource(v)
+              if (v === 'RETAIL') {
+                setSourceContact("")
+              }
+            }} 
+            required
+          >
             <SelectTrigger>
               <SelectValue placeholder="选择渠道" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="RETAIL">零售</SelectItem>
               <SelectItem value="PEER">同行</SelectItem>
               <SelectItem value="PART_TIME_AGENT">兼职代理</SelectItem>
             </SelectContent>
@@ -331,7 +407,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                   if (p.channel === source) return true
                   
                   // Legacy support: check 'channels' array if it exists
-                  const legacyChannels = (p as any).channels as OrderSource[] | undefined
+                  const legacyChannels = (p as (Promoter & { channels?: OrderSource[] })).channels
                   if (legacyChannels && legacyChannels.includes(source)) return true
 
                   return false
@@ -378,56 +454,52 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         </div>
 
         <div className="space-y-2">
-            <Label>订单截图 (选填)</Label>
-            <Input 
-                type="file" 
-                accept="image/*"
-                onChange={async (e) => {
-                    const file = e.target.files?.[0]
-                    if (!file) return
-                    
-                    const formData = new FormData()
-                    formData.append('file', file)
-                    
-                    try {
-                        const res = await fetch('/api/upload', {
-                            method: 'POST',
-                            body: formData
-                        })
-                        const data = await res.json()
-                        if (data.success) {
-                            // Create a hidden input to submit the URL
-                            // Or use state if we were submitting via JSON, but here we use form action?
-                            // Wait, the form action uses FormData directly from the form elements.
-                            // But we need to pass the URL, not the file object, because the server action might expect the URL string
-                            // OR we can handle file upload in the server action if we change it to use FormData.
-                            // However, the current 'createOrder' action likely takes an object.
-                            // Let's check how 'handleSubmit' works.
-                            
-                            // It uses 'action={handleSubmit}'.
-                            // Let's check 'createOrder' in actions.ts.
-                            // It takes 'Order'.
-                            
-                            // Strategy: Upload client-side, get URL, put URL in a hidden input.
-                            if (screenshotInputRef.current) {
-                                screenshotInputRef.current.value = data.url
-                            }
-                            toast.success("截图上传成功")
-                        } else {
-                            toast.error("上传失败")
-                        }
-                    } catch (err) {
-                        console.error(err)
-                        toast.error("上传出错")
-                    }
-                }}
-            />
-            <input type="hidden" name="screenshot" defaultValue={initialData?.screenshot || ''} ref={screenshotInputRef} />
-            {initialData?.screenshot && (
-                <div className="mt-1">
-                    <a href={initialData.screenshot} target="_blank" className="text-xs text-blue-500 underline">查看当前截图</a>
-                </div>
-            )}
+            <Label>截图凭证 (选填, 最多2张)</Label>
+            
+            <div className="flex flex-wrap gap-4">
+                {screenshots.map((url, index) => (
+                    <div key={index} className="relative inline-block group">
+                        <Image src={url} alt={`截图 ${index + 1}`} width={256} height={128} className="h-32 w-auto object-contain rounded border" />
+                        <button 
+                            type="button"
+                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-sm hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => {
+                                setScreenshots(prev => prev.filter((_, i) => i !== index))
+                            }}
+                        >
+                            <X className="w-3 h-3" />
+                        </button>
+                    </div>
+                ))}
+
+                {screenshots.length < 2 && (
+                    <div 
+                        className={`border-2 border-dashed rounded-md p-4 w-32 h-32 flex flex-col items-center justify-center text-center cursor-pointer transition-colors ${
+                            isDragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+                        }`}
+                        onDrop={handleDrop}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onClick={() => document.getElementById('screenshot-upload')?.click()}
+                    >
+                        <input 
+                            id="screenshot-upload"
+                            type="file" 
+                            accept="image/jpeg,image/png"
+                            className="hidden"
+                            onChange={(e) => {
+                                const file = e.target.files?.[0]
+                                if (file) handleFileUpload(file)
+                            }}
+                        />
+                        <Upload className={`w-6 h-6 mb-2 ${isDragOver ? 'text-blue-500' : 'text-gray-400'}`} />
+                        <div className="text-xs text-gray-500">点击上传</div>
+                        <div className="text-[10px] text-gray-400 mt-1">JPG/PNG</div>
+                    </div>
+                )}
+            </div>
+
+            <input type="hidden" name="screenshot" value={screenshots.join(',')} />
         </div>
       </div>
 
@@ -542,7 +614,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                 type="date" 
                 name="rentStartDate" 
                 value={rentStartDate}
-                onChange={(e) => setRentStartDate(e.target.value)}
+                onChange={handleStartDateChange}
                 required 
             />
         </div>
@@ -552,7 +624,11 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             <Input 
                 type="date" 
                 value={rentEndDate}
-                onChange={(e) => setRentEndDate(e.target.value)}
+                onChange={(e) => {
+                    const newEndDate = e.target.value
+                    setRentEndDate(newEndDate)
+                    updateDurationFromDates(rentStartDate, newEndDate)
+                }}
                 required 
             />
             <input type="hidden" name="duration" value={duration} />
@@ -562,10 +638,6 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         <input type="hidden" name="deliveryTime" value={deliveryTime} />
         <input type="hidden" name="returnDeadline" value={returnDeadline} />
       </div>
-      <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-100">
-        提示：系统自动计算发货与寄回时间。
-      </div>
-
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-2">
             <Label>租金 (¥)</Label>
@@ -573,7 +645,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                 type="number" 
                 name="rentPrice" 
                 value={rentPrice} 
-                onChange={e => setRentPrice(Number(e.target.value))}
+                onChange={e => setRentPrice(handleNumberInput(e.target.value))}
             />
         </div>
         <div className="space-y-2">
@@ -582,7 +654,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                 type="number" 
                 name="insurancePrice" 
                 value={insurancePrice} 
-                onChange={e => setInsurancePrice(Number(e.target.value))}
+                onChange={e => setInsurancePrice(handleNumberInput(e.target.value))}
             />
         </div>
         <div className="space-y-2">
@@ -591,7 +663,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                 type="number" 
                 name="deposit" 
                 value={deposit} 
-                onChange={e => setDeposit(Number(e.target.value))}
+                onChange={e => setDeposit(handleNumberInput(e.target.value))}
             />
         </div>
       </div>

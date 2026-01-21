@@ -2,7 +2,7 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { getDb } from "@/lib/db"
+import { prisma } from "@/lib/db"
 import { getCurrentUser } from "@/lib/auth"
 import { OrderStatus } from "@/types"
 import { calculateOrderRevenue } from "@/lib/utils"
@@ -22,20 +22,27 @@ const statusMap: Record<string, { label: string; color: string; order: number }>
 }
 
 export default async function Home() {
-  const db = await getDb()
   const user = await getCurrentUser()
   
   const isAdmin = user?.role === 'ADMIN'
   const canViewAllOrders = isAdmin || user?.permissions?.includes('view_all_orders')
 
   // Filter orders based on permissions
-  const ordersToDisplay = canViewAllOrders 
-    ? db.orders 
-    : db.orders.filter(o => o.creatorId === user?.id)
+  const where = canViewAllOrders ? {} : { creatorId: user?.id };
+  const ordersToDisplay = await prisma.order.findMany({
+    where,
+    include: {
+      extensions: true
+    }
+  });
   
   // Calculate 7 Days Stats
   const sevenDaysAgo = subDays(new Date(), 7)
-  const recentOrders = ordersToDisplay.filter(o => isAfter(parseISO(o.createdAt), sevenDaysAgo))
+  // Prisma dates are Date objects, no need to parseISO if we use them directly, 
+  // but if we treat them as strings (from JSON era) we might need care.
+  // In Prisma, createdAt is DateTime -> Date object.
+  // isAfter(date, date) works with Date objects.
+  const recentOrders = ordersToDisplay.filter(o => isAfter(o.createdAt, sevenDaysAgo))
   
   const recentCount = recentOrders.length
   const recentAmount = recentOrders.reduce((sum, o) => sum + calculateOrderRevenue(o), 0)

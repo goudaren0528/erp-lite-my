@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { updateDb } from '@/lib/db';
-import { OrderStatus } from '@/types';
+import { prisma } from '@/lib/db';
+import { Prisma } from '@prisma/client';
 
 // Force dynamic to prevent caching
 export const dynamic = 'force-dynamic';
 
 // Map external Chinese status to internal Enum
-const STATUS_MAP: Record<string, OrderStatus> = {
+const STATUS_MAP: Record<string, 'PENDING_SHIPMENT' | 'PENDING_RECEIPT' | 'RENTING' | 'COMPLETED' | 'CLOSED'> = {
   '待发货': 'PENDING_SHIPMENT',
   '待收货': 'PENDING_RECEIPT',
   '已发货': 'PENDING_RECEIPT', // Alias
@@ -32,70 +32,76 @@ export async function POST(request: Request) {
        return NextResponse.json({ code: 400, message: 'Missing order_sn' }, { status: 400 });
     }
 
-    const result = await updateDb((db) => {
-      const order = db.orders.find(o => o.miniProgramOrderNo === order_sn);
-      
-      if (!order) {
-        // We throw a specific error to catch it below, but returning null here makes TS unhappy if we want to distinguish 404
-        throw new Error(`ORDER_NOT_FOUND`);
-      }
+    const order = await prisma.order.findFirst({
+        where: { miniProgramOrderNo: order_sn }
+    });
 
-      let updated = false;
+    if (!order) {
+         return NextResponse.json({
+            code: 404,
+            message: `Order with SN ${order_sn} not found`
+        }, { status: 404 });
+    }
 
-      // Update status if provided and valid
-      if (status && STATUS_MAP[status]) {
+    let updated = false;
+    const dataToUpdate: Prisma.OrderUpdateInput = {};
+    const logsToCreate: Prisma.OrderLogCreateWithoutOrderInput[] = [];
+
+    // Update status if provided and valid
+    if (status && STATUS_MAP[status]) {
         const newStatus = STATUS_MAP[status];
         if (order.status !== newStatus) {
-            order.status = newStatus;
+            dataToUpdate.status = newStatus;
             updated = true;
             
-            // Add log
-            if (!order.logs) order.logs = [];
-            order.logs.push({
+            logsToCreate.push({
                 action: '外部同步',
                 operator: 'system',
-                timestamp: new Date().toISOString(),
-                details: `状态更新为: ${status}`
+                desc: `状态更新为: ${status}`
             });
         }
-      }
-      
-      // Update logistics info
-      if (logistics_company && order.logisticsCompany !== logistics_company) {
-        order.logisticsCompany = logistics_company;
+    }
+    
+    // Update logistics info
+    if (logistics_company && order.logisticsCompany !== logistics_company) {
+        dataToUpdate.logisticsCompany = logistics_company;
         updated = true;
-      }
-      
-      if (tracking_number && order.trackingNumber !== tracking_number) {
-        order.trackingNumber = tracking_number;
+    }
+    
+    if (tracking_number && order.trackingNumber !== tracking_number) {
+        dataToUpdate.trackingNumber = tracking_number;
         updated = true;
-      }
-      
-      if (latest_logistics_info && order.latestLogisticsInfo !== latest_logistics_info) {
-        order.latestLogisticsInfo = latest_logistics_info;
+    }
+    
+    if (latest_logistics_info && order.latestLogisticsInfo !== latest_logistics_info) {
+        dataToUpdate.latestLogisticsInfo = latest_logistics_info;
         updated = true;
-      }
+    }
 
-      return { success: true, updated, orderId: order.id };
-    });
+    if (updated) {
+        if (logsToCreate.length > 0) {
+            dataToUpdate.logs = {
+                create: logsToCreate
+            };
+        }
+        
+        await prisma.order.update({
+            where: { id: order.id },
+            data: dataToUpdate
+        });
+    }
 
     return NextResponse.json({
       code: 200,
       message: 'Success',
-      data: result
+      data: { success: true, updated, orderId: order.id }
     });
 
-  } catch (error: any) {
-    if (error.message === 'ORDER_NOT_FOUND') {
-        return NextResponse.json({
-            code: 404,
-            message: `Order with SN ${request.body} not found` // request body is a stream, can't print it easily here without re-parsing, but error message is enough
-        }, { status: 404 });
-    }
-
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({
       code: 500,
-      message: error.message || 'Internal Server Error'
+      message: message || 'Internal Server Error'
     }, { status: 500 });
   }
 }

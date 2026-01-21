@@ -1,7 +1,9 @@
 "use client"
 
 import { useState } from "react"
+import Image from "next/image"
 import { Order, OrderStatus, Product, User, OrderSource, Promoter } from "@/types"
+import { compressImage } from "@/lib/image-utils"
 import {
   Table,
   TableBody,
@@ -30,13 +32,22 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, returnOrder, approveOrder, rejectOrder, addOverdueFee } from "@/app/actions"
+import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot } from "@/app/actions"
 import { format, addDays } from "date-fns"
-import { Edit2, MoreHorizontal, Plus, Search, ArrowUpDown, Info, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy } from "lucide-react"
+import { Edit2, Plus, Search, ArrowUpDown, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy, Upload, Image as ImageIcon } from "lucide-react"
 import { closeOrder } from "@/app/actions"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { OrderForm } from "./order-form"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Command,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import { cn } from "@/lib/utils"
+import { updateOrderSourceInfo } from "@/app/actions"
 
 
 interface OrderTableProps {
@@ -78,7 +89,6 @@ const platformMap: Record<string, string> = {
 import {
   Pagination,
   PaginationContent,
-  PaginationEllipsis,
   PaginationItem,
   PaginationLink,
   PaginationNext,
@@ -107,6 +117,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc') // Default asc for status order
+  const [sortBy, setSortBy] = useState<'status' | 'createdAt'>('status') // Default sort by status
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
@@ -138,7 +149,6 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
     const matchRecipientPhone = !filterRecipientPhone || 
         (order.recipientPhone || '').includes(filterRecipientPhone)
 
-    const matchStatus = filterStatus === 'ALL' || order.status === filterStatus
     const matchSource = filterSource === 'ALL' || order.source === filterSource
     const matchPlatform = filterPlatform === 'ALL' || order.platform === filterPlatform
 
@@ -158,6 +168,12 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   const filteredOrders = baseFilteredOrders.filter(order => {
       return filterStatus === 'ALL' || order.status === filterStatus
   }).sort((a, b) => {
+      if (sortBy === 'createdAt') {
+          const dateA = new Date(a.createdAt).getTime()
+          const dateB = new Date(b.createdAt).getTime()
+          return sortDirection === 'asc' ? dateA - dateB : dateB - dateA
+      }
+
       // Primary Sort: Status Order
       const orderA = statusMap[a.status]?.order || 99
       const orderB = statusMap[b.status]?.order || 99
@@ -188,7 +204,23 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   const todayAmount = todayOrders.reduce((sum, o) => sum + o.totalAmount, 0)
 
   const toggleSort = () => {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')
+      if (sortBy === 'status') {
+        // Switch to createdAt sort
+        setSortBy('createdAt')
+        setSortDirection('desc') // Default to newest first
+      } else {
+        // Toggle direction
+        setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')
+      }
+  }
+
+  const toggleRentSort = () => {
+       if (sortBy === 'createdAt') {
+           setSortBy('status')
+           setSortDirection('asc')
+       } else {
+           setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')
+       }
   }
 
   const resetFilters = () => {
@@ -368,7 +400,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
                       <SelectContent>
                           <SelectItem value="ALL">推广渠道</SelectItem>
                           {Object.entries(sourceMap)
-                              .filter(([k]) => k !== 'AGENT' && k !== 'PART_TIME')
+                              .filter(([k]) => k !== 'AGENT' && k !== 'PART_TIME' && k !== 'RETAIL')
                               .map(([k, v]) => (
                               <SelectItem key={k} value={k}>{v}</SelectItem>
                           ))}
@@ -389,7 +421,12 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
           <Table>
           <TableHeader>
               <TableRow>
-              <TableHead className="w-[150px]">订单号/时间</TableHead>
+              <TableHead className="w-[150px]">
+                  <Button variant="ghost" size="sm" onClick={toggleSort} className="-ml-3 hover:bg-transparent flex items-center gap-1">
+                      订单号/时间
+                      <ArrowUpDown className={cn("ml-2 h-4 w-4 transition-opacity", sortBy === 'createdAt' ? "opacity-100" : "opacity-50")} />
+                  </Button>
+              </TableHead>
               <TableHead>用户昵称（闲鱼等）</TableHead>
               <TableHead>小程序单号</TableHead>
               <TableHead>闲鱼单号</TableHead>
@@ -398,20 +435,20 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
               <TableHead>物流信息</TableHead>
               <TableHead>设备信息</TableHead>
               <TableHead>
-                  <Button variant="ghost" size="sm" onClick={toggleSort} className="-ml-3 hover:bg-transparent">
+                  <Button variant="ghost" size="sm" onClick={toggleRentSort} className="-ml-3 hover:bg-transparent">
                       租期/时间
                       <ArrowUpDown className="ml-2 h-4 w-4" />
                   </Button>
               </TableHead>
               <TableHead>金额详情</TableHead>
               <TableHead>状态</TableHead>
-              <TableHead>截图</TableHead>
+              <TableHead>截图凭证</TableHead>
               <TableHead>备注</TableHead>
               </TableRow>
           </TableHeader>
           <TableBody>
               {paginatedOrders.map((order) => (
-              <OrderRow key={order.id} order={order} products={products} users={users} promoters={promoters} />
+              <OrderRow key={order.id} order={order} products={products} promoters={promoters} />
               ))}
               {paginatedOrders.length === 0 && (
               <TableRow>
@@ -513,7 +550,8 @@ function ShipForm({ order, onSuccess }: { order: Order, onSuccess: () => void })
         } else {
             toast.error(res?.message || "发货失败")
         }
-    } catch (e: any) {
+    } catch (error) {
+        console.error(error)
         toast.error("操作失败")
     }
   }
@@ -568,7 +606,8 @@ function ReturnForm({ order, onSuccess }: { order: Order, onSuccess: () => void 
         } else {
             toast.error(res?.message || "操作失败")
         }
-    } catch (e: any) {
+    } catch (error) {
+        console.error(error)
         toast.error("操作失败")
     }
   }
@@ -599,9 +638,108 @@ function ReturnForm({ order, onSuccess }: { order: Order, onSuccess: () => void 
   )
 }
 
-function OrderRow({ order, products, users, promoters }: { order: Order, products: Product[], users: User[], promoters: Promoter[] }) {
+type LegacyPromoter = Promoter & { channels?: OrderSource[] }
+
+function PlatformEditPopover({ order, onSave }: { order: Order, onSave: (p: string) => Promise<void> }) {
+    const [open, setOpen] = useState(false)
+    return (
+         <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <div className="cursor-pointer hover:opacity-80">
+                    <Badge variant="secondary">{order.platform ? (platformMap[order.platform] || order.platform) : '点击选择'}</Badge>
+                </div>
+            </PopoverTrigger>
+            <PopoverContent className="w-[150px] p-0">
+                <Command>
+                    <CommandInput placeholder="搜索..." />
+                    <CommandList>
+                        <CommandGroup>
+                            {Object.entries(platformMap).map(([k, v]) => (
+                                <CommandItem key={k} value={v} onSelect={async () => {
+                                    await onSave(k)
+                                    setOpen(false)
+                                }}>
+                                    <Check className={cn("mr-2 h-4 w-4", order.platform === k ? "opacity-100" : "opacity-0")} />
+                                    {v}
+                                </CommandItem>
+                            ))}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+         </Popover>
+    )
+}
+
+function SourceEditPopover({ order, promoters, onSave }: { order: Order, promoters: Promoter[], onSave: (s: string, c: string) => Promise<void> }) {
+    const [open, setOpen] = useState(false)
+    const [source, setSource] = useState(order.source)
+    const [contact, setContact] = useState(order.sourceContact)
+    
+    return (
+        <Popover open={open} onOpenChange={(v) => {
+            setOpen(v)
+            if (v) {
+                setSource(order.source)
+                setContact(order.sourceContact)
+            }
+        }}>
+            <PopoverTrigger asChild>
+                <div className="cursor-pointer group">
+                    <Badge variant="outline" className="mb-1">{sourceMap[order.source] || order.source}</Badge>
+                    <div className="text-xs text-gray-700 font-medium group-hover:text-blue-600 flex items-center gap-1">
+                        {order.sourceContact || '-'}
+                        <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50" />
+                    </div>
+                </div>
+            </PopoverTrigger>
+            <PopoverContent className="w-[280px] p-4 space-y-4">
+                <div className="space-y-2">
+                    <Label>渠道</Label>
+                    <Select value={source} onValueChange={(v) => {
+                        setSource(v as OrderSource)
+                        setContact('') 
+                    }}>
+                        <SelectTrigger className="h-8">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                              <SelectItem value="PEER">同行</SelectItem>
+                              <SelectItem value="PART_TIME_AGENT">兼职代理</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="space-y-2">
+                    <Label>推广员</Label>
+                    <Select value={contact} onValueChange={setContact}>
+                        <SelectTrigger className="h-8">
+                            <SelectValue placeholder="选择推广员" />
+                        </SelectTrigger>
+                        <SelectContent>
+                             {promoters.filter(p => {
+                                if (p.channel === source) return true
+                                const legacyChannels = (p as LegacyPromoter).channels
+                                if (legacyChannels && legacyChannels.includes(source as OrderSource)) return true
+                                return false
+                             }).map(p => (
+                                 <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                             ))}
+                             <SelectItem value="self">自主开发</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <Button size="sm" className="w-full" onClick={async () => {
+                    await onSave(source, contact)
+                    setOpen(false)
+                }}>保存</Button>
+            </PopoverContent>
+        </Popover>
+    )
+}
+
+function OrderRow({ order, products, promoters }: { order: Order, products: Product[], promoters: Promoter[] }) {
   const router = useRouter()
-  const [remark, setRemark] = useState(order.remark)
+  const [remark, setRemark] = useState(order.remark || '')
   const [isExtensionOpen, setIsExtensionOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
@@ -624,6 +762,7 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
   const [isXianyuOpen, setIsXianyuOpen] = useState(false)
 
   const [isRejectOpen, setIsRejectOpen] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
 
   const handleStatusChange = async (val: OrderStatus) => {
     try {
@@ -633,8 +772,8 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
         } else {
             toast.error(res?.message || "操作失败")
         }
-    } catch (e: any) {
-        console.error(e)
+    } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
     }
   }
@@ -648,8 +787,8 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
           } else {
             toast.error(res?.message || "操作失败")
           }
-      } catch (e: any) {
-        console.error(e)
+      } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
       }
     }
@@ -657,15 +796,21 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
   
   const handleSaveMpNo = async () => {
       try {
-          const res = await updateMiniProgramOrderNo(order.id, mpNo)
+          const trimmedNo = mpNo.trim()
+          if (trimmedNo && !/^SH\d{20}$/.test(trimmedNo)) {
+              toast.error("小程序订单号格式错误，应为 SH + 20位数字")
+              return
+          }
+          const res = await updateMiniProgramOrderNo(order.id, trimmedNo)
           if (res?.success) {
+              setMpNo(trimmedNo)
               toast.success(res.message)
               setIsMpOpen(false)
           } else {
               toast.error(res?.message || "操作失败")
           }
-      } catch (e: any) {
-        console.error(e)
+      } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
       }
   }
@@ -679,9 +824,85 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
           } else {
               toast.error(res?.message || "操作失败")
           }
-      } catch (e: any) {
-        console.error(e)
+      } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
+      }
+  }
+
+  const handleScreenshotUpload = async (file: File) => {
+      const currentScreenshots = order.screenshot ? order.screenshot.split(',').filter(Boolean) : []
+      if (currentScreenshots.length >= 2) {
+          toast.error("最多上传2张截图")
+          return
+      }
+
+      try {
+          const compressedFile = await compressImage(file)
+          const formData = new FormData()
+          formData.append('file', compressedFile)
+          
+          const toastId = toast.loading("正在压缩上传...")
+          const res = await fetch('/api/upload', {
+              method: 'POST',
+              body: formData
+          })
+          const data = await res.json()
+          
+          if (data.success) {
+              const newScreenshots = [...currentScreenshots, data.url].join(',')
+              const updateRes = await updateOrderScreenshot(order.id, newScreenshots)
+              if (updateRes.success) {
+                  toast.success("截图上传更新成功", { id: toastId })
+                  router.refresh()
+              } else {
+                  toast.error("截图上传成功但更新订单失败", { id: toastId })
+              }
+          } else {
+              toast.error("上传失败", { id: toastId })
+          }
+      } catch (err) {
+          console.error(err)
+          toast.error("上传出错")
+      }
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragOver(false)
+      
+      const files = e.dataTransfer.files
+      if (files && files.length > 0) {
+          const file = files[0]
+          if (file.type === 'image/jpeg' || file.type === 'image/png') {
+              await handleScreenshotUpload(file)
+          } else {
+              toast.error("仅支持 JPEG 或 PNG 格式")
+          }
+      }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragOver(false)
+  }
+
+  const handleUpdateSourceInfo = async (newSource: string, newContact: string, newPlatform?: string) => {
+      try {
+          const res = await updateOrderSourceInfo(order.id, newSource, newContact, newPlatform)
+          if (res.success) {
+              toast.success(res.message)
+          } else {
+              toast.error(res.message)
+          }
+      } catch (error) {
+          console.error(error)
+          toast.error("更新失败")
       }
   }
 
@@ -694,8 +915,8 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
         } else {
             toast.error(res?.message || "操作失败")
         }
-    } catch (e: any) {
-        console.error(e)
+    } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
     }
   }
@@ -709,8 +930,8 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
           } else {
               toast.error(res?.message || "操作失败")
           }
-      } catch (e: any) {
-        console.error(e)
+      } catch (error) {
+        console.error(error)
         toast.error("操作失败: 请刷新页面重试")
       }
   }
@@ -720,7 +941,10 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
         const res = await approveOrder(order.id)
         if (res?.success) toast.success(res.message)
         else toast.error(res?.message || "操作失败")
-    } catch (e) { toast.error("操作失败") }
+    } catch (error) {
+        console.error(error)
+        toast.error("操作失败")
+    }
   }
   
   const handleReject = async () => {
@@ -732,7 +956,10 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
             router.refresh()
         }
         else toast.error(res?.message || "操作失败")
-    } catch (e) { toast.error("操作失败") }
+    } catch (error) {
+        console.error(error)
+        toast.error("操作失败")
+    }
   }
 
   const handleClose = async () => {
@@ -744,7 +971,10 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
             router.refresh()
         }
         else toast.error(res?.message || "操作失败")
-    } catch (e) { toast.error("操作失败") }
+    } catch (error) {
+        console.error(error)
+        toast.error("操作失败")
+    }
   }
 
   const handleOverdueFee = async () => {
@@ -756,12 +986,14 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
         } else {
             toast.error(res?.message || "操作失败")
         }
-    } catch (e) { toast.error("操作失败") }
+    } catch (error) {
+        console.error(error)
+        toast.error("操作失败")
+    }
   }
 
   const totalAmountWithExtensions = order.totalAmount + (order.extensions || []).reduce((acc, curr) => acc + curr.price, 0)
   const totalExtensionDays = (order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)
-  const promoter = promoters.find(p => p.name === order.sourceContact)
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -835,27 +1067,10 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
         </div>
       </TableCell>
       <TableCell className="align-top">
-         <Badge variant="secondary">{order.platform ? (platformMap[order.platform] || order.platform) : '-'}</Badge>
+         <PlatformEditPopover order={order} onSave={(p) => handleUpdateSourceInfo(order.source, p !== order.platform ? "" : order.sourceContact, p)} />
       </TableCell>
       <TableCell className="align-top">
-        <Popover>
-            <PopoverTrigger asChild>
-                <div className="cursor-pointer group">
-                    <Badge variant="outline" className="mb-1">{sourceMap[order.source] || order.source}</Badge>
-                    <div className="text-xs text-gray-700 font-medium group-hover:text-blue-600 flex items-center gap-1">
-                        {order.sourceContact}
-                        <Info className="w-3 h-3 opacity-0 group-hover:opacity-50" />
-                    </div>
-                </div>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-3">
-                <div className="text-sm space-y-1">
-                    <div className="font-bold">{promoter?.name || order.sourceContact}</div>
-                    <div>电话: {promoter?.phone || '未知'}</div>
-                    <div>渠道: {promoter?.channel ? (sourceMap[promoter.channel] || promoter.channel) : ((promoter as any)?.channels?.map((c: any) => sourceMap[c as OrderSource] || c).join(', ') || '未知')}</div>
-                </div>
-            </PopoverContent>
-        </Popover>
+         <SourceEditPopover order={order} promoters={promoters} onSave={(s, c) => handleUpdateSourceInfo(s, c)} />
       </TableCell>
       <TableCell className="align-top space-y-2">
         <div className="space-y-1">
@@ -948,10 +1163,10 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
       </TableCell>
       <TableCell className="align-top">
         <div className="font-medium">{order.duration} 天</div>
-        <div className="text-xs text-muted-foreground mt-1" title="预计发货">发: {order.deliveryTime || '-'}</div>
-        <div className="text-xs text-muted-foreground" title="起租日期">起: {order.rentStartDate || '-'}</div>
+        <div className="text-xs text-muted-foreground mt-1" title="预计发货">发: {order.deliveryTime ? format(new Date(order.deliveryTime), 'yyyy-MM-dd') : '-'}</div>
+        <div className="text-xs text-muted-foreground" title="起租日期">起: {order.rentStartDate ? format(new Date(order.rentStartDate), 'yyyy-MM-dd') : '-'}</div>
         <div className="text-xs text-muted-foreground" title="租期结束">止: {order.rentStartDate ? format(addDays(new Date(order.rentStartDate), order.duration + totalExtensionDays - 1), 'yyyy-MM-dd') : '-'}</div>
-        <div className="text-xs text-muted-foreground" title="最晚归还">归: {order.returnDeadline || '-'}</div>
+        <div className="text-xs text-muted-foreground" title="最晚归还">归: {order.returnDeadline ? format(new Date(order.returnDeadline), 'yyyy-MM-dd') : '-'}</div>
       </TableCell>
       <TableCell className="align-top">
         <div className="font-bold text-red-600">¥ {totalAmountWithExtensions}</div>
@@ -987,29 +1202,59 @@ function OrderRow({ order, products, users, promoters }: { order: Order, product
           </SelectContent>
         </Select>
       </TableCell>
-      <TableCell className="align-top">
-        {order.screenshot ? (
-            <Dialog>
-                <DialogTrigger asChild>
-                    <div className="cursor-pointer hover:opacity-80 transition-opacity">
-                        <img 
-                            src={order.screenshot} 
-                            alt="截图" 
-                            className="w-12 h-12 object-cover rounded border border-gray-200" 
+      <TableCell 
+        className={`align-top transition-colors min-w-[120px] ${isDragOver ? 'bg-blue-50 ring-2 ring-blue-500 ring-inset' : ''}`}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+      >
+        <input 
+            id={`screenshot-upload-${order.id}`}
+            type="file" 
+            accept="image/jpeg,image/png"
+            className="hidden"
+            onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) handleScreenshotUpload(file)
+            }}
+        />
+        
+        <div className="flex flex-wrap gap-2">
+            {order.screenshot ? order.screenshot.split(',').filter(Boolean).map((url, i) => (
+                <Dialog key={i}>
+                    <DialogTrigger asChild>
+                        <div className="cursor-pointer hover:opacity-80 transition-opacity relative group">
+                            <Image 
+                                src={url} 
+                                alt={`截图 ${i+1}`}
+                                width={48}
+                                height={48}
+                                className="w-12 h-12 object-cover rounded border border-gray-200" 
+                            />
+                        </div>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl w-auto p-0 overflow-hidden bg-transparent border-none shadow-none">
+                        <Image 
+                            src={url} 
+                            alt="截图大图" 
+                            width={1200}
+                            height={900}
+                            className="w-auto h-auto max-h-[90vh] rounded-md shadow-2xl" 
                         />
-                    </div>
-                </DialogTrigger>
-                <DialogContent className="max-w-4xl w-auto p-0 overflow-hidden bg-transparent border-none shadow-none">
-                    <img 
-                        src={order.screenshot} 
-                        alt="截图大图" 
-                        className="w-auto h-auto max-h-[90vh] rounded-md shadow-2xl" 
-                    />
-                </DialogContent>
-            </Dialog>
-        ) : (
-            <span className="text-gray-300 text-xs">-</span>
-        )}
+                    </DialogContent>
+                </Dialog>
+            )) : null}
+
+            {(!order.screenshot || order.screenshot.split(',').filter(Boolean).length < 2) && (
+                 <div 
+                    className="w-12 h-12 rounded border border-dashed border-gray-300 flex items-center justify-center text-gray-300 hover:border-blue-400 hover:text-blue-400 transition-colors cursor-pointer" 
+                    title="点击或拖入图片上传"
+                    onClick={() => document.getElementById(`screenshot-upload-${order.id}`)?.click()}
+                >
+                    {isDragOver ? <Upload className="h-5 w-5 text-blue-500" /> : <ImageIcon className="h-5 w-5" />}
+                </div>
+            )}
+        </div>
       </TableCell>
       <TableCell className="align-top">
         <Textarea 
