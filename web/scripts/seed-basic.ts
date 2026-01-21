@@ -8,13 +8,15 @@ async function main() {
     // Create default admin user if not exists
     const adminUser = await prisma.user.upsert({
         where: { username: 'admin' },
-        update: {},
+        update: {
+             permissions: JSON.stringify(['orders', 'promoters', 'stats', 'products', 'users', 'backup'])
+        },
         create: {
             username: 'admin',
             password: '123', // In a real app, this should be hashed
             name: '管理员',
             role: 'ADMIN',
-            permissions: JSON.stringify([])
+            permissions: JSON.stringify(['orders', 'promoters', 'stats', 'products', 'users', 'backup'])
         }
     });
 
