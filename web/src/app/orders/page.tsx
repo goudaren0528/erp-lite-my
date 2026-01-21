@@ -4,6 +4,16 @@ import { CreateOrderDialog } from "@/components/orders/create-order-dialog";
 import { getCurrentUser } from "@/lib/auth";
 import { Order, OrderSource, Role } from "@/types";
 
+type PromoterRaw = {
+  id: string;
+  name: string;
+  phone: string | null;
+  channel: string | null;
+  creatorId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export default async function OrdersPage() {
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -25,7 +35,7 @@ export default async function OrdersPage() {
     where: canViewAllPromoters ? {} : { creatorId: currentUser?.id }
   });
   
-  const promoters = promotersRaw.map(p => ({
+  const promoters = promotersRaw.map((p: PromoterRaw) => ({
       ...p,
       phone: p.phone ?? undefined,
       channel: (p.channel as OrderSource) ?? undefined,
