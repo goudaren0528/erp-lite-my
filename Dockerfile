@@ -56,8 +56,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Users should mount a volume to /app/public/uploads to persist images
 VOLUME ["/app/public/uploads"]
 
-USER nextjs--from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 COPY --from=builder --chown=nextjs:nodejs /app/docker-entrypoint.sh ./
 
 RUN chmod +x ./docker-entrypoint.sh

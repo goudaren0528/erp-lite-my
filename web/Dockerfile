@@ -44,11 +44,11 @@ RUN mkdir -p ./public/uploads
 # Users should mount a volume to /app/public/uploads to persist images
 VOLUME ["/app/public/uploads"]
 
-COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prismabuilt application
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh ./
