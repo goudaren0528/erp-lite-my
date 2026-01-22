@@ -37,23 +37,49 @@ export async function importData(formData: FormData) {
             if (data.users && Array.isArray(data.users)) {
                 let count = 0;
                 for (const u of data.users) {
-                    await tx.user.upsert({
-                        where: { id: u.id },
-                        update: {
-                             username: u.username,
-                             name: u.name,
-                             role: u.role,
-                             permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || [])
-                        },
-                        create: {
-                            id: u.id,
-                            username: u.username,
-                            password: u.password,
-                            name: u.name,
-                            role: u.role,
-                            permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || [])
+                    // Try to find user by username first (exact match) to prevent unique constraint violations
+                    const existingUser = await tx.user.findFirst({
+                        where: {
+                            username: u.username
                         }
                     });
+
+                    if (existingUser) {
+                        // Update existing user (using their ID)
+                        await tx.user.update({
+                            where: { id: existingUser.id },
+                            data: {
+                                name: u.name,
+                                role: u.role,
+                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || [])
+                            }
+                        });
+                    } else {
+                        // If no username conflict, try to upsert by ID (in case ID exists but username is different)
+                        // Or simply create if we assume IDs are unique. Upsert is safer for ID conflicts.
+                        // But wait, if ID exists, we are here because username didn't match.
+                        // So it means ID exists, but has DIFFERENT username.
+                        // If we update that ID with NEW username, we might clash if that NEW username exists...
+                        // But we just checked username didn't exist (existingUser is null).
+                        // So it is safe to update that ID with new username.
+                        await tx.user.upsert({
+                            where: { id: u.id },
+                            update: {
+                                username: u.username,
+                                name: u.name,
+                                role: u.role,
+                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || [])
+                            },
+                            create: {
+                                id: u.id,
+                                username: u.username,
+                                password: u.password,
+                                name: u.name,
+                                role: u.role,
+                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || [])
+                            }
+                        });
+                    }
                     count++;
                 }
                 importedTypes.push(`Users(${count})`);

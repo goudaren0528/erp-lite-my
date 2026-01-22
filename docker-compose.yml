@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # Web Application Service
+  web:
+    container_name: erp-lite-web
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/erp_lite?schema=public
+      # Encryption key for Next.js Server Actions (Ensure this is strong and consistent)
+      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=change-this-to-a-secure-random-string
+      # Set to "true" to run seed scripts on startup (admin user creation, etc.)
+      - SEED_DB=true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      replicas: 1
+      update_config:
+        order: stop-first
+    volumes:
+      # Persist uploaded files to the host machine
+      - ./uploads:/app/public/uploads
+    depends_on:
+      - db
+    networks:
+      - erp-network
+
+  # Database Service
+  db:
+    container_name: erp-lite-db
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=erp_lite
+    volumes:
+      # Persist database data to a named volume
+      - db_data:/var/lib/postgresql/data
+    ports:
+      # Expose database port if you need to connect from host (e.g. for backup/restore)
+      - "5432:5432"
+    networks:
+      - erp-network
+
+volumes:
+  db_data:
+
+networks:
+  erp-network:
+    driver: bridge

@@ -238,6 +238,20 @@ export async function updateOrder(orderId: string, formData: FormData) {
             }
         }
 
+        // Check for duplicate Mini Program Order No
+        const miniProgramOrderNo = rawData.miniProgramOrderNo as string;
+        if (miniProgramOrderNo && miniProgramOrderNo.trim()) {
+            const existingOrder = await prisma.order.findFirst({
+                where: {
+                    miniProgramOrderNo: miniProgramOrderNo.trim(),
+                    id: { not: orderId } // Exclude current order
+                }
+            });
+            if (existingOrder) {
+                throw new Error("重复小程序订单号不可录入");
+            }
+        }
+
         // Handle extension modifications
         const extensionsJSON = rawData.extensionsJSON as string;
         const extensionOps: ExtensionOps = {};

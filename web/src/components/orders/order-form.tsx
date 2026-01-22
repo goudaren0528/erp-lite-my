@@ -102,14 +102,27 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
   const selectedVariant = selectedProduct?.variants.find(v => v.name === selectedVariantName)
 
   const [source, setSource] = useState<OrderSource>(initialData?.source || "PART_TIME_AGENT")
-  const [platform, setPlatform] = useState<OrderPlatform>(initialData?.platform || "OTHER")
+  const [platform, setPlatform] = useState<OrderPlatform>(initialData?.platform || "XIANYU")
 
   const [recipientName, setRecipientName] = useState(initialData?.recipientName || '')
   const [recipientPhone, setRecipientPhone] = useState(initialData?.recipientPhone || '')
   const [smartAddress, setSmartAddress] = useState('')
   const [sourceContact, setSourceContact] = useState(initialData?.sourceContact || "")
+  const [miniProgramOrderNo, setMiniProgramOrderNo] = useState(initialData?.miniProgramOrderNo || "")
+  const [customerXianyuId, setCustomerXianyuId] = useState(initialData?.customerXianyuId || "")
+  const [xianyuOrderNo, setXianyuOrderNo] = useState(initialData?.xianyuOrderNo || "")
+  const [sn, setSn] = useState(initialData?.sn || "")
+  const [remark, setRemark] = useState(initialData?.remark || "")
 
   const [extensions, setExtensions] = useState(initialData?.extensions || [])
+  const [openPromoterSearch, setOpenPromoterSearch] = useState(false)
+
+  // Filter promoters based on source
+  const filteredPromoters = safePromoters.filter(p => {
+    if (source === 'PART_TIME_AGENT') return p.channel === 'PART_TIME_AGENT'
+    if (source === 'PEER') return p.channel === 'PEER'
+    return false
+  })
 
   const handleSmartParse = () => {
       const text = smartAddress.trim()
@@ -362,9 +375,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             value={source} 
             onValueChange={(v: OrderSource) => {
               setSource(v)
-              if (v === 'RETAIL') {
-                setSourceContact("")
-              }
+              setSourceContact("")
             }} 
             required
           >
@@ -379,46 +390,71 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
           </Select>
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-2 flex flex-col">
             <Label>推广员</Label>
-            <Select 
-              name="sourceContact" 
-              value={sourceContact} 
-              onValueChange={setSourceContact}
-              disabled={source === 'RETAIL'}
-              required={source !== 'RETAIL'}
-            >
-                <SelectTrigger>
-                <SelectValue placeholder={source === 'RETAIL' ? "零售无需填写" : "选择推广员"} />
-                </SelectTrigger>
-                <SelectContent>
-                {safePromoters.filter(p => {
-                  if (!p) return false
-                  if (source === 'RETAIL') return false
-                  // Strict filtering by channel, but allow backward compatibility if needed
-                  // or if user wants flexibility, we can relax this.
-                  // User specifically asked why "Xiao Li" (no channel) appears.
-                  // So we enforce strict matching.
-                  
-                  // Handle "No Channel" case: they shouldn't appear in specific lists unless we want them to.
-                  // Current decision: Only show promoters matching the selected source.
-                  // Note: p.channel might be undefined for old data.
-                  
-                  // If p.channel matches source, show it.
-                  if (p.channel === source) return true
-                  
-                  // Legacy support: check 'channels' array if it exists
-                  const legacyChannels = (p as (Promoter & { channels?: OrderSource[] })).channels
-                  if (legacyChannels && legacyChannels.includes(source)) return true
-
-                  return false
-                }).map(p => (
-                    <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
-                ))}
-                <SelectItem value="self">自主开发</SelectItem>
-                </SelectContent>
-            </Select>
+            <Popover open={openPromoterSearch} onOpenChange={setOpenPromoterSearch}>
+                <PopoverTrigger asChild>
+                    <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={openPromoterSearch}
+                        className="w-full justify-between"
+                        disabled={source === 'RETAIL'}
+                    >
+                        {source === 'RETAIL' 
+                            ? "零售无需填写" 
+                            : sourceContact 
+                                ? (sourceContact === 'self' ? '自主开发' : filteredPromoters.find((p) => p.name === sourceContact)?.name || sourceContact)
+                                : "待分配人员"}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                    <Command>
+                        <CommandInput placeholder="搜索推广员..." />
+                        <CommandList>
+                            <CommandEmpty>未找到推广员</CommandEmpty>
+                            <CommandGroup>
+                                {filteredPromoters.map((p) => (
+                                    <CommandItem
+                                        key={p.id}
+                                        value={p.name}
+                                        onSelect={(currentValue) => {
+                                            setSourceContact(currentValue === sourceContact ? "" : currentValue)
+                                            setOpenPromoterSearch(false)
+                                        }}
+                                    >
+                                        <Check
+                                            className={cn(
+                                                "mr-2 h-4 w-4",
+                                                sourceContact === p.name ? "opacity-100" : "opacity-0"
+                                            )}
+                                        />
+                                        {p.name}
+                                    </CommandItem>
+                                ))}
+                                <CommandItem
+                                    value="self"
+                                    onSelect={() => {
+                                        setSourceContact("self")
+                                        setOpenPromoterSearch(false)
+                                    }}
+                                >
+                                    <Check
+                                        className={cn(
+                                            "mr-2 h-4 w-4",
+                                            sourceContact === "self" ? "opacity-100" : "opacity-0"
+                                        )}
+                                    />
+                                    自主开发
+                                </CommandItem>
+                            </CommandGroup>
+                        </CommandList>
+                    </Command>
+                </PopoverContent>
+            </Popover>
             {source === 'RETAIL' && <input type="hidden" name="sourceContact" value="" />}
+            {source !== 'RETAIL' && <input type="hidden" name="sourceContact" value={sourceContact} />}
         </div>
       </div>
 
@@ -441,17 +477,32 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
         <div className="space-y-2">
           <Label>用户昵称（闲鱼等） (选填)</Label>
-          <Input name="customerXianyuId" defaultValue={initialData?.customerXianyuId} placeholder="请输入用户昵称" />
+          <Input 
+            name="customerXianyuId" 
+            value={customerXianyuId} 
+            onChange={(e) => setCustomerXianyuId(e.target.value)} 
+            placeholder="请输入用户昵称" 
+          />
         </div>
 
         <div className="space-y-2">
             <Label>小程序订单号 (选填)</Label>
-            <Input name="miniProgramOrderNo" defaultValue={initialData?.miniProgramOrderNo} placeholder="请输入小程序订单号" />
+            <Input 
+                name="miniProgramOrderNo" 
+                value={miniProgramOrderNo} 
+                onChange={(e) => setMiniProgramOrderNo(e.target.value)}
+                placeholder="请输入小程序订单号" 
+            />
         </div>
 
         <div className="space-y-2">
             <Label>闲鱼订单号 (选填)</Label>
-            <Input name="xianyuOrderNo" defaultValue={initialData?.xianyuOrderNo} placeholder="请输入闲鱼订单号" />
+            <Input 
+                name="xianyuOrderNo" 
+                value={xianyuOrderNo} 
+                onChange={(e) => setXianyuOrderNo(e.target.value)} 
+                placeholder="请输入闲鱼订单号" 
+            />
         </div>
 
         <div className="space-y-2">
@@ -460,7 +511,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             <div className="flex flex-wrap gap-4">
                 {screenshots.map((url, index) => (
                     <div key={index} className="relative inline-block group">
-                        <Image src={url} alt={`截图 ${index + 1}`} width={256} height={128} className="h-32 w-auto object-contain rounded border" />
+                        <Image src={url} alt={`截图 ${index + 1}`} width={256} height={128} className="h-32 w-auto object-contain rounded border" unoptimized />
                         <button 
                             type="button"
                             className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-sm hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -579,7 +630,12 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
           <div className="space-y-2 col-span-2">
              <Label>设备SN码 (选填)</Label>
-             <Input name="sn" defaultValue={initialData?.sn} placeholder="请输入设备SN码" />
+             <Input 
+                 name="sn" 
+                 value={sn} 
+                 onChange={(e) => setSn(e.target.value)} 
+                 placeholder="请输入设备SN码" 
+             />
           </div>
         </div>
 
@@ -801,7 +857,13 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
       <div className="space-y-2">
         <Label>备注 (选填)</Label>
-        <Textarea name="remark" defaultValue={initialData?.remark} placeholder="填写其他注意事项..." className="h-20" />
+        <Textarea 
+            name="remark" 
+            value={remark} 
+            onChange={(e) => setRemark(e.target.value)} 
+            placeholder="填写其他注意事项..." 
+            className="h-20" 
+        />
       </div>
 
       <Button type="submit" size="lg" className="w-full">{isEdit ? '保存修改' : '创建订单'}</Button>

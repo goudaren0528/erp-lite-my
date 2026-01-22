@@ -43,3 +43,6 @@ next-env.d.ts
 
 # data migration files
 data/*.json
+
+# uploads
+public/uploads

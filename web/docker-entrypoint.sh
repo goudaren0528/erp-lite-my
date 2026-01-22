@@ -26,4 +26,4 @@ fi
 
 # Start the application
 echo "Starting application..."
-node server.js
+exec node server.js

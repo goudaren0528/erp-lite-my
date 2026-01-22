@@ -34,18 +34,35 @@ async function main() {
     const users = await readJson(USERS_PATH);
     console.log(`Migrating ${users.length} users...`);
     for (const u of users) {
-        await prisma.user.upsert({
-            where: { username: u.username },
-            update: {},
-            create: {
-                id: u.id,
-                username: u.username,
-                password: u.password,
-                name: u.name,
-                role: u.role,
-                permissions: JSON.stringify(u.permissions || [])
+        // Try to find user by username first to handle case-insensitivity or existing ID mismatch
+        const existingUser = await prisma.user.findFirst({
+            where: {
+                username: {
+                    equals: u.username,
+                    mode: 'insensitive' // Use insensitive search for Postgres compatibility
+                }
             }
         });
+
+        if (existingUser) {
+            console.log(`User ${u.username} already exists, skipping...`);
+            continue;
+        }
+
+        try {
+            await prisma.user.create({
+                data: {
+                    id: u.id,
+                    username: u.username,
+                    password: u.password,
+                    name: u.name,
+                    role: u.role,
+                    permissions: JSON.stringify(u.permissions || [])
+                }
+            });
+        } catch (error) {
+            console.error(`Failed to import user ${u.username}:`, error);
+        }
     }
 
     // 2. Promoters

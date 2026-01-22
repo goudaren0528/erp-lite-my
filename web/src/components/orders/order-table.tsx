@@ -706,14 +706,15 @@ function SourceEditPopover({ order, promoters, onSave }: { order: Order, promote
                         <SelectContent>
                               <SelectItem value="PEER">同行</SelectItem>
                               <SelectItem value="PART_TIME_AGENT">兼职代理</SelectItem>
+                              <SelectItem value="RETAIL">零售</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
                 <div className="space-y-2">
                     <Label>推广员</Label>
-                    <Select value={contact} onValueChange={setContact}>
+                    <Select value={contact} onValueChange={setContact} disabled={source === 'RETAIL'}>
                         <SelectTrigger className="h-8">
-                            <SelectValue placeholder="选择推广员" />
+                            <SelectValue placeholder={source === 'RETAIL' ? "零售无需填写" : "选择推广员"} />
                         </SelectTrigger>
                         <SelectContent>
                              {promoters.filter(p => {
@@ -1260,16 +1261,19 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
                                 width={48}
                                 height={48}
                                 className="w-12 h-12 object-cover rounded border border-gray-200" 
+                                unoptimized
                             />
                         </div>
                     </DialogTrigger>
                     <DialogContent className="max-w-4xl w-auto p-0 overflow-hidden bg-transparent border-none shadow-none">
+                        <DialogTitle className="sr-only">订单截图预览</DialogTitle>
                         <Image 
                             src={url} 
                             alt="截图大图" 
                             width={1200}
                             height={900}
                             className="w-auto h-auto max-h-[90vh] rounded-md shadow-2xl" 
+                            unoptimized
                         />
                     </DialogContent>
                 </Dialog>
