@@ -27,8 +27,8 @@ fi
 # Start the application
 echo "Ensuring uploads directory exists and has correct permissions..."
 mkdir -p ./public/uploads
-# Try to set permissions (might fail if not root, but worth a try)
-chmod 777 ./public/uploads || echo "Warning: Could not chmod uploads directory"
+# Since we run as root, this chmod is guaranteed to work
+chmod 777 ./public/uploads
 
 echo "Starting application..."
 # Use Next.js built-in start command via npm if standalone fails, or direct node if standalone

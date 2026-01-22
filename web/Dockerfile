@@ -54,12 +54,17 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY docker-entrypoint.sh ./
 RUN chmod +x ./docker-entrypoint.sh
 
+# Switch to root to allow entrypoint to fix permissions
+# The entrypoint can then downgrade to nextjs user if needed, 
+# or we just run as root to avoid volume permission headaches in Dokploy
+USER root
+
 EXPOSE 3000
 
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
-HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
   CMD wget --spider -q http://localhost:3000 || exit 1
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
