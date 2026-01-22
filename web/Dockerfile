@@ -33,8 +33,8 @@ ENV NODE_ENV production
 
 # Copy public folder (static assets)
 COPY --from=builder /app/public ./public
-# Ensure uploads directory exists
-RUN mkdir -p ./public/uploads
+# Ensure uploads directory exists and has correct permissions
+RUN mkdir -p ./public/uploads && chmod 777 ./public/uploads
 
 # Copy data folder for initialization (if it exists in repo)
 # Important: Users should mount a volume to /app/data for persistence
