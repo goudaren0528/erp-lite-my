@@ -31,4 +31,10 @@ mkdir -p ./public/uploads
 chmod 777 ./public/uploads || echo "Warning: Could not chmod uploads directory"
 
 echo "Starting application..."
-exec node server.js
+# Use Next.js built-in start command via npm if standalone fails, or direct node if standalone
+if [ -f "server.js" ]; then
+  exec node server.js
+else
+  echo "server.js not found, falling back to npm start..."
+  exec npm start
+fi
