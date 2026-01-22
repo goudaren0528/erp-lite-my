@@ -25,5 +25,10 @@ if [ "$SEED_DB" = "true" ]; then
 fi
 
 # Start the application
+echo "Ensuring uploads directory exists and has correct permissions..."
+mkdir -p ./public/uploads
+# Try to set permissions (might fail if not root, but worth a try)
+chmod 777 ./public/uploads || echo "Warning: Could not chmod uploads directory"
+
 echo "Starting application..."
 exec node server.js
