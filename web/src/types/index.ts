@@ -83,6 +83,7 @@ export interface Order {
   
   rentStartDate: string; // 租期开始日期 (YYYY-MM-DD)
   deliveryTime: string; // 发货时间 (YYYY-MM-DD)
+  actualDeliveryTime?: string; // 实际送达时间
   returnDeadline: string; // 须寄回时间 (YYYY-MM-DD)
   
   remark: string;

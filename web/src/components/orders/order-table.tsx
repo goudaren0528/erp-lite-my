@@ -510,7 +510,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
                       return Array.from({ length: total }, (_, i) => i + 1);
                     }
 
-                    const items: (number | 'ellipsis')[] = [1];
+                    const items: (number | 'ellipsis-start' | 'ellipsis-end')[] = [1];
                     let start = Math.max(2, current - 2);
                     let end = Math.min(total - 1, current + 2);
 
