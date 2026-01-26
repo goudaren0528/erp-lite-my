@@ -20,6 +20,46 @@ model User {
   permissions String   // Stored as JSON string
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  
+  accountGroupId String?
+  accountGroup   AccountGroup? @relation(fields: [accountGroupId], references: [id])
+}
+
+model AccountGroup {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  settlementByCompleted Boolean @default(true)
+  users       User[]
+  rules       CommissionRule[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ChannelConfig {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  settlementByCompleted Boolean @default(true)
+  rules       CommissionRule[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CommissionRule {
+  id              String   @id @default(uuid())
+  type            String   @default("QUANTITY") // QUANTITY, GMV
+  minCount        Int
+  maxCount        Int?     // null represents infinity
+  percentage      Float
+  
+  accountGroupId  String?
+  accountGroup    AccountGroup? @relation(fields: [accountGroupId], references: [id], onDelete: Cascade)
+  
+  channelConfigId String?
+  channelConfig   ChannelConfig? @relation(fields: [channelConfigId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model Promoter {
@@ -32,13 +72,6 @@ model Promoter {
   updatedAt DateTime @updatedAt
 }
 
-model CommissionConfig {
-  id         String @id @default(uuid())
-  role       String
-  minCount   Int
-  maxCount   Int
-  percentage Float
-}
 
 model BackupLog {
   id        String   @id @default(uuid())
@@ -94,6 +127,7 @@ model Order {
   rentStartDate   DateTime?
   deliveryTime    DateTime?
   actualDeliveryTime DateTime?
+  completedAt    DateTime?
   returnDeadline  DateTime?
   
   remark          String?

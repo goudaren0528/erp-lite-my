@@ -45,15 +45,23 @@ async function main() {
     }));
     await saveJson('products.json', productsExport);
 
-    // 4. Commission Configs
-    const configs = await prisma.commissionConfig.findMany();
-    await saveJson('commission-configs.json', configs);
+    // 4. Account Groups
+    const accountGroups = await prisma.accountGroup.findMany();
+    await saveJson('account-groups.json', accountGroups);
 
-    // 5. Backup Logs
+    // 5. Channel Configs
+    const channelConfigs = await prisma.channelConfig.findMany();
+    await saveJson('channel-configs.json', channelConfigs);
+
+    // 6. Commission Rules
+    const commissionRules = await prisma.commissionRule.findMany();
+    await saveJson('commission-rules.json', commissionRules);
+
+    // 7. Backup Logs
     const backupLogs = await prisma.backupLog.findMany();
     await saveJson('backup-logs.json', backupLogs);
 
-    // 6. Orders
+    // 8. Orders
     const orders = await prisma.order.findMany({
         include: {
             extensions: true,

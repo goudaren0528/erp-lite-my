@@ -13,7 +13,10 @@ const USERS_PATH = path.join(DATA_DIR, 'users.json');
 const PROMOTERS_PATH = path.join(DATA_DIR, 'promoters.json');
 const PRODUCTS_PATH = path.join(DATA_DIR, 'products.json');
 const ORDERS_PATH = path.join(DATA_DIR, 'orders.json');
-const CONFIGS_PATH = path.join(DATA_DIR, 'commission-configs.json');
+const ACCOUNT_GROUPS_PATH = path.join(DATA_DIR, 'account-groups.json');
+const CHANNEL_CONFIGS_PATH = path.join(DATA_DIR, 'channel-configs.json');
+const COMMISSION_RULES_PATH = path.join(DATA_DIR, 'commission-rules.json');
+const LEGACY_CONFIGS_PATH = path.join(DATA_DIR, 'commission-configs.json');
 const BACKUP_LOGS_PATH = path.join(DATA_DIR, 'backup-logs.json');
 
 // Helper to safely read a JSON file
@@ -30,11 +33,126 @@ async function readJson(filePath: string) {
 async function main() {
     console.log('Starting migration...');
 
-    // 1. Users
+    const accountGroups = await readJson(ACCOUNT_GROUPS_PATH);
+    console.log(`Migrating ${accountGroups.length} account groups...`);
+    for (const g of accountGroups) {
+        const data = {
+            name: g.name,
+            description: g.description ?? null,
+            settlementByCompleted: g.settlementByCompleted ?? true
+        };
+        if (g.id) {
+            await prisma.accountGroup.upsert({
+                where: { id: g.id },
+                update: data,
+                create: { id: g.id, ...data }
+            });
+        } else if (g.name) {
+            await prisma.accountGroup.upsert({
+                where: { name: g.name },
+                update: data,
+                create: data
+            });
+        }
+    }
+
+    const channelConfigs = await readJson(CHANNEL_CONFIGS_PATH);
+    console.log(`Migrating ${channelConfigs.length} channel configs...`);
+    for (const c of channelConfigs) {
+        const data = {
+            name: c.name,
+            settlementByCompleted: c.settlementByCompleted ?? true
+        };
+        if (c.id) {
+            await prisma.channelConfig.upsert({
+                where: { id: c.id },
+                update: data,
+                create: { id: c.id, ...data }
+            });
+        } else if (c.name) {
+            await prisma.channelConfig.upsert({
+                where: { name: c.name },
+                update: data,
+                create: data
+            });
+        }
+    }
+
+    const commissionRules = await readJson(COMMISSION_RULES_PATH);
+    console.log(`Migrating ${commissionRules.length} commission rules...`);
+    for (const r of commissionRules) {
+        const data = {
+            type: r.type || "QUANTITY",
+            minCount: r.minCount,
+            maxCount: r.maxCount ?? null,
+            percentage: r.percentage,
+            accountGroupId: r.accountGroupId || null,
+            channelConfigId: r.channelConfigId || null
+        };
+        if (r.id) {
+            await prisma.commissionRule.upsert({
+                where: { id: r.id },
+                update: data,
+                create: { id: r.id, ...data }
+            });
+        } else {
+            await prisma.commissionRule.create({ data });
+        }
+    }
+
+    const legacyConfigs = await readJson(LEGACY_CONFIGS_PATH);
+    console.log(`Migrating ${legacyConfigs.length} legacy commission configs...`);
+    const roleMap: Record<string, string> = {
+        PEER: "同行",
+        PART_TIME_AGENT: "兼职代理",
+        AGENT: "代理",
+        PART_TIME: "兼职",
+        RETAIL: "零售"
+    };
+    for (const c of legacyConfigs) {
+        const channelName = roleMap[c.role] || c.role;
+        if (!channelName) continue;
+        const channelConfig = await prisma.channelConfig.upsert({
+            where: { name: channelName },
+            update: { name: channelName, settlementByCompleted: true },
+            create: { name: channelName, settlementByCompleted: true }
+        });
+        if (c.id) {
+            await prisma.commissionRule.upsert({
+                where: { id: c.id },
+                update: {
+                    type: "QUANTITY",
+                    minCount: c.minCount,
+                    maxCount: c.maxCount ?? null,
+                    percentage: c.percentage,
+                    channelConfigId: channelConfig.id,
+                    accountGroupId: null
+                },
+                create: {
+                    id: c.id,
+                    type: "QUANTITY",
+                    minCount: c.minCount,
+                    maxCount: c.maxCount ?? null,
+                    percentage: c.percentage,
+                    channelConfigId: channelConfig.id
+                }
+            });
+        } else {
+            await prisma.commissionRule.create({
+                data: {
+                    type: "QUANTITY",
+                    minCount: c.minCount,
+                    maxCount: c.maxCount ?? null,
+                    percentage: c.percentage,
+                    channelConfigId: channelConfig.id
+                }
+            });
+        }
+    }
+
     const users = await readJson(USERS_PATH);
     console.log(`Migrating ${users.length} users...`);
     for (const u of users) {
-        // Try to find user by username first to handle case-insensitivity or existing ID mismatch
         const existingUser = await prisma.user.findFirst({
             where: {
                 username: {
@@ -56,7 +174,8 @@ async function main() {
                     password: u.password,
                     name: u.name,
                     role: u.role,
-                    permissions: JSON.stringify(u.permissions || [])
+                    permissions: JSON.stringify(u.permissions || []),
+                    accountGroupId: u.accountGroupId || null
                 }
             });
         } catch (error) {
@@ -100,47 +219,7 @@ async function main() {
         });
     }
 
-    // 4. Commission Configs
-    const configs = await readJson(CONFIGS_PATH);
-    console.log(`Migrating ${configs.length} commission configs...`);
-    for (const c of configs) {
-        // CommissionConfig doesn't have a unique field other than ID, but in JSON it might not have ID?
-        // Let's check schema. CommissionConfig has id @id @default(uuid()).
-        // If JSON configs don't have IDs, we can't easily upsert by ID.
-        // However, usually they might be identified by role.
-        // Let's assume we create them if they don't exist? Or just create.
-        // If we run multiple times, we might duplicate.
-        // Let's try to find by role if possible, but schema doesn't say role is unique.
-        // Let's just use create for now, but maybe delete all first? 
-        // Or better, let's assume if we are migrating, we can clear the table or just ignore if it fails?
-        // Let's use createMany? No, sqlite.
-        
-        // Let's try to upsert by ID if available, else create.
-        if (c.id) {
-            await prisma.commissionConfig.upsert({
-                where: { id: c.id },
-                update: {},
-                create: {
-                    id: c.id,
-                    role: c.role,
-                    minCount: c.minCount,
-                    maxCount: c.maxCount,
-                    percentage: c.percentage
-                }
-            });
-        } else {
-             await prisma.commissionConfig.create({
-                data: {
-                    role: c.role,
-                    minCount: c.minCount,
-                    maxCount: c.maxCount,
-                    percentage: c.percentage
-                }
-            });
-        }
-    }
-
-    // 5. Backup Logs
+    // 4. Backup Logs
     const backupLogs = await readJson(BACKUP_LOGS_PATH);
     console.log(`Migrating ${backupLogs.length} backup logs...`);
     for (const b of backupLogs) {
@@ -170,7 +249,7 @@ async function main() {
         }
     }
 
-    // 6. Orders
+    // 5. Orders
     const orders = await readJson(ORDERS_PATH);
     console.log(`Migrating ${orders.length} orders...`);
     for (const o of orders) {

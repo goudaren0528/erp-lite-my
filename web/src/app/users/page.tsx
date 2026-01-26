@@ -11,6 +11,7 @@ type UserRaw = {
   username: string;
   password?: string | null;
   permissions: string;
+  accountGroupId?: string | null;
 };
 
 export default async function UsersPage() {
@@ -24,6 +25,7 @@ export default async function UsersPage() {
     }
 
     const usersRaw = await prisma.user.findMany();
+
     const users = usersRaw.map((u: UserRaw) => ({
         ...u,
         role: u.role as Role,

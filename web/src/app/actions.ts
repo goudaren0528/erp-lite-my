@@ -127,7 +127,8 @@ export async function saveUser(user: Partial<User> & { id?: string }) {
                     username: user.username || '',
                     password: user.password || '123456',
                     role: user.role || 'SHIPPING',
-                    permissions: JSON.stringify(user.permissions || [])
+                    permissions: JSON.stringify(user.permissions || []),
+                    accountGroupId: user.accountGroupId
                 }
             });
             revalidatePath('/users');
@@ -383,18 +384,24 @@ export async function updateOrderStatus(orderId: string, newStatus: OrderStatus)
     const oldStatusLabel = STATUS_LABELS[oldStatus] || oldStatus;
     const newStatusLabel = STATUS_LABELS[newStatus] || newStatus;
     
-    await prisma.order.update({
-        where: { id: orderId },
-        data: {
-            status: newStatus,
-            logs: {
-                create: {
-                    action: '状态变更',
-                    operator: currentUser?.name || '系统',
-                    desc: `${oldStatusLabel} -> ${newStatusLabel}`
-                }
+    const data: { status: OrderStatus; completedAt?: Date | null; logs: { create: { action: string; operator: string; desc: string } } } = {
+        status: newStatus,
+        logs: {
+            create: {
+                action: '状态变更',
+                operator: currentUser?.name || '系统',
+                desc: `${oldStatusLabel} -> ${newStatusLabel}`
             }
         }
+    };
+
+    if (newStatus === 'COMPLETED' && !order.completedAt) {
+        data.completedAt = new Date();
+    }
+
+    await prisma.order.update({
+        where: { id: orderId },
+        data
     });
 
     revalidatePath('/orders');

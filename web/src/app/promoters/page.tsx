@@ -41,10 +41,16 @@ export default async function PromotersPage() {
         permissions: JSON.parse(u.permissions)
     }));
 
+    const channelConfigs = await prisma.channelConfig.findMany({
+        select: { name: true },
+        orderBy: { createdAt: 'desc' }
+    });
+    const channelNames = channelConfigs.map(c => c.name);
+
     const formattedPromoters = promoters.map((p: PromoterRaw) => ({
         ...p,
         phone: p.phone ?? undefined,
-        channel: (p.channel as OrderSource) ?? undefined,
+        channel: (p.channel as any) ?? undefined, // Cast to any to avoid type mismatch if OrderSource is strict
         creatorId: p.creatorId ?? undefined,
         createdAt: p.createdAt.toISOString(),
         updatedAt: p.updatedAt.toISOString()
@@ -53,7 +59,7 @@ export default async function PromotersPage() {
     return (
         <div className="p-8">
             <h1 className="text-2xl font-bold mb-6">推广人员管理</h1>
-            <PromoterList promoters={formattedPromoters} users={users} />
+            <PromoterList promoters={formattedPromoters} users={users} channels={channelNames} />
         </div>
     )
 }

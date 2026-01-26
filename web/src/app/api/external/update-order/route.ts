@@ -29,6 +29,7 @@ type OrderUpdateData = {
   logisticsCompany?: string;
   trackingNumber?: string;
   latestLogisticsInfo?: string;
+  completedAt?: Date | null;
   logs?: {
     create: OrderLogCreateInput[];
   };
@@ -70,6 +71,10 @@ export async function POST(request: Request) {
         if (order.status !== newStatus) {
             dataToUpdate.status = newStatus;
             updated = true;
+
+            if (newStatus === 'COMPLETED' && !order.completedAt) {
+                dataToUpdate.completedAt = new Date();
+            }
             
             logsToCreate.push({
                 action: '外部同步',

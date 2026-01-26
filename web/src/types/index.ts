@@ -7,6 +7,7 @@ export interface User {
   username: string;
   password?: string; // Optional for existing users, but required for login
   permissions: string[]; // List of allowed menu keys: 'orders', 'promoters', 'stats', 'products', 'users'
+  accountGroupId?: string | null;
 }
 
 export interface ProductVariant {
@@ -105,20 +106,36 @@ export interface OrderLog {
   details?: string;
 }
 
-export interface CommissionConfig {
-  role: OrderSource; // 针对兼职/代理等
-  minCount: number;
-  maxCount: number;
-  percentage: number;
-}
-
 export interface Promoter {
   id: string;
   name: string;
   phone?: string;
-  channel?: OrderSource; // 推广渠道 (单选)
+  channel?: string;
   creatorId?: string;
   createdAt: string;
+}
+
+export interface AccountGroup {
+  id: string;
+  name: string;
+  description?: string | null;
+  settlementByCompleted?: boolean;
+}
+
+export interface ChannelConfig {
+  id: string;
+  name: string;
+  settlementByCompleted?: boolean;
+}
+
+export interface CommissionRule {
+  id: string;
+  type: string;
+  minCount: number;
+  maxCount?: number | null;
+  percentage: number;
+  accountGroupId?: string | null;
+  channelConfigId?: string | null;
 }
 
 export interface BackupLog {
@@ -135,6 +152,8 @@ export interface DB {
   promoters: Promoter[];
   products: Product[];
   orders: Order[];
-  commissionConfigs: CommissionConfig[];
+  accountGroups: AccountGroup[];
+  channelConfigs: ChannelConfig[];
+  commissionRules: CommissionRule[];
   backupLogs: BackupLog[];
 }

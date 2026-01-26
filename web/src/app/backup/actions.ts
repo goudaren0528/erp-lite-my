@@ -33,11 +33,149 @@ export async function importData(formData: FormData) {
         const importedTypes: string[] = [];
 
         await prisma.$transaction(async (tx: TransactionClient) => {
-            // 1. Users
+            if (data.accountGroups && Array.isArray(data.accountGroups)) {
+                let count = 0;
+                for (const g of data.accountGroups) {
+                    const updateData = {
+                        name: g.name,
+                        description: g.description ?? null,
+                        settlementByCompleted: g.settlementByCompleted ?? true
+                    };
+                    if (g.id) {
+                        await tx.accountGroup.upsert({
+                            where: { id: g.id },
+                            update: updateData,
+                            create: {
+                                id: g.id,
+                                ...updateData
+                            }
+                        });
+                    } else if (g.name) {
+                        await tx.accountGroup.upsert({
+                            where: { name: g.name },
+                            update: updateData,
+                            create: updateData
+                        });
+                    }
+                    count++;
+                }
+                importedTypes.push(`AccountGroups(${count})`);
+            }
+
+            if (data.channelConfigs && Array.isArray(data.channelConfigs)) {
+                let count = 0;
+                for (const c of data.channelConfigs) {
+                    const updateData = {
+                        name: c.name,
+                        settlementByCompleted: c.settlementByCompleted ?? true
+                    };
+                    if (c.id) {
+                        await tx.channelConfig.upsert({
+                            where: { id: c.id },
+                            update: updateData,
+                            create: {
+                                id: c.id,
+                                ...updateData
+                            }
+                        });
+                    } else if (c.name) {
+                        await tx.channelConfig.upsert({
+                            where: { name: c.name },
+                            update: updateData,
+                            create: updateData
+                        });
+                    }
+                    count++;
+                }
+                importedTypes.push(`ChannelConfigs(${count})`);
+            }
+
+            if (data.commissionRules && Array.isArray(data.commissionRules)) {
+                let count = 0;
+                for (const r of data.commissionRules) {
+                    const updateData = {
+                        type: r.type || "QUANTITY",
+                        minCount: r.minCount,
+                        maxCount: r.maxCount ?? null,
+                        percentage: r.percentage,
+                        accountGroupId: r.accountGroupId || null,
+                        channelConfigId: r.channelConfigId || null
+                    };
+                    if (r.id) {
+                        await tx.commissionRule.upsert({
+                            where: { id: r.id },
+                            update: updateData,
+                            create: {
+                                id: r.id,
+                                ...updateData
+                            }
+                        });
+                    } else {
+                        await tx.commissionRule.create({
+                            data: updateData
+                        });
+                    }
+                    count++;
+                }
+                importedTypes.push(`CommissionRules(${count})`);
+            }
+
+            if (data.commissionConfigs && Array.isArray(data.commissionConfigs)) {
+                const roleMap: Record<string, string> = {
+                    PEER: "同行",
+                    PART_TIME_AGENT: "兼职代理",
+                    AGENT: "代理",
+                    PART_TIME: "兼职",
+                    RETAIL: "零售"
+                };
+                let count = 0;
+                for (const c of data.commissionConfigs) {
+                    const channelName = roleMap[c.role] || c.role;
+                    if (!channelName) continue;
+                    const channelConfig = await tx.channelConfig.upsert({
+                        where: { name: channelName },
+                        update: { name: channelName, settlementByCompleted: true },
+                        create: { name: channelName, settlementByCompleted: true }
+                    });
+                    if (c.id) {
+                        await tx.commissionRule.upsert({
+                            where: { id: c.id },
+                            update: {
+                                type: "QUANTITY",
+                                minCount: c.minCount,
+                                maxCount: c.maxCount ?? null,
+                                percentage: c.percentage,
+                                channelConfigId: channelConfig.id,
+                                accountGroupId: null
+                            },
+                            create: {
+                                id: c.id,
+                                type: "QUANTITY",
+                                minCount: c.minCount,
+                                maxCount: c.maxCount ?? null,
+                                percentage: c.percentage,
+                                channelConfigId: channelConfig.id
+                            }
+                        });
+                    } else {
+                        await tx.commissionRule.create({
+                            data: {
+                                type: "QUANTITY",
+                                minCount: c.minCount,
+                                maxCount: c.maxCount ?? null,
+                                percentage: c.percentage,
+                                channelConfigId: channelConfig.id
+                            }
+                        });
+                    }
+                    count++;
+                }
+                importedTypes.push(`LegacyCommissionConfigs(${count})`);
+            }
+
             if (data.users && Array.isArray(data.users)) {
                 let count = 0;
                 for (const u of data.users) {
-                    // Try to find user by username first (exact match) to prevent unique constraint violations
                     const existingUser = await tx.user.findFirst({
                         where: {
                             username: u.username
@@ -45,30 +183,24 @@ export async function importData(formData: FormData) {
                     });
 
                     if (existingUser) {
-                        // Update existing user (using their ID)
                         await tx.user.update({
                             where: { id: existingUser.id },
                             data: {
                                 name: u.name,
                                 role: u.role,
-                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || [])
+                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || []),
+                                accountGroupId: u.accountGroupId || null
                             }
                         });
                     } else {
-                        // If no username conflict, try to upsert by ID (in case ID exists but username is different)
-                        // Or simply create if we assume IDs are unique. Upsert is safer for ID conflicts.
-                        // But wait, if ID exists, we are here because username didn't match.
-                        // So it means ID exists, but has DIFFERENT username.
-                        // If we update that ID with NEW username, we might clash if that NEW username exists...
-                        // But we just checked username didn't exist (existingUser is null).
-                        // So it is safe to update that ID with new username.
                         await tx.user.upsert({
                             where: { id: u.id },
                             update: {
                                 username: u.username,
                                 name: u.name,
                                 role: u.role,
-                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || [])
+                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || []),
+                                accountGroupId: u.accountGroupId || null
                             },
                             create: {
                                 id: u.id,
@@ -76,7 +208,8 @@ export async function importData(formData: FormData) {
                                 password: u.password,
                                 name: u.name,
                                 role: u.role,
-                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || [])
+                                permissions: typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || []),
+                                accountGroupId: u.accountGroupId || null
                             }
                         });
                     }
@@ -85,7 +218,6 @@ export async function importData(formData: FormData) {
                 importedTypes.push(`Users(${count})`);
             }
             
-            // 2. Promoters
             if (data.promoters && Array.isArray(data.promoters)) {
                 let count = 0;
                 for (const p of data.promoters) {
@@ -110,7 +242,6 @@ export async function importData(formData: FormData) {
                 importedTypes.push(`Promoters(${count})`);
             }
 
-            // 3. Products
             if (data.products && Array.isArray(data.products)) {
                 let count = 0;
                 for (const p of data.products) {
@@ -131,43 +262,6 @@ export async function importData(formData: FormData) {
                 importedTypes.push(`Products(${count})`);
             }
 
-            // 4. CommissionConfigs
-            if (data.commissionConfigs && Array.isArray(data.commissionConfigs)) {
-                 let count = 0;
-                 for (const c of data.commissionConfigs) {
-                     if (c.id) {
-                         await tx.commissionConfig.upsert({
-                             where: { id: c.id },
-                             update: {
-                                 role: c.role,
-                                 minCount: c.minCount,
-                                 maxCount: c.maxCount,
-                                 percentage: c.percentage
-                             },
-                             create: {
-                                 id: c.id,
-                                 role: c.role,
-                                 minCount: c.minCount,
-                                 maxCount: c.maxCount,
-                                 percentage: c.percentage
-                             }
-                         });
-                     } else {
-                         await tx.commissionConfig.create({
-                             data: {
-                                 role: c.role,
-                                 minCount: c.minCount,
-                                 maxCount: c.maxCount,
-                                 percentage: c.percentage
-                             }
-                         });
-                     }
-                     count++;
-                 }
-                 importedTypes.push(`CommissionConfigs(${count})`);
-            }
-            
-            // 5. Orders
             if (data.orders && Array.isArray(data.orders)) {
                 let count = 0;
                 for (const o of data.orders) {

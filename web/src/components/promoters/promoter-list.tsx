@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Promoter, OrderSource, User } from "@/types"
+import { OrderSource, Promoter, User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -43,19 +43,15 @@ import { Plus, Trash2, Edit2 } from "lucide-react"
 
 import { toast } from "sonner"
 
-const CHANNEL_OPTIONS: { value: OrderSource; label: string }[] = [
-    { value: 'PEER', label: '同行' },
-    { value: 'PART_TIME_AGENT', label: '兼职代理' },
-]
-
 interface PromoterListProps {
     promoters: Promoter[]
     users?: User[]
+    channels?: string[]
 }
 
 type LegacyPromoter = Promoter & { channels?: OrderSource[] }
 
-export function PromoterList({ promoters, users = [] }: PromoterListProps) {
+export function PromoterList({ promoters, users = [], channels = [] }: PromoterListProps) {
     const router = useRouter()
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
@@ -67,13 +63,41 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
     const [currentPage, setCurrentPage] = useState(1)
     const [pageSize, setPageSize] = useState(10)
 
+    const channelOptions = useMemo(() => channels.map(c => ({ value: c, label: c })), [channels])
+
+    const legacyChannelLabels: Record<string, string> = {
+        PEER: "同行",
+        PART_TIME_AGENT: "兼职代理",
+        AGENT: "代理",
+        PART_TIME: "兼职"
+    }
+
+    const getSelectableChannelValue = (value?: string) => {
+        if (!value) return undefined
+        if (channelOptions.some(option => option.value === value)) return value
+        const mapped = legacyChannelLabels[value]
+        if (mapped && channelOptions.some(option => option.value === mapped)) return mapped
+        return undefined
+    }
+
     const filteredPromoters = promoters.filter(p => {
         const matchCreator = creatorFilter === "all" || p.creatorId === creatorFilter
-        const matchChannel = channelFilter === "all" || (
-            p.channel === channelFilter || 
-            ((p as LegacyPromoter).channels?.includes(channelFilter as OrderSource))
-        )
-        return matchCreator && matchChannel
+        if (channelFilter === "all") return matchCreator
+        const possibleChannels = new Set<string>()
+        if (p.channel) {
+            possibleChannels.add(p.channel)
+            const mapped = legacyChannelLabels[p.channel]
+            if (mapped) possibleChannels.add(mapped)
+        }
+        const legacyChannels = (p as LegacyPromoter).channels || []
+        legacyChannels.forEach(c => {
+            possibleChannels.add(c)
+            const mapped = legacyChannelLabels[c]
+            if (mapped) possibleChannels.add(mapped)
+        })
+        const resolved = getSelectableChannelValue(p.channel)
+        if (resolved) possibleChannels.add(resolved)
+        return matchCreator && possibleChannels.has(channelFilter)
     })
 
     const totalPages = Math.ceil(filteredPromoters.length / pageSize)
@@ -98,9 +122,19 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
     const handleEdit = (promoter: Promoter) => {
         setEditingPromoter(promoter)
         const legacyChannels = (promoter as LegacyPromoter).channels
+        let channelValue = promoter.channel || legacyChannels?.[0]
+
+        // Try to map legacy value to new value if not found in options
+        if (channelValue && !channelOptions.some(o => o.value === channelValue)) {
+             const mapped = legacyChannelLabels[channelValue]
+             if (mapped && channelOptions.some(o => o.value === mapped)) {
+                 channelValue = mapped
+             }
+        }
+
         setFormData({
             ...promoter,
-            channel: promoter.channel || legacyChannels?.[0]
+            channel: channelValue
         })
         setIsDialogOpen(true)
     }
@@ -159,10 +193,9 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
     }
 
     const getChannelLabel = (value: string) => {
-        const option = CHANNEL_OPTIONS.find(c => c.value === value)
+        const option = channelOptions.find(c => c.value === value)
         if (option) return option.label
-        if (value === 'AGENT') return '代理'
-        if (value === 'PART_TIME') return '兼职'
+        if (legacyChannelLabels[value]) return legacyChannelLabels[value]
         return value
     }
 
@@ -190,7 +223,7 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                                 <Label>渠道类型</Label>
                                 <Select 
                                     value={formData.channel} 
-                                    onValueChange={(val: OrderSource) => {
+                                    onValueChange={(val: string) => {
                                         setFormData({
                                             ...formData, 
                                             channel: val
@@ -201,11 +234,16 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                                         <SelectValue placeholder="选择渠道类型" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {CHANNEL_OPTIONS.map((option) => (
+                                        {channelOptions.map((option) => (
                                             <SelectItem key={option.value} value={option.value}>
                                                 {option.label}
                                             </SelectItem>
                                         ))}
+                                        {channelOptions.length === 0 && (
+                                            <SelectItem value="__empty" disabled>
+                                                暂无渠道
+                                            </SelectItem>
+                                        )}
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -261,7 +299,7 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">所有渠道</SelectItem>
-                            {CHANNEL_OPTIONS.map(option => (
+                            {channelOptions.map(option => (
                                 <SelectItem key={option.value} value={option.value}>
                                     {option.label}
                                 </SelectItem>

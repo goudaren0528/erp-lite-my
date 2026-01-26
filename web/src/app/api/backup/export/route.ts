@@ -45,8 +45,16 @@ export async function GET(req: NextRequest) {
         exportData.orders = orders;
     }
 
-    if (shouldExport('commissionConfigs')) {
-        exportData.commissionConfigs = await prisma.commissionConfig.findMany();
+    if (shouldExport('accountGroups')) {
+        exportData.accountGroups = await prisma.accountGroup.findMany();
+    }
+
+    if (shouldExport('channelConfigs')) {
+        exportData.channelConfigs = await prisma.channelConfig.findMany();
+    }
+
+    if (shouldExport('commissionRules')) {
+        exportData.commissionRules = await prisma.commissionRule.findMany();
     }
 
     if (shouldExport('backupLogs')) {
