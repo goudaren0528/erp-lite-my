@@ -38,8 +38,7 @@ async function main() {
         const existingUser = await prisma.user.findFirst({
             where: {
                 username: {
-                    equals: u.username,
-                    mode: 'insensitive' // Use insensitive search for Postgres compatibility
+                    equals: u.username
                 }
             }
         });
