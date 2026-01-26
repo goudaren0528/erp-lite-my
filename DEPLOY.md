@@ -66,3 +66,4 @@ docker-compose exec db psql -U postgres -d erp_lite
 
 - **Image Uploads**: If images are not showing, ensure the `./uploads` directory has write permissions and that `unoptimized` prop is used in Next.js Image components (already configured in code).
 - **Database Connection**: Ensure the `web` service can reach the `db` service. The hostname for the database is `db` (service name).
+- **Prisma Error P1012**: If you see `Error validating datasource db: the URL must start with the protocol file:`, it means `prisma/schema.prisma` is configured for `sqlite` but you provided a PostgreSQL URL. Ensure the provider in `web/prisma/schema.prisma` is set to `"postgresql"`.

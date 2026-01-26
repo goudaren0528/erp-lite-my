@@ -28,6 +28,10 @@ services:
     ports:
       - "3000:3000"
     
+    environment:
+      - DATABASE_URL=file:../data/erp-lite.db
+    
     # Mount uploads directory for persistence
     volumes:
       - ./public/uploads:/app/public/uploads
+      - ./data:/app/data
