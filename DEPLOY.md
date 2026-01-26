@@ -66,4 +66,7 @@ docker-compose exec db psql -U postgres -d erp_lite
 
 - **Image Uploads**: If images are not showing, ensure the `./uploads` directory has write permissions and that `unoptimized` prop is used in Next.js Image components (already configured in code).
 - **Database Connection**: Ensure the `web` service can reach the `db` service. The hostname for the database is `db` (service name).
-- **Prisma Error P1012**: If you see `Error validating datasource db: the URL must start with the protocol file:`, it means `prisma/schema.prisma` is configured for `sqlite` but you provided a PostgreSQL URL. Ensure the provider in `web/prisma/schema.prisma` is set to `"postgresql"`.
+- **Prisma Error P1012/P3019**: 
+  - The application is configured to automatically switch the Prisma provider from `sqlite` to `postgresql` when a PostgreSQL `DATABASE_URL` is detected in the environment variables (via `docker-entrypoint.sh`).
+  - **Note**: When deploying with PostgreSQL (e.g., in production), the entrypoint script uses `prisma db push` instead of `prisma migrate deploy` to avoid cross-provider migration lock issues (P3019). This ensures the database schema is synchronized without requiring a separate migration history for PostgreSQL.
+  - If you encounter provider mismatch errors locally, ensure your `DATABASE_URL` starts with `file:` for SQLite, or `postgresql://` for PostgreSQL.

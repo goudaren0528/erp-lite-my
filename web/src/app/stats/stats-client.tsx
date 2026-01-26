@@ -10,6 +10,7 @@ interface StatsClientProps {
     userName: string
     orderCount: number
     totalRevenue: number
+    refundedAmount: number
     promoters: {
       name: string
       count: number
@@ -30,6 +31,7 @@ export function StatsClient({ userStats }: StatsClientProps) {
                 <TableHead>账号名称</TableHead>
                 <TableHead>总订单数</TableHead>
                 <TableHead>总营收 (不含押金)</TableHead>
+                <TableHead>已退款金额</TableHead>
                 <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -39,6 +41,7 @@ export function StatsClient({ userStats }: StatsClientProps) {
                   <TableCell className="font-medium">{stat.userName}</TableCell>
                   <TableCell>{stat.orderCount}</TableCell>
                   <TableCell>¥ {stat.totalRevenue.toLocaleString()}</TableCell>
+                  <TableCell className="text-red-500">¥ {stat.refundedAmount.toLocaleString()}</TableCell>
                   <TableCell>
                     <Dialog>
                         <DialogTrigger asChild>

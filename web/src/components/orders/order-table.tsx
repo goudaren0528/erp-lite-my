@@ -125,7 +125,24 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
-  const baseFilteredOrders = orders.filter(order => {
+  // Pre-process orders to calculate OVERDUE status dynamically
+  const processedOrders = orders.map(order => {
+    let status = order.status;
+    // Check if Overdue: Status is RENTING and today > returnDeadline
+    if (status === 'RENTING' && order.returnDeadline) {
+        const deadline = new Date(order.returnDeadline);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        deadline.setHours(0, 0, 0, 0);
+
+        if (today > deadline) {
+            status = 'OVERDUE';
+        }
+    }
+    return { ...order, status };
+  });
+
+  const baseFilteredOrders = processedOrders.filter(order => {
     const matchOrderNo = !filterOrderNo || 
         order.orderNo.toLowerCase().includes(filterOrderNo.toLowerCase()) || 
         (order.miniProgramOrderNo && order.miniProgramOrderNo.toLowerCase().includes(filterOrderNo.toLowerCase()))
