@@ -32,8 +32,8 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot } from "@/app/actions"
-import { format, addDays } from "date-fns"
+import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot } from "@/app/actions"
+import { format, addDays, differenceInDays } from "date-fns"
 import { Edit2, Plus, Search, ArrowUpDown, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy, Upload, Image as ImageIcon } from "lucide-react"
 import { closeOrder } from "@/app/actions"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -61,6 +61,7 @@ const statusMap: Record<string, { label: string; color: string; order: number }>
   // New Statuses
   PENDING_REVIEW: { label: '待审核', color: 'bg-orange-500', order: 2 },
   PENDING_SHIPMENT: { label: '待发货', color: 'bg-blue-400', order: 5 },
+  SHIPPED_PENDING_CONFIRMATION: { label: '已发货待确认', color: 'bg-indigo-500', order: 5.5 },
   PENDING_RECEIPT: { label: '待收货', color: 'bg-blue-600', order: 6 },
   RENTING: { label: '待归还', color: 'bg-green-600', order: 7 }, // "待归还" implies Renting
   OVERDUE: { label: '已逾期', color: 'bg-red-600', order: 8 },
@@ -89,6 +90,7 @@ const platformMap: Record<string, string> = {
 import {
   Pagination,
   PaginationContent,
+  PaginationEllipsis,
   PaginationItem,
   PaginationLink,
   PaginationNext,
@@ -201,7 +203,10 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   const today = new Date().toISOString().split('T')[0]
   const todayOrders = orders.filter(o => o.createdAt.startsWith(today))
   const todayCount = todayOrders.length
-  const todayAmount = todayOrders.reduce((sum, o) => sum + o.totalAmount, 0)
+  const todayAmount = todayOrders.reduce((sum, o) => {
+    const extensionTotal = (o.extensions || []).reduce((acc, curr) => acc + curr.price, 0)
+    return sum + o.totalAmount + extensionTotal
+  }, 0)
 
   const toggleSort = () => {
       if (sortBy === 'status') {
@@ -421,29 +426,29 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
           <Table>
           <TableHeader>
               <TableRow>
-              <TableHead className="w-[150px]">
+              <TableHead className="w-[180px]">
                   <Button variant="ghost" size="sm" onClick={toggleSort} className="-ml-3 hover:bg-transparent flex items-center gap-1">
                       订单号/时间
                       <ArrowUpDown className={cn("ml-2 h-4 w-4 transition-opacity", sortBy === 'createdAt' ? "opacity-100" : "opacity-50")} />
                   </Button>
               </TableHead>
-              <TableHead>用户昵称（闲鱼等）</TableHead>
-              <TableHead>小程序单号</TableHead>
-              <TableHead>闲鱼单号</TableHead>
-              <TableHead>推广方式</TableHead>
-              <TableHead>推广员</TableHead>
-              <TableHead>物流信息</TableHead>
-              <TableHead>设备信息</TableHead>
-              <TableHead>
+              <TableHead className="w-[120px]">用户昵称（闲鱼等）</TableHead>
+              <TableHead className="w-[150px]">小程序单号</TableHead>
+              <TableHead className="w-[150px]">闲鱼单号</TableHead>
+              <TableHead className="w-[100px]">推广方式</TableHead>
+              <TableHead className="w-[100px]">推广员</TableHead>
+              <TableHead className="w-[150px]">物流信息</TableHead>
+              <TableHead className="w-[200px]">设备信息</TableHead>
+              <TableHead className="w-[150px]">
                   <Button variant="ghost" size="sm" onClick={toggleRentSort} className="-ml-3 hover:bg-transparent">
                       租期/时间
                       <ArrowUpDown className="ml-2 h-4 w-4" />
                   </Button>
               </TableHead>
-              <TableHead>金额详情</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead>截图凭证</TableHead>
-              <TableHead>备注</TableHead>
+              <TableHead className="w-[120px]">金额详情</TableHead>
+              <TableHead className="w-[100px]">状态</TableHead>
+              <TableHead className="w-[100px]">截图凭证</TableHead>
+              <TableHead className="min-w-[150px]">备注</TableHead>
               </TableRow>
           </TableHeader>
           <TableBody>
@@ -490,35 +495,76 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
           </div>
 
           {totalPages > 1 && (
-              <Pagination className="justify-end w-auto mx-0">
-                  <PaginationContent>
-                      <PaginationItem>
-                          <PaginationPrevious 
-                              onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
-                              className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                          />
-                      </PaginationItem>
-                      
-                      {Array.from({ length: totalPages }).map((_, i) => (
-                          <PaginationItem key={i}>
-                              <PaginationLink 
-                                  isActive={currentPage === i + 1}
-                                  onClick={() => setCurrentPage(i + 1)}
-                                  className="cursor-pointer"
-                              >
-                                  {i + 1}
-                              </PaginationLink>
-                          </PaginationItem>
-                      ))}
+            <Pagination className="justify-end w-auto mx-0">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
 
-                      <PaginationItem>
-                          <PaginationNext 
-                              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                              className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                          />
-                      </PaginationItem>
-                  </PaginationContent>
-              </Pagination>
+                {(() => {
+                  const generatePaginationItems = (current: number, total: number) => {
+                    if (total <= 7) {
+                      return Array.from({ length: total }, (_, i) => i + 1);
+                    }
+
+                    const items: (number | 'ellipsis')[] = [1];
+                    let start = Math.max(2, current - 2);
+                    let end = Math.min(total - 1, current + 2);
+
+                    if (current < 4) {
+                      end = Math.min(total - 1, 5);
+                    }
+                    if (current > total - 3) {
+                      start = Math.max(2, total - 4);
+                    }
+
+                    if (start > 2) {
+                      items.push('ellipsis-start');
+                    }
+
+                    for (let i = start; i <= end; i++) {
+                      items.push(i);
+                    }
+
+                    if (end < total - 1) {
+                      items.push('ellipsis-end');
+                    }
+
+                    if (total > 1) {
+                      items.push(total);
+                    }
+
+                    return items;
+                  };
+
+                  return generatePaginationItems(currentPage, totalPages).map((item, index) => (
+                    <PaginationItem key={typeof item === 'string' ? item : item}>
+                      {typeof item === 'number' ? (
+                        <PaginationLink
+                          isActive={currentPage === item}
+                          onClick={() => setCurrentPage(item)}
+                          className="cursor-pointer"
+                        >
+                          {item}
+                        </PaginationLink>
+                      ) : (
+                        <PaginationEllipsis />
+                      )}
+                    </PaginationItem>
+                  ));
+                })()}
+
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
           )}
           </div>
       </div>
@@ -529,6 +575,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
 function ShipForm({ order, onSuccess }: { order: Order, onSuccess: () => void }) {
   const [trackingNumber, setTrackingNumber] = useState(order.trackingNumber || '')
   const [logisticsCompany, setLogisticsCompany] = useState(order.logisticsCompany || '顺丰速运')
+  const [sn, setSn] = useState(order.sn || '')
   const isOffline = logisticsCompany === '线下自提'
 
   async function handleSubmit(e: React.FormEvent) {
@@ -542,6 +589,7 @@ function ShipForm({ order, onSuccess }: { order: Order, onSuccess: () => void })
         const res = await shipOrder(order.id, {
             trackingNumber,
             logisticsCompany,
+            sn,
         })
         
         if (res?.success) {
@@ -575,6 +623,10 @@ function ShipForm({ order, onSuccess }: { order: Order, onSuccess: () => void })
             <div className="space-y-2">
                 <Label>物流单号 (选填)</Label>
                 <Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} placeholder="请输入单号" />
+            </div>
+            <div className="space-y-2 col-span-2">
+                <Label>设备SN码 (选填)</Label>
+                <Input value={sn} onChange={e => setSn(e.target.value)} placeholder="请输入设备SN码" />
             </div>
         </div>
         <Button type="submit" className="w-full">确认发货</Button>
@@ -963,6 +1015,21 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
     }
   }
 
+  const handleConfirmShipment = async () => {
+    try {
+        const res = await confirmShipment(order.id)
+        if (res?.success) {
+            toast.success(res.message)
+            router.refresh()
+        } else {
+            toast.error(res?.message || "操作失败")
+        }
+    } catch (error) {
+        console.error(error)
+        toast.error("操作失败")
+    }
+  }
+
   const handleClose = async () => {
      try {
         const res = await closeOrder(order.id, closeRemark)
@@ -984,6 +1051,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         if (res?.success) {
             toast.success(res.message)
             setIsOverdueOpen(false)
+            router.refresh()
         } else {
             toast.error(res?.message || "操作失败")
         }
@@ -1031,28 +1099,70 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
     }
   }
 
+  const copySnapshot = () => {
+    const lines = [
+        "收货信息",
+        `${order.recipientName || '-'} | ${order.recipientPhone || '-'}`,
+        order.address || '-',
+        "",
+        "设备信息",
+        order.productName || '-',
+        order.variantName || '-',
+        "",
+        "租期",
+        `起: ${order.rentStartDate ? format(new Date(order.rentStartDate), 'yyyy-MM-dd') : '-'}`,
+        `止: ${order.rentStartDate ? format(addDays(new Date(order.rentStartDate), order.duration + totalExtensionDays - 1), 'yyyy-MM-dd') : '-'}`,
+        "",
+        "快递单号",
+        order.trackingNumber || '-'
+    ];
+    copyToClipboard(lines.join('\n'));
+  }
+
+  const getDeliveryTimeColor = () => {
+    if (!order.deliveryTime) return "text-muted-foreground";
+    const now = new Date();
+    const deliveryTime = new Date(order.deliveryTime);
+    const isNotShipped = ['PENDING_REVIEW', 'PENDING_SHIPMENT'].includes(order.status);
+
+    if (isNotShipped) {
+        if (now > deliveryTime) return "text-red-600 font-bold";
+        return "text-muted-foreground";
+    } else {
+        if (order.actualDeliveryTime) {
+            const actual = new Date(order.actualDeliveryTime);
+            if (actual > deliveryTime) {
+                const diff = differenceInDays(actual, deliveryTime);
+                if (diff <= 3) return "text-green-600 font-bold";
+                return "text-muted-foreground";
+            }
+        }
+        return "text-muted-foreground";
+    }
+  }
+
   return (
     <>
     <TableRow className="border-b-0 group">
       <TableCell className="font-medium align-top">
         <div className="flex items-center gap-1">
-            <div className="text-sm font-bold">{order.orderNo}</div>
+            <div className="text-xs font-bold">{order.orderNo}</div>
             <Button variant="ghost" size="icon" className="h-4 w-4 text-gray-400 hover:text-blue-600" onClick={() => copyToClipboard(order.orderNo)}>
                 <Copy className="h-3 w-3" />
             </Button>
         </div>
-        <div className="text-xs text-muted-foreground mt-1">{format(new Date(order.createdAt), 'MM-dd HH:mm')}</div>
-        <div className="text-xs text-blue-600 mt-1">创建人: {order.creatorName}</div>
+        <div className="text-[10px] text-muted-foreground mt-1">{format(new Date(order.createdAt), 'MM-dd HH:mm')}</div>
+        <div className="text-[10px] text-blue-600 mt-1">创建人: {order.creatorName}</div>
       </TableCell>
       <TableCell className="align-top">
-        <div className="font-bold">{order.customerXianyuId}</div>
+        <div className="font-bold text-xs">{order.customerXianyuId}</div>
       </TableCell>
       <TableCell className="align-top">
          <div className="flex items-center gap-1">
             <Popover open={isMpOpen} onOpenChange={setIsMpOpen}>
                 <PopoverTrigger asChild>
-                    <div className="text-sm cursor-pointer hover:underline decoration-dashed underline-offset-4 text-green-700 font-mono break-all">
-                        {order.miniProgramOrderNo || <span className="text-gray-300 italic text-xs">点击填写</span>}
+                    <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-green-700 font-mono break-all">
+                        {order.miniProgramOrderNo || <span className="text-gray-300 italic text-[10px]">点击填写</span>}
                     </div>
                 </PopoverTrigger>
                 <PopoverContent className="w-64 p-3">
@@ -1076,8 +1186,8 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         <div className="flex items-center gap-1">
             <Popover open={isXianyuOpen} onOpenChange={setIsXianyuOpen}>
                 <PopoverTrigger asChild>
-                    <div className="text-sm cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700 font-mono break-all">
-                        {order.xianyuOrderNo || <span className="text-gray-300 italic text-xs">点击填写</span>}
+                    <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700 font-mono break-all">
+                        {order.xianyuOrderNo || <span className="text-gray-300 italic text-[10px]">点击填写</span>}
                     </div>
                 </PopoverTrigger>
                 <PopoverContent className="w-64 p-3">
@@ -1105,8 +1215,8 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
       </TableCell>
       <TableCell className="align-top space-y-2">
         <div className="space-y-1">
-            <div className="text-xs font-semibold text-gray-500">收货信息</div>
-            <div className="text-xs text-muted-foreground max-w-[150px] truncate cursor-help" title={`收件人: ${order.recipientName || '无'}\n电话: ${order.recipientPhone || '无'}\n地址: ${order.address}`}>
+            <div className="text-[10px] font-semibold text-gray-500">收货信息</div>
+            <div className="text-[10px] text-muted-foreground max-w-[150px] truncate cursor-help" title={`收件人: ${order.recipientName || '无'}\n电话: ${order.recipientPhone || '无'}\n地址: ${order.address}`}>
                 {(order.recipientName || order.recipientPhone) ? (
                     <div>
                         {order.recipientName || '-'} <span className="mx-1">|</span> {order.recipientPhone || '-'}
@@ -1118,8 +1228,8 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
 
         {order.logisticsCompany && (
             <div className="space-y-1 pt-2 border-t border-dashed border-gray-200">
-                <div className="text-xs font-semibold text-gray-500">发货物流</div>
-                <div className="text-xs">
+                <div className="text-[10px] font-semibold text-gray-500">发货物流</div>
+                <div className="text-[10px]">
                     {order.logisticsCompany === '线下自提' ? (
                         <div className="flex items-center text-orange-600 font-medium">
                             <Truck className="w-3 h-3 mr-1" />
@@ -1194,10 +1304,11 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
       </TableCell>
       <TableCell className="align-top">
         <div className="font-medium">{order.duration} 天</div>
-        <div className="text-xs text-muted-foreground mt-1" title="预计发货">发: {order.deliveryTime ? format(new Date(order.deliveryTime), 'yyyy-MM-dd') : '-'}</div>
-        <div className="text-xs text-muted-foreground" title="起租日期">起: {order.rentStartDate ? format(new Date(order.rentStartDate), 'yyyy-MM-dd') : '-'}</div>
-        <div className="text-xs text-muted-foreground" title="租期结束">止: {order.rentStartDate ? format(addDays(new Date(order.rentStartDate), order.duration + totalExtensionDays - 1), 'yyyy-MM-dd') : '-'}</div>
-        <div className="text-xs text-muted-foreground" title="最晚归还">归: {order.returnDeadline ? format(new Date(order.returnDeadline), 'yyyy-MM-dd') : '-'}</div>
+        <div className={`text-xs mt-1 ${getDeliveryTimeColor()}`} title="预计发货">预发: {order.deliveryTime ? format(new Date(order.deliveryTime), 'yyyy-MM-dd') : '-'}</div>
+        <div className="text-xs text-muted-foreground" title="实际发货">实发: {order.actualDeliveryTime ? format(new Date(order.actualDeliveryTime), 'yyyy-MM-dd') : '-'}</div>
+        <div className="text-xs text-muted-foreground" title="起租日期">起租: {order.rentStartDate ? format(new Date(order.rentStartDate), 'yyyy-MM-dd') : '-'}</div>
+        <div className="text-xs text-muted-foreground" title="租期结束">止租: {order.rentStartDate ? format(addDays(new Date(order.rentStartDate), order.duration + totalExtensionDays - 1), 'yyyy-MM-dd') : '-'}</div>
+        <div className="text-xs text-muted-foreground" title="最晚归还">归还: {order.returnDeadline ? format(new Date(order.returnDeadline), 'yyyy-MM-dd') : '-'}</div>
       </TableCell>
       <TableCell className="align-top">
         <div className="font-bold text-red-600">¥ {totalAmountWithExtensions}</div>
@@ -1217,7 +1328,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         )}
         {order.overdueFee && order.overdueFee > 0 ? (
             <div className="text-xs text-red-600 mt-1 font-bold">
-               (+ 违约金 ¥{order.overdueFee})
+               (含 违约金 ¥{order.overdueFee})
             </div>
         ) : null}
       </TableCell>
@@ -1295,7 +1406,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
             value={remark} 
             onChange={e => setRemark(e.target.value)} 
             onBlur={handleRemarkBlur}
-            className="w-[150px] min-h-[50px] text-xs resize-none"
+            className="w-[140px] min-h-[40px] text-[10px] resize-none"
             placeholder="备注..."
         />
       </TableCell>
@@ -1341,6 +1452,62 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
                     </DialogContent>
                 </Dialog>
 
+                <Dialog>
+                    <DialogTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs text-gray-600 hover:text-blue-600 border-dashed" title="订单快照">
+                            <ScrollText className="h-3 w-3 mr-1" /> 快照
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>订单快照</DialogTitle>
+                        </DialogHeader>
+                        <div className="bg-gray-50 p-4 rounded text-sm space-y-3">
+                            <div>
+                                <div className="font-bold text-gray-900 mb-1">收货信息</div>
+                                <div className="pl-3 border-l-2 border-blue-300 text-gray-700">
+                                    <div>{order.recipientName || '-'} | {order.recipientPhone || '-'}</div>
+                                    <div className="mt-0.5 text-gray-600 break-words">{order.address || '-'}</div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div className="font-bold text-gray-900 mb-1">设备信息</div>
+                                <div className="pl-3 border-l-2 border-green-300 text-gray-700">
+                                    <div>{order.productName || '-'}</div>
+                                    <div className="text-gray-600">{order.variantName || '-'}</div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div className="font-bold text-gray-900 mb-1">租期</div>
+                                <div className="pl-3 border-l-2 border-purple-300 text-gray-700 grid grid-cols-2 gap-4">
+                                    <div>
+                                        <span className="text-gray-500 mr-1">起:</span>
+                                        {order.rentStartDate ? format(new Date(order.rentStartDate), 'yyyy-MM-dd') : '-'}
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500 mr-1">止:</span>
+                                        {order.rentStartDate ? format(addDays(new Date(order.rentStartDate), order.duration + (order.extensions || []).reduce((acc, curr) => acc + curr.days, 0) - 1), 'yyyy-MM-dd') : '-'}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div className="font-bold text-gray-900 mb-1">快递单号</div>
+                                <div className="pl-3 border-l-2 border-orange-300 text-gray-700 font-mono select-all">
+                                    {order.trackingNumber || '-'}
+                                </div>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button onClick={copySnapshot} className="w-full">
+                                <Copy className="w-4 h-4 mr-2" /> 复制内容
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
                 {/* Workflow Buttons */}
                 {order.status === 'PENDING_REVIEW' && (
                     <>
@@ -1383,6 +1550,12 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
                             <ShipForm order={order} onSuccess={() => setIsShipOpen(false)} />
                         </DialogContent>
                     </Dialog>
+                )}
+
+                {order.status === 'SHIPPED_PENDING_CONFIRMATION' && (
+                    <Button size="sm" onClick={handleConfirmShipment} className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-700">
+                        <Check className="h-3 w-3 mr-1" /> 确认发货
+                    </Button>
                 )}
 
                 {/* Return for Renting/Overdue */}

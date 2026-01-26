@@ -29,6 +29,15 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationEllipsis,
+} from "@/components/ui/pagination"
 import { savePromoter, deletePromoter } from "@/app/actions"
 import { Plus, Trash2, Edit2 } from "lucide-react"
 
@@ -54,11 +63,37 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
     const [promoterToDelete, setPromoterToDelete] = useState<Promoter | null>(null)
     const [formData, setFormData] = useState<Partial<Promoter>>({})
     const [creatorFilter, setCreatorFilter] = useState<string>("all")
+    const [channelFilter, setChannelFilter] = useState<string>("all")
+    const [currentPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize] = useState(10)
 
     const filteredPromoters = promoters.filter(p => {
-        if (creatorFilter === "all") return true
-        return p.creatorId === creatorFilter
+        const matchCreator = creatorFilter === "all" || p.creatorId === creatorFilter
+        const matchChannel = channelFilter === "all" || (
+            p.channel === channelFilter || 
+            ((p as LegacyPromoter).channels?.includes(channelFilter as OrderSource))
+        )
+        return matchCreator && matchChannel
     })
+
+    const totalPages = Math.ceil(filteredPromoters.length / pageSize)
+    const paginatedPromoters = filteredPromoters.slice(
+        (currentPage - 1) * pageSize,
+        currentPage * pageSize
+    )
+
+    // Reset page when filter changes
+    // We can't use useEffect here easily without importing it, but we can just set it in the handlers or let it be.
+    // Better to set page to 1 when filters change.
+    const handleCreatorFilterChange = (val: string) => {
+        setCreatorFilter(val)
+        setCurrentPage(1)
+    }
+
+    const handleChannelFilterChange = (val: string) => {
+        setChannelFilter(val)
+        setCurrentPage(1)
+    }
 
     const handleEdit = (promoter: Promoter) => {
         setEditingPromoter(promoter)
@@ -139,26 +174,7 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
     return (
         <div className="space-y-4">
             <div className="flex justify-between items-center">
-                <div className="flex items-center space-x-4">
-                    <h2 className="text-xl font-bold">推广人员列表</h2>
-                    {users.length > 0 && (
-                        <div className="w-[200px]">
-                            <Select value={creatorFilter} onValueChange={setCreatorFilter}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="筛选创建人" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">所有创建人</SelectItem>
-                                    {users.map(user => (
-                                        <SelectItem key={user.id} value={user.id}>
-                                            {user.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    )}
-                </div>
+                <h2 className="text-xl font-bold">推广人员列表</h2>
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                     <DialogTrigger asChild>
                         <Button onClick={handleAdd}>
@@ -220,20 +236,55 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                 </Dialog>
             </div>
 
+            <div className="bg-muted/30 p-4 rounded-lg flex flex-wrap gap-1 items-center">
+                {users.length > 0 && (
+                    <div className="w-[200px]">
+                        <Select value={creatorFilter} onValueChange={handleCreatorFilterChange}>
+                            <SelectTrigger className="bg-background">
+                                <SelectValue placeholder="筛选创建人" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">所有创建人</SelectItem>
+                                {users.map(user => (
+                                    <SelectItem key={user.id} value={user.id}>
+                                        {user.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
+                <div className="w-[200px]">
+                    <Select value={channelFilter} onValueChange={handleChannelFilterChange}>
+                        <SelectTrigger className="bg-background">
+                            <SelectValue placeholder="筛选渠道" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">所有渠道</SelectItem>
+                            {CHANNEL_OPTIONS.map(option => (
+                                <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+            </div>
+
             <div className="rounded-md border">
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead>姓名</TableHead>
-                            <TableHead>联系方式</TableHead>
-                            <TableHead>渠道类型</TableHead>
-                            <TableHead>创建人</TableHead>
-                            <TableHead>创建时间</TableHead>
+                            <TableHead className="w-[150px]">姓名</TableHead>
+                            <TableHead className="w-[150px]">联系方式</TableHead>
+                            <TableHead className="w-[150px]">渠道类型</TableHead>
+                            <TableHead className="w-[120px]">创建人</TableHead>
+                            <TableHead className="w-[150px]">创建时间</TableHead>
                             <TableHead className="w-[100px]">操作</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {filteredPromoters.map((promoter) => (
+                        {paginatedPromoters.map((promoter) => (
                             <TableRow key={promoter.id}>
                                 <TableCell className="font-medium">{promoter.name}</TableCell>
                                 <TableCell>{promoter.phone || '-'}</TableCell>
@@ -269,6 +320,121 @@ export function PromoterList({ promoters, users = [] }: PromoterListProps) {
                         )}
                     </TableBody>
                 </Table>
+            </div>
+
+            <div className="flex items-center justify-between mt-4 px-2">
+                <div className="text-sm text-muted-foreground">
+                    共 {filteredPromoters.length} 条数据，本页显示 {paginatedPromoters.length} 条
+                </div>
+
+                <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                        <p className="text-sm font-medium text-gray-500">每页行数</p>
+                        <Select
+                            value={`${pageSize}`}
+                            onValueChange={(value) => {
+                                setPageSize(Number(value))
+                                setCurrentPage(1)
+                            }}
+                        >
+                            <SelectTrigger className="h-8 w-[70px]">
+                                <SelectValue placeholder={pageSize} />
+                            </SelectTrigger>
+                            <SelectContent side="top">
+                                {[10, 20, 50, 100].map((size) => (
+                                    <SelectItem key={size} value={`${size}`}>
+                                        {size}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {totalPages > 1 && (
+                        <Pagination className="justify-end w-auto mx-0">
+                            <PaginationContent>
+                                <PaginationItem>
+                                    <PaginationPrevious
+                                        href="#"
+                                        onClick={(e) => {
+                                            e.preventDefault()
+                                            setCurrentPage(p => Math.max(1, p - 1))
+                                        }}
+                                        className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                    />
+                                </PaginationItem>
+
+                                {(() => {
+                                    const generatePaginationItems = (current: number, total: number) => {
+                                        if (total <= 7) {
+                                            return Array.from({ length: total }, (_, i) => i + 1);
+                                        }
+
+                                        const items: (number | 'ellipsis-start' | 'ellipsis-end')[] = [1];
+                                        let start = Math.max(2, current - 2);
+                                        let end = Math.min(total - 1, current + 2);
+
+                                        if (current < 4) {
+                                            end = Math.min(total - 1, 5);
+                                        }
+                                        if (current > total - 3) {
+                                            start = Math.max(2, total - 4);
+                                        }
+
+                                        if (start > 2) {
+                                            items.push('ellipsis-start');
+                                        }
+
+                                        for (let i = start; i <= end; i++) {
+                                            items.push(i);
+                                        }
+
+                                        if (end < total - 1) {
+                                            items.push('ellipsis-end');
+                                        }
+
+                                        if (total > 1) {
+                                            items.push(total);
+                                        }
+
+                                        return items;
+                                    };
+
+                                    return generatePaginationItems(currentPage, totalPages).map((item, index) => (
+                                        <PaginationItem key={`${item}-${index}`}>
+                                            {typeof item === 'number' ? (
+                                                <PaginationLink
+                                                    href="#"
+                                                    isActive={currentPage === item}
+                                                    onClick={(e) => {
+                                                        e.preventDefault()
+                                                        setCurrentPage(item)
+                                                    }}
+                                                    className="cursor-pointer"
+                                                >
+                                                    {item}
+                                                </PaginationLink>
+                                            ) : (
+                                                <PaginationEllipsis />
+                                            )}
+                                        </PaginationItem>
+                                    ));
+                                })()}
+
+                                <PaginationItem>
+                                    <PaginationNext
+                                        href="#"
+                                        onClick={(e) => {
+                                            e.preventDefault()
+                                            setCurrentPage(p => Math.min(totalPages, p + 1))
+                                        }}
+                                        className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                    />
+                                </PaginationItem>
+                            </PaginationContent>
+                        </Pagination>
+                    )}
+                </div>
             </div>
 
             <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

@@ -21,6 +21,7 @@ type DashboardOrder = {
 const statusMap: Record<string, { label: string; color: string; order: number }> = {
   PENDING_REVIEW: { label: '待审核', color: 'text-orange-600 bg-orange-50 border-orange-200', order: 2 },
   PENDING_SHIPMENT: { label: '待发货', color: 'text-blue-600 bg-blue-50 border-blue-200', order: 5 },
+  SHIPPED_PENDING_CONFIRMATION: { label: '已发货待确认', color: 'text-indigo-600 bg-indigo-50 border-indigo-200', order: 5.5 },
   PENDING_RECEIPT: { label: '待收货', color: 'text-blue-700 bg-blue-100 border-blue-300', order: 6 },
   RENTING: { label: '待归还', color: 'text-green-600 bg-green-50 border-green-200', order: 7 },
   OVERDUE: { label: '已逾期', color: 'text-red-600 bg-red-50 border-red-200', order: 8 },
@@ -71,6 +72,7 @@ export default async function Home() {
     XIAOHONGSHU: '小红书',
     XIANYU: '闲鱼',
     DOUYIN: '抖音',
+    OFFLINE: '线下',
     OTHER: '其他',
   };
 

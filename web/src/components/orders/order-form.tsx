@@ -81,6 +81,9 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
   const [deposit, setDeposit] = useState<string>(
     initialData?.deposit !== undefined ? String(initialData.deposit) : "0"
   )
+  const [overdueFee, setOverdueFee] = useState<string>(
+    initialData?.overdueFee !== undefined ? String(initialData.overdueFee) : "0"
+  )
 
   // Address State
   // Try to parse existing address: "Province City Detail"
@@ -235,7 +238,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     }
   }
 
-  const totalAmount = (Number(rentPrice) || 0) + (Number(insurancePrice) || 0) + (Number(deposit) || 0)
+  const totalAmount = (Number(rentPrice) || 0) + (Number(insurancePrice) || 0) + (Number(deposit) || 0) + (Number(overdueFee) || 0)
   
   // Date Calculations
   const deliveryTime = rentStartDate ? format(subDays(new Date(rentStartDate), 2), "yyyy-MM-dd") : ""
@@ -245,6 +248,17 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     : ""
 
   async function handleSubmit(formData: FormData) {
+      // Validate Mandatory Fields
+      if (!selectedProductId) {
+          toast.error("请选择设备型号")
+          return
+      }
+
+      if (!selectedVariantName) {
+          toast.error("请选择设备版本")
+          return
+      }
+
       // Validate dates
       if (rentStartDate && rentEndDate) {
           const start = new Date(rentStartDate)
@@ -271,6 +285,14 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         ? `${province} ${city} ${detailAddress}`
         : detailAddress || formData.get('address') as string
       
+      // Validate Address for PEER
+      if (source === 'PEER') {
+          if (!fullAddress || !fullAddress.trim()) {
+              toast.error("同行订单必须填写送达地址")
+              return
+          }
+      }
+
       formData.set('address', fullAddress)
 
       try {
@@ -369,7 +391,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     <form action={handleSubmit} className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>渠道类型</Label>
+          <Label>渠道类型<span className="text-red-500 ml-1">*</span></Label>
           <Select 
             name="source" 
             value={source} 
@@ -460,7 +482,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>推广方式</Label>
+          <Label>推广方式<span className="text-red-500 ml-1">*</span></Label>
           <Select name="platform" value={platform} onValueChange={(v: OrderPlatform) => setPlatform(v)} required>
             <SelectTrigger>
               <SelectValue placeholder="选择推广方式" />
@@ -560,7 +582,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2 flex flex-col">
-            <Label className="mb-2">选择型号 (支持搜索)</Label>
+            <Label className="mb-2">选择型号 (支持搜索)<span className="text-red-500 ml-1">*</span></Label>
             <Popover open={openProductSearch} onOpenChange={setOpenProductSearch}>
               <PopoverTrigger asChild>
                 <Button
@@ -609,7 +631,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
           </div>
 
           <div className="space-y-2">
-            <Label>选择版本</Label>
+            <Label>选择版本<span className="text-red-500 ml-1">*</span></Label>
             <Select 
               name="variantName" 
               value={selectedVariantName}
@@ -666,7 +688,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-            <Label>租期开始日期</Label>
+            <Label>租期开始日期<span className="text-red-500 ml-1">*</span></Label>
             <Input 
                 type="date" 
                 name="rentStartDate" 
@@ -677,7 +699,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         </div>
 
         <div className="space-y-2">
-            <Label>租期结束日期 ({duration}天)</Label>
+            <Label>租期结束日期 ({duration}天)<span className="text-red-500 ml-1">*</span></Label>
             <Input 
                 type="date" 
                 value={rentEndDate}
@@ -695,7 +717,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         <input type="hidden" name="deliveryTime" value={deliveryTime} />
         <input type="hidden" name="returnDeadline" value={returnDeadline} />
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="space-y-2">
             <Label>租金 (¥)</Label>
             <Input 
@@ -721,6 +743,15 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                 name="deposit" 
                 value={deposit} 
                 onChange={e => setDeposit(handleNumberInput(e.target.value))}
+            />
+        </div>
+        <div className="space-y-2">
+            <Label>违约金 (¥)</Label>
+            <Input 
+                type="number" 
+                name="overdueFee" 
+                value={overdueFee} 
+                onChange={e => setOverdueFee(handleNumberInput(e.target.value))}
             />
         </div>
       </div>
@@ -822,7 +853,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         </div>
 
         <div className="space-y-2">
-            <Label>送达地址</Label>
+            <Label>送达地址{source === 'PEER' && <span className="text-red-500 ml-1">*</span>}</Label>
             <div className="grid grid-cols-2 gap-4 mb-2">
             <Select value={province} onValueChange={(val) => { setProvince(val); setCity(""); }}>
                 <SelectTrigger>

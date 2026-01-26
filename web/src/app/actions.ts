@@ -205,6 +205,7 @@ export async function deletePromoter(promoterId: string) {
 const STATUS_LABELS: Record<string, string> = {
   PENDING_REVIEW: '待审核',
   PENDING_SHIPMENT: '待发货',
+  SHIPPED_PENDING_CONFIRMATION: '已发货待确认',
   PENDING_RECEIPT: '待收货',
   RENTING: '待归还',
   OVERDUE: '已逾期',
@@ -236,6 +237,14 @@ export async function updateOrder(orderId: string, formData: FormData) {
             if (returnDeadline <= rentStartDate) {
                 throw new Error("租期结束日期不能早于开始日期");
             }
+        }
+
+        const order = await prisma.order.findUnique({
+            where: { id: orderId },
+            select: { overdueFee: true }
+        });
+        if (!order) {
+            throw new Error("Order not found");
         }
 
         // Check for duplicate Mini Program Order No
@@ -286,6 +295,8 @@ export async function updateOrder(orderId: string, formData: FormData) {
              });
         }
 
+        const totalAmount = Number(rawData.totalAmount) || 0
+
         await prisma.order.update({
             where: { id: orderId },
             data: {
@@ -304,7 +315,8 @@ export async function updateOrder(orderId: string, formData: FormData) {
                 rentPrice: Number(rawData.rentPrice) || 0,
                 deposit: Number(rawData.deposit) || 0,
                 insurancePrice: Number(rawData.insurancePrice) || 0,
-                totalAmount: Number(rawData.totalAmount) || 0,
+                overdueFee: Number(rawData.overdueFee) || 0,
+                totalAmount,
                 
                 address: (rawData.address as string) || '',
                 recipientName: (rawData.recipientName as string) || null,
@@ -505,29 +517,55 @@ export async function deleteOrder(orderId: string) {
     }
 }
 
-export async function shipOrder(orderId: string, data: { trackingNumber?: string, logisticsCompany?: string }) {
+export async function shipOrder(orderId: string, data: { trackingNumber?: string, logisticsCompany?: string, sn?: string }) {
     try {
         const currentUser = await getCurrentUser();
         await prisma.order.update({
             where: { id: orderId },
             data: {
-                status: 'RENTING',
+                status: 'SHIPPED_PENDING_CONFIRMATION',
                 trackingNumber: data.trackingNumber,
                 logisticsCompany: data.logisticsCompany,
+                sn: data.sn,
+                actualDeliveryTime: new Date(),
                 logs: {
                     create: {
                         action: '发货',
                         operator: currentUser?.name || '系统',
-                        desc: `发货: ${data.logisticsCompany || ''} ${data.trackingNumber || ''}`
+                        desc: `发货: ${data.logisticsCompany || ''} ${data.trackingNumber || ''}${data.sn ? ` SN:${data.sn}` : ''}`
                     }
                 }
             }
         });
         revalidatePath('/orders');
-        return { success: true, message: "发货成功" };
+        return { success: true, message: "发货成功，请确认发货信息" };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { success: false, message: message || "发货失败" };
+    }
+}
+
+export async function confirmShipment(orderId: string) {
+    try {
+        const currentUser = await getCurrentUser();
+        await prisma.order.update({
+            where: { id: orderId },
+            data: {
+                status: 'PENDING_RECEIPT',
+                logs: {
+                    create: {
+                        action: '确认发货',
+                        operator: currentUser?.name || '系统',
+                        desc: '确认发货信息，等待客户收货'
+                    }
+                }
+            }
+        });
+        revalidatePath('/orders');
+        return { success: true, message: "确认成功" };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "确认失败" };
     }
 }
 
@@ -636,11 +674,13 @@ export async function addOverdueFee(orderId: string, fee: number) {
         if (!order) throw new Error("Order not found");
 
         const newOverdueFee = (order.overdueFee || 0) + fee;
+        const totalAmount = (order.totalAmount || 0) + fee;
         
         await prisma.order.update({
             where: { id: orderId },
             data: {
                 overdueFee: newOverdueFee,
+                totalAmount,
                 logs: {
                     create: {
                         action: '增加逾期费',

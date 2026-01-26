@@ -3,6 +3,23 @@
 import { useState } from "react"
 import { Product } from "@/types"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationEllipsis,
+} from "@/components/ui/pagination"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Plus, Trash2, Edit2 } from "lucide-react"
@@ -20,6 +37,24 @@ export function ProductList({ products }: ProductListProps) {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [productToDelete, setProductToDelete] = useState<Product | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+
+  const filteredProducts = products.filter(p => 
+      p.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const totalPages = Math.ceil(filteredProducts.length / pageSize)
+  const paginatedProducts = filteredProducts.slice(
+      (currentPage - 1) * pageSize,
+      currentPage * pageSize
+  )
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setSearchQuery(e.target.value)
+      setCurrentPage(1)
+  }
 
   const confirmDelete = (product: Product) => {
     setProductToDelete(product)
@@ -44,9 +79,9 @@ export function ProductList({ products }: ProductListProps) {
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>商品列表</CardTitle>
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-bold">商品列表</h2>
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
                 <Button>
@@ -60,18 +95,28 @@ export function ProductList({ products }: ProductListProps) {
                 <ProductForm onSuccess={() => setIsCreateOpen(false)} />
             </DialogContent>
         </Dialog>
-      </CardHeader>
-      <CardContent>
+      </div>
+
+      <div className="bg-muted/30 p-4 rounded-lg flex flex-wrap gap-1 items-center">
+        <Input 
+            placeholder="搜索商品名称..." 
+            value={searchQuery}
+            onChange={handleSearchChange}
+            className="max-w-sm bg-background"
+        />
+      </div>
+
+      <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>型号名称</TableHead>
+              <TableHead className="w-[200px]">型号名称</TableHead>
               <TableHead>包含版本 (SKU)</TableHead>
-              <TableHead className="text-right">操作</TableHead>
+              <TableHead className="text-right w-[100px]">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {products.map((product) => (
+            {paginatedProducts.map((product) => (
               <TableRow key={product.id}>
                 <TableCell className="font-medium">{product.name}</TableCell>
                 <TableCell>
@@ -100,6 +145,122 @@ export function ProductList({ products }: ProductListProps) {
             )}
           </TableBody>
         </Table>
+      </div>
+
+            <div className="flex items-center justify-between mt-4 px-2">
+                <div className="text-sm text-muted-foreground">
+                    共 {filteredProducts.length} 条数据，本页显示 {paginatedProducts.length} 条
+                </div>
+
+                <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                        <p className="text-sm font-medium text-gray-500">每页行数</p>
+                        <Select
+                            value={`${pageSize}`}
+                            onValueChange={(value) => {
+                                setPageSize(Number(value))
+                                setCurrentPage(1)
+                            }}
+                        >
+                            <SelectTrigger className="h-8 w-[70px]">
+                                <SelectValue placeholder={pageSize} />
+                            </SelectTrigger>
+                            <SelectContent side="top">
+                                {[10, 20, 50, 100].map((size) => (
+                                    <SelectItem key={size} value={`${size}`}>
+                                        {size}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {totalPages > 1 && (
+                        <Pagination className="justify-end w-auto mx-0">
+                            <PaginationContent>
+                                <PaginationItem>
+                                    <PaginationPrevious
+                                        href="#"
+                                        onClick={(e) => {
+                                            e.preventDefault()
+                                            setCurrentPage(p => Math.max(1, p - 1))
+                                        }}
+                                        className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                    />
+                                </PaginationItem>
+
+                                {(() => {
+                                    const generatePaginationItems = (current: number, total: number) => {
+                                        if (total <= 7) {
+                                            return Array.from({ length: total }, (_, i) => i + 1);
+                                        }
+
+                                        const items: (number | 'ellipsis-start' | 'ellipsis-end')[] = [1];
+                                        let start = Math.max(2, current - 2);
+                                        let end = Math.min(total - 1, current + 2);
+
+                                        if (current < 4) {
+                                            end = Math.min(total - 1, 5);
+                                        }
+                                        if (current > total - 3) {
+                                            start = Math.max(2, total - 4);
+                                        }
+
+                                        if (start > 2) {
+                                            items.push('ellipsis-start');
+                                        }
+
+                                        for (let i = start; i <= end; i++) {
+                                            items.push(i);
+                                        }
+
+                                        if (end < total - 1) {
+                                            items.push('ellipsis-end');
+                                        }
+
+                                        if (total > 1) {
+                                            items.push(total);
+                                        }
+
+                                        return items;
+                                    };
+
+                                    return generatePaginationItems(currentPage, totalPages).map((item, index) => (
+                                        <PaginationItem key={`${item}-${index}`}>
+                                            {typeof item === 'number' ? (
+                                                <PaginationLink
+                                                    href="#"
+                                                    isActive={currentPage === item}
+                                                    onClick={(e) => {
+                                                        e.preventDefault()
+                                                        setCurrentPage(item)
+                                                    }}
+                                                    className="cursor-pointer"
+                                                >
+                                                    {item}
+                                                </PaginationLink>
+                                            ) : (
+                                                <PaginationEllipsis />
+                                            )}
+                                        </PaginationItem>
+                                    ));
+                                })()}
+
+                                <PaginationItem>
+                                    <PaginationNext
+                                        href="#"
+                                        onClick={(e) => {
+                                            e.preventDefault()
+                                            setCurrentPage(p => Math.min(totalPages, p + 1))
+                                        }}
+                                        className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                    />
+                                </PaginationItem>
+                            </PaginationContent>
+                        </Pagination>
+                    )}
+                </div>
+            </div>
 
         {/* Edit Dialog */}
         <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
@@ -136,7 +297,6 @@ export function ProductList({ products }: ProductListProps) {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
-      </CardContent>
-    </Card>
+    </div>
   )
 }

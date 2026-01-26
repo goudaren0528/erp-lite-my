@@ -69,7 +69,7 @@ export default async function StatsPage() {
       
       // Promoter Breakdown
       const promoterName = order.sourceContact || '未标记';
-      const displayPromoterName = promoterName === 'self' ? '自主开发' : promoterName;
+      const displayPromoterName = promoterName === 'self' ? '自主开发' : (promoterName === 'OFFLINE' ? '线下' : promoterName);
       
       if (!stats.promotersMap[displayPromoterName]) {
           stats.promotersMap[displayPromoterName] = {

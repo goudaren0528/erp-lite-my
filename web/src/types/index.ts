@@ -27,6 +27,7 @@ export type OrderPlatform = 'XIAOHONGSHU' | 'XIANYU' | 'DOUYIN' | 'OTHER' | 'OFF
 export type OrderStatus = 
   | 'PENDING_REVIEW' 
   | 'PENDING_SHIPMENT' 
+  | 'SHIPPED_PENDING_CONFIRMATION'
   | 'PENDING_RECEIPT' 
   | 'RENTING' 
   | 'OVERDUE' 

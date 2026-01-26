@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -93,6 +93,7 @@ model Order {
   
   rentStartDate   DateTime?
   deliveryTime    DateTime?
+  actualDeliveryTime DateTime?
   returnDeadline  DateTime?
   
   remark          String?
