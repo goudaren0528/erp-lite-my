@@ -9,6 +9,8 @@ export type CommissionRuleInput = {
   minCount: number;
   maxCount: number | null;
   percentage: number;
+  target?: string; // USER | PROMOTER
+  channelConfigId?: string;
 }
 
 // --- Account Groups ---
@@ -53,7 +55,9 @@ export async function upsertAccountGroup(data: {
             type: r.type || "QUANTITY",
             minCount: r.minCount,
             maxCount: r.maxCount,
-            percentage: r.percentage
+            percentage: r.percentage,
+            target: r.target || "USER",
+            channelConfigId: r.channelConfigId
           }))
         };
       }
@@ -84,7 +88,9 @@ export async function upsertAccountGroup(data: {
               type: r.type || "QUANTITY",
               minCount: r.minCount,
               maxCount: r.maxCount,
-              percentage: r.percentage
+              percentage: r.percentage,
+              target: r.target || "USER",
+              channelConfigId: r.channelConfigId
             }))
           },
           users: userIds ? {
@@ -153,14 +159,16 @@ export async function getChannelConfigs() {
 export async function upsertChannelConfig(data: {
   id?: string;
   name: string;
+  isEnabled?: boolean;
   settlementByCompleted?: boolean;
   rules?: CommissionRuleInput[];
 }) {
   try {
-    const { id, name, settlementByCompleted, rules } = data;
+    const { id, name, isEnabled, settlementByCompleted, rules } = data;
 
     if (id) {
       const updateData: any = { name, settlementByCompleted };
+      if (isEnabled !== undefined) updateData.isEnabled = isEnabled;
       
       if (rules) {
           updateData.rules = {
@@ -182,6 +190,7 @@ export async function upsertChannelConfig(data: {
       await prisma.channelConfig.create({
         data: {
           name,
+          isEnabled: isEnabled ?? true,
           settlementByCompleted,
           rules: {
             create: (rules || []).map(r => ({

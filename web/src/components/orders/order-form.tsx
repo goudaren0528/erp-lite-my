@@ -45,6 +45,12 @@ const handleNumberInput = (value: string) => {
   return value.replace(/^0+(?=\d)/, '')
 }
 
+const CHANNEL_MAPPING: Record<string, string[]> = {
+  PEER: ['PEER', '同行'],
+  PART_TIME_AGENT: ['PART_TIME_AGENT', '兼职代理', 'AGENT', 'PART_TIME', '代理', '兼职'],
+  RETAIL: ['RETAIL', '零售']
+}
+
 export function OrderForm({ products, promoters = [], initialData, onSuccess }: OrderFormProps) {
   const isEdit = !!initialData
   const safePromoters = Array.isArray(promoters) ? promoters : []
@@ -122,8 +128,21 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
   // Filter promoters based on source
   const filteredPromoters = safePromoters.filter(p => {
-    if (source === 'PART_TIME_AGENT') return p.channel === 'PART_TIME_AGENT'
-    if (source === 'PEER') return p.channel === 'PEER'
+    const allowedChannels = CHANNEL_MAPPING[source] || [source]
+
+    // Check new channel field
+    if (p.channel) {
+        if (allowedChannels.includes(p.channel)) return true
+
+        // Fuzzy matching for robust compatibility
+        if (source === 'PEER' && p.channel.includes('同行')) return true
+        if (source === 'PART_TIME_AGENT' && (p.channel.includes('兼职') || p.channel.includes('代理'))) return true
+    }
+    
+    // Check legacy channels array (backward compatibility)
+    const legacyChannels = (p as any).channels as string[] | undefined
+    if (legacyChannels && legacyChannels.some(c => allowedChannels.includes(c))) return true
+    
     return false
   })
 

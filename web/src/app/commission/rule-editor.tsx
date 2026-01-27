@@ -89,9 +89,6 @@ export function RuleEditor({ rules, onChange, label = "提成点数", ruleType }
     <div className="space-y-2">
       <div className="flex justify-between items-center">
         <h4 className="text-sm font-medium">阶梯规则配置<span className="text-red-500 ml-1">*</span></h4>
-        <Button type="button" variant="outline" size="sm" onClick={addRule}>
-          <Plus className="h-4 w-4 mr-1" /> 添加阶梯
-        </Button>
       </div>
       
       <div className="border rounded-md">

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { format, addYears, subYears, setMonth, getYear, getMonth } from "date-fns"
+import { format, getYear, getMonth } from "date-fns"
 import * as XLSX from "xlsx"
 import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Check } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -14,27 +14,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import {
   Tabs,
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet"
 import {
   Pagination,
   PaginationContent,
@@ -51,7 +35,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { DateRange } from "react-day-picker"
 import { HelpCircle } from "lucide-react"
 import {
   Tooltip,
@@ -60,41 +53,56 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
-import { DateRange } from "react-day-picker"
-
 interface Rule {
   minCount: number;
   maxCount: number | null;
   percentage: number;
 }
 
+interface AccountStat {
+    userId: string;
+    userName: string;
+    accountGroupId: string;
+    accountGroupName: string;
+    totalOrderCount: number;
+    totalRevenue: number;
+    refundedAmount: number;
+    estimatedEmployeeCommission: number;
+    volumeGradientCommission: number;
+    channelCommission: number;
+    estimatedPromoterCommission: number;
+    effectiveBaseRate?: number;
+    defaultUserRules?: Rule[];
+    orders: any[];
+    channels: {
+        channelId: string;
+        channelName: string;
+        orderCount: number;
+        revenue: number;
+        employeeRate: number;
+        employeeCommission: number;
+        promoters: {
+            name: string;
+            count: number;
+            revenue: number;
+            rate: number;
+            commission: number;
+            isPromoter: boolean;
+            accountRate: number;
+            accountCommission: number;
+        }[]
+    }[]
+}
+
 interface StatsClientProps {
   period?: string
   start?: string
   end?: string
-  userStats: {
-    userId: string
-    userName: string
-    accountGroupName: string
-    orderCount: number
-    totalRevenue: number
-    refundedAmount: number
-    accountEffectivePercentage: number
-    estimatedCommission: number
-    accountGroupRules: Rule[]
-    promoters: {
-      name: string
-      count: number
-      revenue: number
-      channelName: string
-      channelCostPercentage: number
-      commission: number
-      rules: Rule[]
-    }[]
-  }[]
+  allStats: AccountStat[]
+  accountGroups: { id: string; name: string }[]
 }
 
-function RuleHoverCard({ rules, label = "提成点数" }: { rules: Rule[], label?: string }) {
+function RuleHoverCard({ rules, label = "提成点数" }: { rules?: Rule[], label?: string }) {
   if (!rules || rules.length === 0) return null;
 
   return (
@@ -105,7 +113,7 @@ function RuleHoverCard({ rules, label = "提成点数" }: { rules: Rule[], label
         </TooltipTrigger>
         <TooltipContent className="w-80 p-0" side="right">
           <div className="p-2 bg-white rounded-md border shadow-sm">
-            <h4 className="font-medium text-sm mb-2 px-2">阶梯规则详情 <span className="text-xs font-normal text-muted-foreground ml-2">(单量越多提成越高)</span></h4>
+            <h4 className="font-medium text-sm mb-2 px-2">账号组梯度详情 <span className="text-xs font-normal text-muted-foreground ml-2">(单量越多提成越高)</span></h4>
             <Table>
               <TableHeader>
                 <TableRow className="h-8 hover:bg-transparent">
@@ -135,7 +143,6 @@ function MonthPicker({ date, onSelect }: { date: Date, onSelect: (date: Date) =>
   const [year, setYear] = React.useState(getYear(date));
   const [open, setOpen] = React.useState(false);
 
-  // Sync internal year state when date prop changes
   React.useEffect(() => {
     setYear(getYear(date));
   }, [date]);
@@ -196,37 +203,41 @@ function MonthPicker({ date, onSelect }: { date: Date, onSelect: (date: Date) =>
   );
 }
 
-export function StatsClient({ userStats, period = 'cumulative', start, end }: StatsClientProps) {
+export function StatsClient({ allStats, accountGroups, period = 'cumulative', start, end }: StatsClientProps) {
   const router = useRouter();
+  const [selectedGroupId, setSelectedGroupId] = React.useState<string>("all");
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
 
-  // Calculate Totals
-  const totalOrdersCount = userStats.reduce((acc, curr) => acc + curr.orderCount, 0);
-  const totalRevenue = userStats.reduce((acc, curr) => acc + curr.totalRevenue, 0);
-  const totalRefunded = userStats.reduce((acc, curr) => acc + curr.refundedAmount, 0);
-  const totalCommission = userStats.reduce((acc, curr) => acc + curr.estimatedCommission, 0);
-  const totalNetIncome = totalRevenue - totalCommission;
-  const [currentPage, setCurrentPage] = React.useState(1)
-  const [pageSize, setPageSize] = React.useState(10)
-  const totalPages = Math.max(1, Math.ceil(userStats.length / pageSize))
-  const paginatedStats = userStats.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  )
+  // Filter Stats
+  const filteredStats = React.useMemo(() => {
+    if (selectedGroupId === "all") return allStats;
+    return allStats.filter(s => s.accountGroupId === selectedGroupId);
+  }, [allStats, selectedGroupId]);
 
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredStats.length / pageSize));
+  const paginatedStats = React.useMemo(() => {
+    return filteredStats.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  }, [filteredStats, currentPage, pageSize]);
+
+  // Reset page when filter changes
   React.useEffect(() => {
-    setCurrentPage(1)
-  }, [pageSize, userStats])
+    setCurrentPage(1);
+  }, [selectedGroupId]);
+
+  // Calculate Totals based on Filtered Stats
+  const totalOrdersCount = filteredStats.reduce((acc, s) => acc + s.totalOrderCount, 0);
+  const totalRevenue = filteredStats.reduce((acc, s) => acc + s.totalRevenue, 0);
+  const totalRefunded = filteredStats.reduce((acc, s) => acc + s.refundedAmount, 0);
+  const totalEmployeeCommission = filteredStats.reduce((acc, s) => acc + s.estimatedEmployeeCommission, 0);
+  const totalPromoterCommission = filteredStats.reduce((acc, s) => acc + s.estimatedPromoterCommission, 0);
+  const totalNetIncome = totalRevenue - totalEmployeeCommission - totalPromoterCommission;
 
   // Handle Period Change
   const handlePeriodChange = (value: string) => {
     const params = new URLSearchParams();
     params.set("period", value);
-    if (value === 'monthly') {
-        // Default to current month if switching to monthly
-        // Or leave empty and let server handle default? 
-        // Better let server handle default, but if we want to show it in UI, we might need to set it.
-        // Let's not set start/end here, let server/default handle it.
-    }
     router.push(`?${params.toString()}`);
   };
 
@@ -251,43 +262,54 @@ export function StatsClient({ userStats, period = 'cumulative', start, end }: St
      router.push(`?${params.toString()}`);
   };
 
-  // Export Account Stats
-  const handleExportAccounts = () => {
+  // Export Stats
+  const handleExport = () => {
     const rows: any[] = [];
-    userStats.forEach(u => {
-      if (u.promoters.length > 0) {
-        u.promoters.forEach(p => {
-          rows.push({
-            "账号": u.userName,
-            "账号组": u.accountGroupName,
-            "总订单数": u.orderCount,
-            "总营收": u.totalRevenue,
-            "账号生效点数": u.accountEffectivePercentage + '%',
-            "预计总提成": u.estimatedCommission,
-            "推广员": p.name,
-            "所属渠道": p.channelName,
-            "推广员订单数": p.count,
-            "推广员营收": p.revenue,
-            "渠道成本点数": p.channelCostPercentage + '%',
-            "推广员预计提成": p.commission
-          });
+    filteredStats.forEach(stat => {
+        stat.channels.forEach(c => {
+            c.promoters.forEach(p => {
+                 rows.push({
+                    "账号组": stat.accountGroupName,
+                    "账号": stat.userName,
+                    "总订单数": stat.totalOrderCount,
+                    "总营收": stat.totalRevenue,
+                    "员工总提成": stat.estimatedEmployeeCommission,
+                    "渠道提成": stat.channelCommission,
+                    "单量阶梯提成": stat.volumeGradientCommission,
+                    "渠道": c.channelName,
+                    "渠道单量": c.orderCount,
+                    "渠道营收": c.revenue,
+                    "员工提成点数": c.employeeRate + '%',
+                    "员工渠道提成": c.employeeCommission,
+                    "推广员": p.name,
+                    "推广员单量": p.count,
+                    "推广员营收": p.revenue,
+                    "推广员点数": p.rate + '%',
+                    "推广员提成": p.commission
+                 });
+            });
+            if (c.promoters.length === 0) {
+                 rows.push({
+                    "账号组": stat.accountGroupName,
+                    "账号": stat.userName,
+                    "总订单数": stat.totalOrderCount,
+                    "总营收": stat.totalRevenue,
+                    "员工总提成": stat.estimatedEmployeeCommission,
+                    "渠道提成": stat.channelCommission,
+                    "单量阶梯提成": stat.volumeGradientCommission,
+                    "渠道": c.channelName,
+                    "渠道单量": c.orderCount,
+                    "渠道营收": c.revenue,
+                    "员工提成点数": c.employeeRate + '%',
+                    "员工渠道提成": c.employeeCommission,
+                    "推广员": "无",
+                    "推广员单量": 0,
+                    "推广员营收": 0,
+                    "推广员点数": "0%",
+                    "推广员提成": 0
+                 });
+            }
         });
-      } else {
-        rows.push({
-            "账号": u.userName,
-            "账号组": u.accountGroupName,
-            "总订单数": u.orderCount,
-            "总营收": u.totalRevenue,
-            "账号生效点数": u.accountEffectivePercentage + '%',
-            "预计总提成": u.estimatedCommission,
-            "推广员": "无",
-            "所属渠道": "-",
-            "推广员订单数": 0,
-            "推广员营收": 0,
-            "渠道成本点数": "-",
-            "推广员预计提成": 0
-        });
-      }
     });
 
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -296,21 +318,25 @@ export function StatsClient({ userStats, period = 'cumulative', start, end }: St
     XLSX.writeFile(wb, `业绩统计_${period}_${format(new Date(), 'yyyyMMddHHmm')}.xlsx`);
   };
 
-  // Export Individual Promoter Stats
-  const handleExportPromoters = (userName: string, promoters: typeof userStats[0]['promoters']) => {
-    const rows = promoters.map(p => ({
-        "推广员": p.name,
-        "所属渠道": p.channelName,
-        "订单数": p.count,
-        "营收": p.revenue,
-        "渠道成本点数": p.channelCostPercentage + '%',
-        "预计提成": p.commission
-    }));
+  const handleExportOrders = (userName: string, orders: any[]) => {
+      const rows = orders.map(o => ({
+          "订单号": o.orderNo,
+          "创建时间": format(new Date(o.createdAt), 'yyyy-MM-dd HH:mm:ss'),
+          "完结时间": o.completedAt ? format(new Date(o.completedAt), 'yyyy-MM-dd HH:mm:ss') : '-',
+          "状态": o.status,
+          "来源/推广员": o.promoterName,
+          "营收": o.orderRevenue,
+          "退款": o.refundAmount || 0,
+          "租金": o.rentPrice,
+          "保险": o.insurancePrice,
+          "延期": o.extensions?.reduce((acc: number, e: any) => acc + e.price, 0) || 0,
+          "逾期": o.overdueFee || 0
+      }));
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "推广员明细");
-    XLSX.writeFile(wb, `${userName}_推广员明细_${format(new Date(), 'yyyyMMdd')}.xlsx`);
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "订单明细");
+      XLSX.writeFile(wb, `${userName}_订单明细_${format(new Date(), 'yyyyMMddHHmm')}.xlsx`);
   };
 
   const dateRange: DateRange | undefined = (start && end) ? { from: new Date(start), to: new Date(end) } : (start ? { from: new Date(start), to: undefined } : undefined);
@@ -318,13 +344,27 @@ export function StatsClient({ userStats, period = 'cumulative', start, end }: St
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <Tabs value={period} onValueChange={handlePeriodChange} className="w-[400px]">
-            <TabsList>
-                <TabsTrigger value="cumulative">累计</TabsTrigger>
-                <TabsTrigger value="monthly">月度</TabsTrigger>
-                <TabsTrigger value="custom">自定义</TabsTrigger>
-            </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-4">
+            <Tabs value={period} onValueChange={handlePeriodChange} className="w-[400px]">
+                <TabsList>
+                    <TabsTrigger value="cumulative">累计</TabsTrigger>
+                    <TabsTrigger value="monthly">月度</TabsTrigger>
+                    <TabsTrigger value="custom">自定义</TabsTrigger>
+                </TabsList>
+            </Tabs>
+            
+            <Select value={selectedGroupId} onValueChange={setSelectedGroupId}>
+                <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="筛选账号组" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">所有账号组</SelectItem>
+                    {accountGroups.map(g => (
+                        <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+        </div>
 
         <div className="flex items-center gap-2">
             {period === 'monthly' && (
@@ -357,7 +397,7 @@ export function StatsClient({ userStats, period = 'cumulative', start, end }: St
                                 format(dateRange.from, "LLL dd, y")
                             )
                             ) : (
-                            <span>Pick a date</span>
+                                <span>Pick a date</span>
                             )}
                         </Button>
                         </PopoverTrigger>
@@ -375,7 +415,7 @@ export function StatsClient({ userStats, period = 'cumulative', start, end }: St
                 </div>
             )}
 
-            <Button variant="outline" onClick={handleExportAccounts}>
+            <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" />
                 导出明细
             </Button>
@@ -394,7 +434,7 @@ export function StatsClient({ userStats, period = 'cumulative', start, end }: St
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">总营收 (不含押金)</CardTitle>
+            <CardTitle className="text-sm font-medium">总营收</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">¥ {totalRevenue.toLocaleString()}</div>
@@ -403,214 +443,244 @@ export function StatsClient({ userStats, period = 'cumulative', start, end }: St
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">已退款金额</CardTitle>
+            <CardTitle className="text-sm font-medium">员工总提成</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-500">¥ {totalRefunded.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">已关闭订单总额</p>
+            <div className="text-2xl font-bold text-green-600">¥ {totalEmployeeCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            <p className="text-xs text-muted-foreground">预计发放给员工</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">预计总提成</CardTitle>
+            <CardTitle className="text-sm font-medium">推广员总提成</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">¥ {totalCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-            <p className="text-xs text-muted-foreground">根据当前配置估算</p>
+            <div className="text-2xl font-bold text-orange-600">¥ {totalPromoterCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            <p className="text-xs text-muted-foreground">预计发放给推广员</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">提成后收入</CardTitle>
+            <CardTitle className="text-sm font-medium">平台净收</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">¥ {totalNetIncome.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-            <p className="text-xs text-muted-foreground">总营收 - 预计提成</p>
+            <p className="text-xs text-muted-foreground">营收 - 员工提成 - 推广提成</p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-6">
+      <div className="space-y-4">
         <div className="rounded-md border bg-white">
-          <div className="p-4 font-semibold border-b">账号业绩统计</div>
-          <Table className="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[140px]">账号名称</TableHead>
-                <TableHead className="w-[160px]">所属账号组</TableHead>
-                <TableHead className="w-[100px]">总订单数</TableHead>
-                <TableHead className="w-[160px]">总营收 (不含押金)</TableHead>
-                <TableHead className="w-[140px]">已退款金额</TableHead>
-                <TableHead className="w-[160px]">
-                  单量提成点数
-                  <span className="text-xs font-normal text-muted-foreground ml-1">(基于总单量)</span>
-                </TableHead>
-                <TableHead className="w-[140px]">预计提成</TableHead>
-                <TableHead className="w-[110px]">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedStats.map((stat) => (
-                <TableRow key={stat.userId}>
-                  <TableCell className="font-medium">{stat.userName}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">{stat.accountGroupName}</TableCell>
-                  <TableCell>{stat.orderCount}</TableCell>
-                  <TableCell>¥ {stat.totalRevenue.toLocaleString()}</TableCell>
-                  <TableCell className="text-red-500">¥ {stat.refundedAmount.toLocaleString()}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center">
-                      <span className="font-medium">{stat.accountEffectivePercentage}%</span>
-                      <RuleHoverCard rules={stat.accountGroupRules} label="提成点数" />
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-green-600 font-medium">¥ {stat.estimatedCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                  <TableCell>
-                    <Sheet>
-                        <SheetTrigger asChild>
-                            <Button variant="outline" size="sm">查看明细</Button>
-                        </SheetTrigger>
-                        <SheetContent className="min-w-[800px] overflow-y-auto">
-                            <SheetHeader className="flex flex-row justify-between items-center pr-8">
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead className="w-[140px]">账号组</TableHead>
+                        <TableHead className="w-[140px]">账号</TableHead>
+                        <TableHead className="w-[100px]">总单量</TableHead>
+                        <TableHead className="w-[160px]">总营收</TableHead>
+                        <TableHead className="w-[120px]">渠道提成</TableHead>
+                        <TableHead className="w-[120px]">单量阶梯提成</TableHead>
+                        <TableHead className="w-[140px]">员工总提成</TableHead>
+                        <TableHead className="w-[140px]">推广员预计提成</TableHead>
+                        <TableHead className="w-[100px]"></TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {paginatedStats.map(u => (
+                        <TableRow key={u.userId}>
+                            <TableCell className="font-medium text-muted-foreground">{u.accountGroupName}</TableCell>
+                            <TableCell className="font-medium">{u.userName}</TableCell>
+                            <TableCell>{u.totalOrderCount}</TableCell>
+                            <TableCell>¥ {u.totalRevenue.toLocaleString()}</TableCell>
+                            <TableCell className="font-medium">
+                                ¥ {u.channelCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                            </TableCell>
+                            <TableCell className="font-medium">
                                 <div>
-                                    <SheetTitle>{stat.userName} - 推广员/渠道明细</SheetTitle>
-                                    <SheetDescription>
-                                        该账号下所有推广员的业绩及提成计算详情
-                                    </SheetDescription>
+                                    ¥ {u.volumeGradientCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                                 </div>
-                                <Button variant="outline" size="sm" onClick={() => handleExportPromoters(stat.userName, stat.promoters)}>
-                                    <Download className="h-4 w-4 mr-1" />
-                                    导出
-                                </Button>
-                            </SheetHeader>
-                            <div className="mt-6">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>推广员</TableHead>
-                                            <TableHead>所属渠道</TableHead>
-                                            <TableHead>订单数</TableHead>
-                                            <TableHead>营收</TableHead>
-                                            <TableHead>渠道成本</TableHead>
-                                            <TableHead>预计提成</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {stat.promoters.map((p, idx) => (
-                                            <TableRow key={idx}>
-                                                <TableCell>{p.name}</TableCell>
-                                                <TableCell className="text-muted-foreground">{p.channelName}</TableCell>
-                                                <TableCell>{p.count}</TableCell>
-                                                <TableCell>¥ {p.revenue.toLocaleString()}</TableCell>
-                                                <TableCell>
-                                                    <div className="flex items-center">
-                                                        <span>{p.channelCostPercentage}%</span>
-                                                        <RuleHoverCard rules={p.rules} label="成本点数" />
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="font-medium text-green-600">¥ {p.commission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                                            </TableRow>
-                                        ))}
-                                        {stat.promoters.length === 0 && (
-                                            <TableRow>
-                                                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">无推广数据</TableCell>
-                                            </TableRow>
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </SheetContent>
-                    </Sheet>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {userStats.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center h-24">
-                    {period === 'custom' && !start ? "请选择日期范围" : "暂无数据"}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                                {u.effectiveBaseRate !== undefined && (
+                                    <div className="text-xs text-muted-foreground flex items-center mt-1">
+                                        (生效点数: {u.effectiveBaseRate}% 
+                                        <RuleHoverCard rules={u.defaultUserRules} />)
+                                    </div>
+                                )}
+                            </TableCell>
+                            <TableCell className="text-green-600 font-medium">
+                                ¥ {u.estimatedEmployeeCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                            </TableCell>
+                            <TableCell className="text-orange-600 font-medium">¥ {u.estimatedPromoterCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                            <TableCell>
+                                <Sheet>
+                                    <SheetTrigger asChild>
+                                        <Button variant="outline" size="sm">详情</Button>
+                                    </SheetTrigger>
+                                    <SheetContent className="min-w-[800px] overflow-y-auto">
+                                        <SheetHeader>
+                                            <div className="flex justify-between items-center pr-8">
+                                                <SheetTitle>{u.userName} - 提成详情</SheetTitle>
+                                                <Button variant="outline" size="sm" onClick={() => handleExportOrders(u.userName, u.orders)}>
+                                                    <Download className="mr-2 h-4 w-4" />
+                                                    导出详情
+                                                </Button>
+                                            </div>
+                                            <SheetDescription>
+                                                按渠道拆分的员工及推广员提成明细 (当前总单量级别: {u.totalOrderCount})
+                                            </SheetDescription>
+                                        </SheetHeader>
+                                        
+                                        <div className="mt-6 space-y-8">
+                                            {/* 1. Volume Gradient Commission Section */}
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <h3 className="text-lg font-semibold">单量阶梯提成</h3>
+                                                    <span className="text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                                                        总计: ¥{u.volumeGradientCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                                    </span>
+                                                </div>
+                                                <div className="rounded-md border">
+                                                    <Table>
+                                                        <TableHeader>
+                                                            <TableRow className="bg-muted/50">
+                                                                <TableHead>来源</TableHead>
+                                                                <TableHead>单量</TableHead>
+                                                                <TableHead>营收</TableHead>
+                                                                <TableHead>员工点数</TableHead>
+                                                                <TableHead>员工提成</TableHead>
+                                                            </TableRow>
+                                                        </TableHeader>
+                                                        <TableBody>
+                                                            {u.channels.flatMap(c => c.promoters.filter(p => !p.isPromoter).map(p => ({...p, channelName: c.channelName}))).map((item, idx) => (
+                                                                <TableRow key={idx}>
+                                                                    <TableCell>{item.name === 'self' || item.name === '未标记' ? item.channelName : item.name}</TableCell>
+                                                                    <TableCell>{item.count}</TableCell>
+                                                                    <TableCell>¥{item.revenue.toLocaleString()}</TableCell>
+                                                                    <TableCell>{item.accountRate}%</TableCell>
+                                                                    <TableCell>¥{item.accountCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                                                                </TableRow>
+                                                            ))}
+                                                            {u.channels.flatMap(c => c.promoters.filter(p => !p.isPromoter)).length === 0 && (
+                                                                <TableRow>
+                                                                    <TableCell colSpan={5} className="text-center text-muted-foreground py-4">无阶梯提成数据</TableCell>
+                                                                </TableRow>
+                                                            )}
+                                                        </TableBody>
+                                                    </Table>
+                                                </div>
+                                            </div>
+
+                                            {/* 2. Channel Promoter Commission Section */}
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <h3 className="text-lg font-semibold">渠道推广员提成</h3>
+                                                    <span className="text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                                                        总计: ¥{u.channelCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                                    </span>
+                                                </div>
+                                                <div className="rounded-md border">
+                                                    <Table>
+                                                        <TableHeader>
+                                                            <TableRow className="bg-muted/50">
+                                                                <TableHead>渠道</TableHead>
+                                                                <TableHead>推广员</TableHead>
+                                                                <TableHead>单量</TableHead>
+                                                                <TableHead>营收</TableHead>
+                                                                <TableHead>员工点数</TableHead>
+                                                                <TableHead>员工提成</TableHead>
+                                                            </TableRow>
+                                                        </TableHeader>
+                                                        <TableBody>
+                                                            {u.channels.flatMap(c => c.promoters.filter(p => p.isPromoter).map(p => ({...p, channelName: c.channelName}))).map((item, idx) => (
+                                                                <TableRow key={idx}>
+                                                                    <TableCell>{item.channelName}</TableCell>
+                                                                    <TableCell>{item.name}</TableCell>
+                                                                    <TableCell>{item.count}</TableCell>
+                                                                    <TableCell>¥{item.revenue.toLocaleString()}</TableCell>
+                                                                    <TableCell>{item.accountRate}%</TableCell>
+                                                                    <TableCell>¥{item.accountCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                                                                </TableRow>
+                                                            ))}
+                                                            {u.channels.flatMap(c => c.promoters.filter(p => p.isPromoter)).length === 0 && (
+                                                                <TableRow>
+                                                                    <TableCell colSpan={6} className="text-center text-muted-foreground py-4">无渠道推广员提成数据</TableCell>
+                                                                </TableRow>
+                                                            )}
+                                                        </TableBody>
+                                                    </Table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </SheetContent>
+                                </Sheet>
+                            </TableCell>
+                        </TableRow>
+                    ))}
+                    {paginatedStats.length === 0 && (
+                        <TableRow>
+                            <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                                暂无数据
+                            </TableCell>
+                        </TableRow>
+                    )}
+                </TableBody>
+            </Table>
         </div>
-        <div className="flex items-center justify-between mt-4 px-2">
-          <div className="text-sm text-muted-foreground">
-            共 {userStats.length} 条数据，本页显示 {paginatedStats.length} 条
-          </div>
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <p className="text-sm font-medium text-gray-500">每页行数</p>
-              <Select
-                value={`${pageSize}`}
-                onValueChange={(value) => {
-                  setPageSize(Number(value))
-                  setCurrentPage(1)
-                }}
-              >
-                <SelectTrigger className="h-8 w-[70px]">
-                  <SelectValue placeholder={pageSize} />
-                </SelectTrigger>
-                <SelectContent side="top">
-                  {[10, 20, 50, 100].map((size) => (
-                    <SelectItem key={size} value={`${size}`}>
-                      {size}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        
+        {totalPages > 1 && (
+            <div className="flex justify-end mt-4">
+                <Pagination>
+                    <PaginationContent>
+                        <PaginationItem>
+                            <PaginationPrevious 
+                                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                                className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                            />
+                        </PaginationItem>
+                        {Array.from({length: totalPages}).map((_, idx) => {
+                            const page = idx + 1;
+                             const shouldShow = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1
+                             if (!shouldShow) {
+                               if (page === 2 && currentPage > 3) {
+                                 return (
+                                   <PaginationItem key={`ellipsis-start-${page}`}>
+                                     <PaginationEllipsis />
+                                   </PaginationItem>
+                                 )
+                               }
+                               if (page === totalPages - 1 && currentPage < totalPages - 2) {
+                                 return (
+                                   <PaginationItem key={`ellipsis-end-${page}`}>
+                                     <PaginationEllipsis />
+                                   </PaginationItem>
+                                 )
+                               }
+                               return null
+                             }
+
+                            return (
+                                <PaginationItem key={page}>
+                                    <PaginationLink 
+                                        isActive={page === currentPage}
+                                        onClick={() => setCurrentPage(page)}
+                                        className="cursor-pointer"
+                                    >
+                                        {page}
+                                    </PaginationLink>
+                                </PaginationItem>
+                            )
+                        })}
+                        <PaginationItem>
+                            <PaginationNext 
+                                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                                className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                            />
+                        </PaginationItem>
+                    </PaginationContent>
+                </Pagination>
             </div>
-            {totalPages > 1 && (
-              <Pagination className="justify-end w-auto mx-0">
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      className={currentPage === 1 ? "pointer-events-none opacity-50" : ""}
-                    />
-                  </PaginationItem>
-                  {Array.from({ length: totalPages }).map((_, idx) => {
-                    const page = idx + 1
-                    const shouldShow = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1
-                    if (!shouldShow) {
-                      if (page === 2 && currentPage > 3) {
-                        return (
-                          <PaginationItem key={`ellipsis-start-${page}`}>
-                            <PaginationEllipsis />
-                          </PaginationItem>
-                        )
-                      }
-                      if (page === totalPages - 1 && currentPage < totalPages - 2) {
-                        return (
-                          <PaginationItem key={`ellipsis-end-${page}`}>
-                            <PaginationEllipsis />
-                          </PaginationItem>
-                        )
-                      }
-                      return null
-                    }
-                    return (
-                      <PaginationItem key={page}>
-                        <PaginationLink
-                          isActive={page === currentPage}
-                          onClick={() => setCurrentPage(page)}
-                        >
-                          {page}
-                        </PaginationLink>
-                      </PaginationItem>
-                    )
-                  })}
-                  <PaginationItem>
-                    <PaginationNext
-                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                      className={currentPage === totalPages ? "pointer-events-none opacity-50" : ""}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
-            )}
-          </div>
-        </div>
+        )}
       </div>
     </div>
-  )
+  );
 }

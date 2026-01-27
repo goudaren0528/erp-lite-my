@@ -39,6 +39,7 @@ model AccountGroup {
 model ChannelConfig {
   id          String   @id @default(uuid())
   name        String   @unique
+  isEnabled   Boolean  @default(true)
   settlementByCompleted Boolean @default(true)
   rules       CommissionRule[]
   createdAt   DateTime @default(now())
@@ -51,6 +52,7 @@ model CommissionRule {
   minCount        Int
   maxCount        Int?     // null represents infinity
   percentage      Float
+  target          String   @default("USER") // USER, PROMOTER
   
   accountGroupId  String?
   accountGroup    AccountGroup? @relation(fields: [accountGroupId], references: [id], onDelete: Cascade)

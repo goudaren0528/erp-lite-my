@@ -107,8 +107,19 @@ interface PromoterStatsClientProps {
   }[]
 }
 
-function RuleHoverCard({ rules, label = "提成点数" }: { rules: Rule[], label?: string }) {
-  if (!rules || rules.length === 0) return null;
+function RuleHoverCard({ details }: { details: PromoterStatsClientProps["promoterStats"][0]["details"] }) {
+  // Group rules by Account Group
+  const groupMap = new Map<string, Rule[]>();
+  details.forEach(d => {
+      if (!groupMap.has(d.accountGroupName)) {
+           groupMap.set(d.accountGroupName, d.channelRules || []);
+      }
+  });
+
+  if (groupMap.size === 0) return null;
+
+  const hasAnyRules = Array.from(groupMap.values()).some(rules => rules.length > 0);
+  if (!hasAnyRules) return null;
 
   return (
     <TooltipProvider>
@@ -117,31 +128,65 @@ function RuleHoverCard({ rules, label = "提成点数" }: { rules: Rule[], label
           <HelpCircle className="h-4 w-4 text-muted-foreground cursor-pointer inline-block ml-1 align-middle" />
         </TooltipTrigger>
         <TooltipContent className="w-80 p-0" side="right">
-          <div className="p-2 bg-white rounded-md border shadow-sm">
-            <h4 className="font-medium text-sm mb-2 px-2">阶梯规则详情 <span className="text-xs font-normal text-muted-foreground ml-2">(单量越多提成越高)</span></h4>
-            <Table>
-              <TableHeader>
-                <TableRow className="h-8 hover:bg-transparent">
-                  <TableHead className="h-8 text-xs">单量区间</TableHead>
-                  <TableHead className="h-8 text-xs">{label}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rules.map((rule, idx) => (
-                  <TableRow key={idx} className="h-8 hover:bg-muted/50">
-                    <TableCell className="py-1 text-xs">
-                      {rule.maxCount === null ? `> ${rule.minCount}` : `${rule.minCount} - ${rule.maxCount}`}
-                    </TableCell>
-                    <TableCell className="py-1 text-xs">{rule.percentage}%</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <div className="p-3 bg-white rounded-md border shadow-sm max-h-[400px] overflow-y-auto">
+            <h4 className="font-medium text-sm mb-2 px-1">提成规则详情 <span className="text-xs font-normal text-muted-foreground ml-1">(单量越多提成越高)</span></h4>
+            {Array.from(groupMap.entries()).map(([groupName, rules], idx) => {
+                // Deduplicate rules
+                const uniqueRules = rules.filter((r, i, self) => 
+                   self.findIndex(t => t.minCount === r.minCount && t.maxCount === r.maxCount && t.percentage === r.percentage) === i
+                ).filter(r => r.percentage > 0.001); // Filter out 0% rules (using 0.001 to avoid float issues)
+
+                if (uniqueRules.length === 0) return null;
+
+                return (
+                    <div key={idx} className="mb-3 last:mb-0 border rounded-sm p-2 bg-slate-50">
+                        <div className="text-xs font-semibold text-slate-700 mb-1 border-b pb-1">账号组: {groupName}</div>
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="h-6 hover:bg-transparent border-b-0">
+                                    <TableHead className="h-6 text-xs py-0 pl-1">单量区间</TableHead>
+                                    <TableHead className="h-6 text-xs py-0">提成点数</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {uniqueRules.map((rule, rIdx) => (
+                                    <TableRow key={rIdx} className="h-6 hover:bg-muted/50 border-0">
+                                        <TableCell className="py-0 text-xs pl-1">
+                                            {rule.maxCount === null ? `> ${rule.minCount}` : `${rule.minCount} - ${rule.maxCount}`}
+                                        </TableCell>
+                                        <TableCell className="py-0 text-xs">{rule.percentage}%</TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
+                );
+            })}
           </div>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
+}
+
+function TruncatedList({ items }: { items: string[] }) {
+    const uniqueItems = Array.from(new Set(items));
+    const text = uniqueItems.join(', ') || '无';
+    
+    return (
+        <TooltipProvider>
+            <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                    <div className="max-w-[140px] truncate cursor-default">
+                        {text}
+                    </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[300px] max-h-[300px] overflow-y-auto">
+                    <p className="break-words text-xs">{text}</p>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+    );
 }
 
 function MonthPicker({ date, onSelect }: { date: Date, onSelect: (date: Date) => void }) {
@@ -321,24 +366,66 @@ function OrderDetailsTable({ orders }: { orders: PromoterStatsClientProps["promo
 
 export function PromoterStatsClient({ promoterStats, period = 'cumulative', start, end }: PromoterStatsClientProps) {
   const router = useRouter();
+  
+  const [selectedChannel, setSelectedChannel] = React.useState<string>("all");
+  const [selectedGroup, setSelectedGroup] = React.useState<string>("all");
+  const [selectedAccount, setSelectedAccount] = React.useState<string>("all");
+
+  // Extract unique filter options
+  const channels = React.useMemo(() => Array.from(new Set(promoterStats.map(p => p.channelName).filter(Boolean))), [promoterStats]);
+  
+  const groups = React.useMemo(() => {
+      const s = new Set<string>();
+      promoterStats.forEach(p => p.details.forEach(d => s.add(d.accountGroupName)));
+      return Array.from(s).filter(Boolean);
+  }, [promoterStats]);
+
+  const accounts = React.useMemo(() => {
+      const s = new Set<string>();
+      promoterStats.forEach(p => p.details.forEach(d => s.add(d.userName)));
+      return Array.from(s).filter(Boolean);
+  }, [promoterStats]);
+
+  // Filter and Sort Stats
+  const filteredStats = React.useMemo(() => {
+      let result = [...promoterStats];
+
+      if (selectedChannel !== "all") {
+          result = result.filter(p => p.channelName === selectedChannel);
+      }
+
+      if (selectedGroup !== "all") {
+          result = result.filter(p => p.details.some(d => d.accountGroupName === selectedGroup));
+      }
+
+      if (selectedAccount !== "all") {
+          result = result.filter(p => p.details.some(d => d.userName === selectedAccount));
+      }
+
+      // Default Sort: Commission Descending
+      result.sort((a, b) => b.commission - a.commission);
+
+      return result;
+  }, [promoterStats, selectedChannel, selectedGroup, selectedAccount]);
 
   // Calculate Totals
-  const totalOrdersCount = promoterStats.reduce((acc, curr) => acc + curr.orderCount, 0);
-  const totalRevenue = promoterStats.reduce((acc, curr) => acc + curr.totalRevenue, 0);
-  const totalRefunded = promoterStats.reduce((acc, curr) => acc + curr.refundedAmount, 0);
-  const totalCommission = promoterStats.reduce((acc, curr) => acc + curr.commission, 0);
+  const totalOrdersCount = filteredStats.reduce((acc, curr) => acc + curr.orderCount, 0);
+  const totalRevenue = filteredStats.reduce((acc, curr) => acc + curr.totalRevenue, 0);
+  const totalRefunded = filteredStats.reduce((acc, curr) => acc + curr.refundedAmount, 0);
+  const totalCommission = filteredStats.reduce((acc, curr) => acc + curr.commission, 0);
   const totalNetIncome = totalRevenue - totalCommission;
+
   const [currentPage, setCurrentPage] = React.useState(1)
   const [pageSize, setPageSize] = React.useState(10)
-  const totalPages = Math.max(1, Math.ceil(promoterStats.length / pageSize))
-  const paginatedStats = promoterStats.slice(
+  const totalPages = Math.max(1, Math.ceil(filteredStats.length / pageSize))
+  const paginatedStats = filteredStats.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   )
 
   React.useEffect(() => {
     setCurrentPage(1)
-  }, [pageSize, promoterStats])
+  }, [pageSize, selectedChannel, selectedGroup, selectedAccount, period]) // Reset page on filter change
 
   // Handle Period Change
   const handlePeriodChange = (value: string) => {
@@ -417,68 +504,102 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <Tabs value={period} onValueChange={handlePeriodChange} className="w-[400px]">
-            <TabsList>
-                <TabsTrigger value="cumulative">累计</TabsTrigger>
-                <TabsTrigger value="monthly">月度</TabsTrigger>
-                <TabsTrigger value="custom">自定义</TabsTrigger>
-            </TabsList>
-        </Tabs>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <Tabs value={period} onValueChange={handlePeriodChange} className="w-[400px]">
+                <TabsList>
+                    <TabsTrigger value="cumulative">累计</TabsTrigger>
+                    <TabsTrigger value="monthly">月度</TabsTrigger>
+                    <TabsTrigger value="custom">自定义</TabsTrigger>
+                </TabsList>
+            </Tabs>
 
-        <div className="flex items-center gap-2">
-            {period === 'monthly' && (
-                <MonthPicker 
-                    date={start ? new Date(start) : new Date()}
-                    onSelect={handleMonthSelect}
-                />
-            )}
+            <div className="flex items-center gap-2">
+                {period === 'monthly' && (
+                    <MonthPicker 
+                        date={start ? new Date(start) : new Date()}
+                        onSelect={handleMonthSelect}
+                    />
+                )}
 
-            {period === 'custom' && (
-                <div className={cn("grid gap-2")}>
-                    <Popover>
-                        <PopoverTrigger asChild>
-                        <Button
-                            id="date"
-                            variant={"outline"}
-                            className={cn(
-                            "w-[260px] justify-start text-left font-normal",
-                            !dateRange && "text-muted-foreground"
-                            )}
-                        >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {dateRange?.from ? (
-                            dateRange.to ? (
-                                <>
-                                {format(dateRange.from, "LLL dd, y")} -{" "}
-                                {format(dateRange.to, "LLL dd, y")}
-                                </>
-                            ) : (
-                                format(dateRange.from, "LLL dd, y")
-                            )
-                            ) : (
-                            <span>Pick a date</span>
-                            )}
-                        </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="end">
-                        <Calendar
-                            initialFocus
-                            mode="range"
-                            defaultMonth={dateRange?.from}
-                            selected={dateRange}
-                            onSelect={handleDateRangeSelect}
-                            numberOfMonths={2}
-                        />
-                        </PopoverContent>
-                    </Popover>
-                </div>
-            )}
+                {period === 'custom' && (
+                    <div className={cn("grid gap-2")}>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                            <Button
+                                id="date"
+                                variant={"outline"}
+                                className={cn(
+                                "w-[260px] justify-start text-left font-normal",
+                                !dateRange && "text-muted-foreground"
+                                )}
+                            >
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {dateRange?.from ? (
+                                dateRange.to ? (
+                                    <>
+                                    {format(dateRange.from, "LLL dd, y")} -{" "}
+                                    {format(dateRange.to, "LLL dd, y")}
+                                    </>
+                                ) : (
+                                    format(dateRange.from, "LLL dd, y")
+                                )
+                                ) : (
+                                <span>Pick a date</span>
+                                )}
+                            </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="end">
+                            <Calendar
+                                initialFocus
+                                mode="range"
+                                defaultMonth={dateRange?.from}
+                                selected={dateRange}
+                                onSelect={handleDateRangeSelect}
+                                numberOfMonths={2}
+                            />
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+                )}
 
-            <Button variant="outline" onClick={handleExportPromoters}>
-                <Download className="mr-2 h-4 w-4" />
-                导出报表
-            </Button>
+                <Button variant="outline" onClick={handleExportPromoters}>
+                    <Download className="mr-2 h-4 w-4" />
+                    导出报表
+                </Button>
+            </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+             <Select value={selectedChannel} onValueChange={setSelectedChannel}>
+                <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="筛选渠道" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">所有渠道</SelectItem>
+                    {channels.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+             </Select>
+
+             <Select value={selectedGroup} onValueChange={setSelectedGroup}>
+                <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="筛选账号组" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">所有账号组</SelectItem>
+                    {groups.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                </SelectContent>
+             </Select>
+
+             <Select value={selectedAccount} onValueChange={setSelectedAccount}>
+                <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="筛选账号" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">所有账号</SelectItem>
+                    {accounts.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                </SelectContent>
+             </Select>
         </div>
       </div>
 
@@ -538,12 +659,14 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
               <TableRow>
                 <TableHead className="w-[140px]">推广员</TableHead>
                 <TableHead className="w-[140px]">所属渠道</TableHead>
-                <TableHead className="w-[100px]">总订单数</TableHead>
-                <TableHead className="w-[150px]">总营收</TableHead>
-                <TableHead className="w-[150px]">已退款金额</TableHead>
-                <TableHead className="w-[140px]">单量提成点数</TableHead>
-                <TableHead className="w-[150px]">预计提成</TableHead>
-                <TableHead className="w-[110px]">操作</TableHead>
+                <TableHead className="w-[140px]">所属账号组</TableHead>
+                <TableHead className="w-[140px]">所属账号</TableHead>
+                <TableHead>总订单数</TableHead>
+                <TableHead>总营收</TableHead>
+                <TableHead>已退款金额</TableHead>
+                <TableHead>单量提成点数</TableHead>
+                <TableHead>预计提成</TableHead>
+                <TableHead className="w-[100px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -551,13 +674,23 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
                 <TableRow key={idx}>
                   <TableCell className="font-medium">{stat.name}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{stat.channelName}</TableCell>
+                  <TableCell>
+                      <TruncatedList items={stat.details.map(d => d.accountGroupName)} />
+                  </TableCell>
+                  <TableCell>
+                      <TruncatedList items={stat.details.map(d => d.userName)} />
+                  </TableCell>
                   <TableCell>{stat.orderCount}</TableCell>
                   <TableCell>¥ {stat.totalRevenue.toLocaleString()}</TableCell>
                   <TableCell className="text-red-500">¥ {stat.refundedAmount.toLocaleString()}</TableCell>
                   <TableCell>
                     <div className="flex items-center">
-                      <span>{stat.channelEffectivePercentage.toFixed(2)}%</span>
-                      <RuleHoverCard rules={stat.channelRules} label="提成点数" />
+                      <span>
+                          {stat.commission > 0 && stat.channelEffectivePercentage < 0.01 
+                              ? "< 0.01%" 
+                              : `${stat.channelEffectivePercentage.toFixed(2)}%`}
+                      </span>
+                      <RuleHoverCard details={stat.details} />
                     </div>
                   </TableCell>
                   <TableCell className="text-green-600 font-medium">¥ {stat.commission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
@@ -624,7 +757,7 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
               ))}
               {promoterStats.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                     暂无数据
                   </TableCell>
                 </TableRow>

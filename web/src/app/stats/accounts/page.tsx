@@ -91,165 +91,288 @@ export default async function StatsPage(props: PageProps) {
         }
       }
     }),
-    prisma.channelConfig.findMany({
-      include: {
-        rules: {
-          orderBy: { minCount: 'asc' }
-        }
-      }
-    }),
+    prisma.channelConfig.findMany(),
     prisma.promoter.findMany()
   ]);
 
   // 2. Build Lookup Maps
   const userMap = new Map(users.map(u => [u.id, u]));
-  const promoterChannelMap = new Map(promoters.map(p => [p.name, p.channel])); // Map Name -> ChannelName
-  const channelConfigMap = new Map(channelConfigs.map(c => [c.name, c])); // Map ChannelName -> Config
+  // Promoter Name -> Channel Config ID
+  const promoterMap = new Map<string, string>();
+  promoters.forEach(p => {
+    const config = channelConfigs.find(c => c.name === p.channel);
+    if (config) {
+      promoterMap.set(p.name, config.id);
+    }
+  });
 
-  // Helper to find matching rule percentage
-  const getPercentage = (count: number, rules: { type?: string; minCount: number; maxCount: number | null; percentage: number }[]) => {
-    const match = rules.find(r => count >= r.minCount && (r.maxCount === null || count <= r.maxCount));
-    return match ? match.percentage : 0;
+  // Channel Config Map (ID -> Name)
+  const channelIdToName = new Map(channelConfigs.map(c => [c.id, c.name]));
+  const channelNameToId = new Map(channelConfigs.map(c => [c.name, c.id]));
+
+  const promoterNames = new Set(promoters.map(p => p.name));
+
+  // Helper: Get Commission Percentage
+  const getPercentage = (count: number, rules: any[]) => {
+    if (!rules || rules.length === 0) return 0;
+    const rule = rules.find(r => count >= r.minCount && (r.maxCount === null || count <= r.maxCount));
+    return rule ? rule.percentage : 0;
   };
-  
-  // 3. Aggregate Basic Stats
-  // Map CreatorId -> { ...basicStats, promotersMap: ... }
-  
-  const userStatsMap: Record<string, {
-    userId: string,
-    userName: string,
-    orderCount: number,
-    totalRevenue: number,
-    refundedAmount: number,
-    promotersMap: Record<string, { name: string, count: number, revenue: number, channelName?: string }>
-  }> = {};
-  
+
+  // 3. Process Data
+  const accountGroupsMap = new Map<string, {
+    id: string,
+    name: string,
+    users: Map<string, {
+      user: any,
+      totalOrderCount: number,
+      totalRevenue: number,
+      refundedAmount: number,
+      channels: Map<string, {
+        channelId: string,
+        channelName: string,
+        orderCount: number,
+        revenue: number,
+        promoters: Map<string, {
+            name: string,
+            count: number,
+            revenue: number
+        }>
+      }>,
+      orders: any[]
+    }>
+  }>();
+
   const isInRange = (value?: Date | null) => {
     if (!dateRange) return true;
     if (!value) return false;
     return value >= dateRange.gte && value <= dateRange.lte;
   };
 
+  // 3.1 First Pass: Aggregate Orders by User & Channel
   ordersToAnalyze.forEach((order: StatsOrder) => {
       const creatorId = order.creatorId || 'unknown';
-      const creatorName = order.creatorName || 'Unknown';
       const user = userMap.get(creatorId);
+      
       const settlementByCompleted = user?.accountGroup?.settlementByCompleted ?? true;
       const includeOrder = settlementByCompleted
         ? order.status === 'COMPLETED' && isInRange(order.completedAt)
         : isInRange(order.createdAt);
 
-      if (!includeOrder) {
-        return;
-      }
+      if (!includeOrder) return;
+
+      const groupId = user?.accountGroupId || 'ungrouped';
+      const groupName = user?.accountGroup?.name || '未分组';
       
-      if (!userStatsMap[creatorId]) {
-          userStatsMap[creatorId] = {
-              userId: creatorId,
-              userName: creatorName,
-              orderCount: 0,
+      if (!accountGroupsMap.has(groupId)) {
+          accountGroupsMap.set(groupId, { id: groupId, name: groupName, users: new Map() });
+      }
+      const group = accountGroupsMap.get(groupId)!;
+
+      if (!group.users.has(creatorId)) {
+          group.users.set(creatorId, {
+              user: user || { id: creatorId, name: order.creatorName || 'Unknown', username: 'Unknown' },
+              totalOrderCount: 0,
               totalRevenue: 0,
               refundedAmount: 0,
-              promotersMap: {}
-          };
+              channels: new Map(),
+              orders: []
+          });
       }
-      
-      const stats = userStatsMap[creatorId];
+      const userStats = group.users.get(creatorId)!;
       const revenue = calculateOrderRevenue(order);
 
       if (order.status === 'CLOSED') {
-          stats.refundedAmount += revenue;
+          userStats.refundedAmount += revenue;
+          userStats.orders.push({
+              ...order,
+              orderRevenue: revenue,
+              refundAmount: revenue,
+              promoterName: order.sourceContact || '未标记'
+          });
       } else {
-          stats.orderCount++;
-          stats.totalRevenue += revenue;
-          
-          // Promoter Breakdown
+          userStats.totalOrderCount++;
+          userStats.totalRevenue += revenue;
+          userStats.orders.push({
+              ...order,
+              orderRevenue: revenue,
+              refundAmount: 0,
+              promoterName: order.sourceContact || '未标记'
+          });
+
           const promoterName = order.sourceContact || '未标记';
-          const displayPromoterName = promoterName === 'self' ? '自主开发' : (promoterName === 'OFFLINE' ? '线下' : promoterName);
-          
-          if (!stats.promotersMap[displayPromoterName]) {
-              // Try to find channel name from promoter list
-              // If not found, check if the name itself is a known channel (unlikely but possible logic fallback)
-              const channelName = promoterChannelMap.get(promoterName) || promoterChannelMap.get(displayPromoterName);
-              
-              stats.promotersMap[displayPromoterName] = {
-                  name: displayPromoterName,
-                  count: 0,
-                  revenue: 0,
-                  channelName: channelName || undefined
-              };
+          let channelId = promoterMap.get(promoterName);
+          let channelName = channelId ? channelIdToName.get(channelId) : undefined;
+
+          if (!channelId) {
+             channelId = channelNameToId.get(promoterName);
+             if (channelId) channelName = promoterName;
           }
           
-          stats.promotersMap[displayPromoterName].count++;
-          stats.promotersMap[displayPromoterName].revenue += revenue;
+          const safeChannelId = channelId || 'default'; 
+          const safeChannelName = channelName || (promoterName === 'self' ? '自主开发' : promoterName);
+
+          if (!userStats.channels.has(safeChannelId)) {
+              userStats.channels.set(safeChannelId, {
+                  channelId: safeChannelId,
+                  channelName: safeChannelName,
+                  orderCount: 0,
+                  revenue: 0,
+                  promoters: new Map()
+              });
+          }
+          const channelStats = userStats.channels.get(safeChannelId)!;
+          channelStats.orderCount++;
+          channelStats.revenue += revenue;
+
+          if (!channelStats.promoters.has(promoterName)) {
+              channelStats.promoters.set(promoterName, { name: promoterName, count: 0, revenue: 0 });
+          }
+          const promoterStats = channelStats.promoters.get(promoterName)!;
+          promoterStats.count++;
+          promoterStats.revenue += revenue;
       }
   });
 
-  // 4. Calculate Commission
-  const userStats = Object.values(userStatsMap).map(u => {
-      const user = userMap.get(u.userId);
-      const accountGroup = user?.accountGroup;
+  // 4. Flatten Data for Client
+  const allStats: any[] = [];
+  const accountGroups: { id: string; name: string }[] = [];
+
+  Array.from(accountGroupsMap.values()).forEach(group => {
+      accountGroups.push({ id: group.id, name: group.name });
       
-      // A. Account Effective Points
-      // Based on USER'S total order count (u.orderCount)
-      const accountEffectivePercentage = accountGroup 
-          ? getPercentage(u.orderCount, (accountGroup.rules as { type?: string; minCount: number; maxCount: number | null; percentage: number }[]).filter(r => (r.type || "QUANTITY") === "QUANTITY")) 
-          : 0;
+      // Get rules from one of the users in the group (assuming consistent rules per group)
+      // Actually we should look up the group definition from DB, but we have it via users include
+      const groupRules = users.find(u => u.accountGroupId === group.id)?.accountGroup?.rules || [];
+      
+      const defaultUserRules = groupRules.filter((r: any) => r.target === 'USER' && !r.channelConfigId);
+      const channelUserRulesMap = new Map<string, any[]>();
+      const channelPromoterRulesMap = new Map<string, any[]>();
 
-      // B. Process Promoters & Calculate Commission
-      let totalCommission = 0;
-
-      const promoters = Object.values(u.promotersMap).map(p => {
-          // Channel Cost Points
-          // Based on PROMOTER'S total order count (p.count)
-          let channelCostPercentage = 0;
-          let channelConfig = null;
-
-          if (p.channelName) {
-              channelConfig = channelConfigMap.get(p.channelName);
-              if (channelConfig) {
-                  channelCostPercentage = getPercentage(p.count, (channelConfig.rules as { type?: string; minCount: number; maxCount: number | null; percentage: number }[]).filter(r => (r.type || "QUANTITY") === "QUANTITY"));
+      groupRules.forEach((r: any) => {
+          if (r.channelConfigId) {
+              if (r.target === 'PROMOTER') {
+                  if (!channelPromoterRulesMap.has(r.channelConfigId)) channelPromoterRulesMap.set(r.channelConfigId, []);
+                  channelPromoterRulesMap.get(r.channelConfigId)!.push(r);
+              } else {
+                  if (!channelUserRulesMap.has(r.channelConfigId)) channelUserRulesMap.set(r.channelConfigId, []);
+                  channelUserRulesMap.get(r.channelConfigId)!.push(r);
               }
           }
+      });
 
-          // Commission Formula: Revenue * (Account% - Channel%)
-          // If Channel% > Account%, Commission = 0
-          let effectiveRate = accountEffectivePercentage - channelCostPercentage;
-          if (effectiveRate < 0) effectiveRate = 0;
-          
-          const commission = p.revenue * (effectiveRate / 100);
-          totalCommission += commission;
+      Array.from(group.users.values()).forEach(uStats => {
+          let totalEmployeeCommission = 0;
+          let totalPromoterCommission = 0;
+          let totalVolumeGradientCommission = 0;
+          let totalChannelCommission = 0;
 
-          return {
-              ...p,
-              channelName: p.channelName || '无',
-              channelCostPercentage,
-              commission,
-              rules: channelConfig?.rules || []
-          };
-      }).sort((a, b) => b.revenue - a.revenue);
+          const effectiveBaseRate = getPercentage(uStats.totalOrderCount, defaultUserRules);
 
-      return {
-          userId: u.userId,
-          userName: u.userName,
-          accountGroupName: accountGroup?.name || '无',
-          orderCount: u.orderCount,
-          totalRevenue: u.totalRevenue,
-          refundedAmount: u.refundedAmount,
-          accountEffectivePercentage,
-          estimatedCommission: totalCommission,
-          accountGroupRules: accountGroup?.rules || [],
-          promoters
-      };
-  }).sort((a, b) => b.totalRevenue - a.totalRevenue);
+          const channelsDetails = Array.from(uStats.channels.values()).map(cStats => {
+                const channelUserRules = cStats.channelId !== 'default' && channelUserRulesMap.has(cStats.channelId)
+                    ? channelUserRulesMap.get(cStats.channelId)!
+                    : [];
+                const channelEffectiveRate = channelUserRules.length > 0
+                    ? getPercentage(uStats.totalOrderCount, channelUserRules)
+                    : effectiveBaseRate;
+                const employeeRate = channelEffectiveRate;
 
+              let channelPromoterCommission = 0;
+              let channelVolumeGradientCommission = 0;
+              let channelSubordinateCommission = 0;
+
+              const promotersDetails = Array.from(cStats.promoters.values()).map(pStats => {
+                  const promoterRules = cStats.channelId !== 'default' && channelPromoterRulesMap.has(cStats.channelId)
+                      ? channelPromoterRulesMap.get(cStats.channelId)!
+                      : [];
+                  
+                  const promoterRate = getPercentage(pStats.count, promoterRules);
+                  const pCommission = pStats.revenue * (promoterRate / 100);
+                  channelPromoterCommission += pCommission;
+
+                  const isPromoter = promoterNames.has(pStats.name);
+
+                  // Split Employee Commission Source
+                  const employeeRateForOrder = isPromoter ? channelEffectiveRate : effectiveBaseRate;
+                  const pEmployeeCommission = pStats.revenue * (employeeRateForOrder / 100);
+                  
+                  // Volume Gradient applies to Direct/Non-Promoter orders
+                // Channel Commission applies to Promoter orders
+                // Total Employee Commission = Volume Gradient + Channel Commission
+                
+                if (isPromoter) {
+                    channelSubordinateCommission += pEmployeeCommission;
+                } else {
+                    channelVolumeGradientCommission += pEmployeeCommission;
+                }
+
+                return {
+                    ...pStats,
+                    rate: promoterRate,
+                    commission: pCommission,
+                    isPromoter,
+                    accountRate: employeeRateForOrder,
+                    accountCommission: pEmployeeCommission
+                };
+            });
+            
+            // Recalculate employeeCommission based on the sum of its parts to ensure strict equality
+            // and avoid any floating point discrepancies or logic mismatch
+            const calculatedEmployeeCommission = channelVolumeGradientCommission + channelSubordinateCommission;
+
+            totalPromoterCommission += channelPromoterCommission;
+            totalVolumeGradientCommission += channelVolumeGradientCommission;
+            totalChannelCommission += channelSubordinateCommission;
+            totalEmployeeCommission += calculatedEmployeeCommission;
+
+            return {
+                ...cStats,
+                employeeRate,
+                employeeCommission: calculatedEmployeeCommission,
+                volumeGradientCommission: channelVolumeGradientCommission,
+                subordinateCommission: channelSubordinateCommission,
+                promoters: promotersDetails
+            };
+        });
+
+          allStats.push({
+              accountGroupId: group.id,
+              accountGroupName: group.name,
+              userId: uStats.user.id,
+              userName: uStats.user.name || uStats.user.username,
+              totalOrderCount: uStats.totalOrderCount,
+              totalRevenue: uStats.totalRevenue,
+              refundedAmount: uStats.refundedAmount,
+              estimatedEmployeeCommission: totalEmployeeCommission,
+              volumeGradientCommission: totalVolumeGradientCommission,
+              channelCommission: totalChannelCommission,
+              estimatedPromoterCommission: totalPromoterCommission,
+              effectiveBaseRate,
+              defaultUserRules,
+              channels: channelsDetails,
+              orders: uStats.orders
+          });
+      });
+  });
+
+  // Sort by Account Group Name, then Revenue Desc
+  allStats.sort((a, b) => {
+      if (a.accountGroupName !== b.accountGroupName) {
+          return a.accountGroupName.localeCompare(b.accountGroupName);
+      }
+      return b.totalRevenue - a.totalRevenue;
+  });
+
+  accountGroups.sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="space-y-6">
-      <h2 className="text-3xl font-bold tracking-tight">账号结算</h2>
+      <h2 className="text-3xl font-bold tracking-tight">账号结算统计</h2>
       
       <StatsClient 
-        userStats={userStats} 
+        allStats={allStats}
+        accountGroups={accountGroups}
         period={period}
         start={start}
         end={end}

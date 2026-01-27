@@ -278,24 +278,28 @@ export default async function PromoterStatsPage(props: PageProps) {
       const accountGroup = user?.accountGroup;
       
       const accountEffectivePercentage = accountGroup 
-          ? getPercentage(u.orderCount, (accountGroup.rules as any[]).filter(r => (r.type || "QUANTITY") === "QUANTITY")) 
+          ? getPercentage(u.orderCount, (accountGroup.rules as any[]).filter(r => (r.type || "QUANTITY") === "QUANTITY" && (r.target || "USER") === "USER" && !r.channelConfigId)) 
           : 0;
 
       Object.values(u.promotersMap).forEach(p => {
-          let channelCostPercentage = 0;
-          let channelConfig = null;
+          let promoterRate = 0;
+          let channelConfig: typeof channelConfigs[0] | undefined | null = null;
+          let specificRules: any[] = [];
 
           if (p.channelName) {
               channelConfig = channelConfigMap.get(p.channelName);
-              if (channelConfig) {
-                  channelCostPercentage = getPercentage(p.count, (channelConfig.rules as any[]).filter(r => (r.type || "QUANTITY") === "QUANTITY"));
+              if (channelConfig && accountGroup) {
+                  const currentChannelConfig = channelConfig;
+                  // Find promoter rules defined in the Account Group for this Channel
+                  specificRules = accountGroup.rules.filter((r: any) => 
+                      r.channelConfigId === currentChannelConfig.id && 
+                      r.target === 'PROMOTER'
+                  );
+                  promoterRate = getPercentage(p.count, specificRules);
               }
           }
 
-          let effectiveRate = accountEffectivePercentage - channelCostPercentage;
-          if (effectiveRate < 0) effectiveRate = 0;
-          
-          const commission = p.revenue * (effectiveRate / 100);
+          const commission = p.revenue * (promoterRate / 100);
 
           // Aggregate
           if (!promoterAggMap.has(p.name)) {
@@ -333,19 +337,19 @@ export default async function PromoterStatsPage(props: PageProps) {
               revenue: p.revenue,
               refundedAmount: p.refundedAmount,
               accountEffectivePercentage,
-              channelCostPercentage,
+              channelCostPercentage: promoterRate, // Renaming for consistency, but this is Promoter Rate
               commission,
               accountGroupRules: accountGroup?.rules || [],
-              channelRules: channelConfig?.rules || []
+              channelRules: specificRules // Store the specific promoter rules here
           });
           p.orders.forEach(orderItem => {
               agg.orders.push({
                   ...orderItem,
                   userName: u.userName,
                   accountEffectivePercentage,
-                  channelCostPercentage,
+                  channelCostPercentage: promoterRate,
                   accountGroupRules: accountGroup?.rules || [],
-                  channelRules: channelConfig?.rules || []
+                  channelRules: specificRules
               });
           });
           
@@ -359,20 +363,20 @@ export default async function PromoterStatsPage(props: PageProps) {
   const promoterStats = Array.from(promoterAggMap.values())
     .sort((a, b) => b.totalRevenue - a.totalRevenue)
     .map(p => {
-        const channelConfig = p.channelName && p.channelName !== '无' ? channelConfigMap.get(p.channelName) : undefined;
-        const channelRules = channelConfig?.rules || [];
-        const channelEffectivePercentage = channelRules.length
-          ? getPercentage(p.orderCount, (channelRules as any[]).filter(r => (r.type || "QUANTITY") === "QUANTITY"))
-          : 0;
+        // Calculate weighted average rate for display if needed, or just use the first one if consistent
+        // For the summary table, we can calculate an "Effective Average Rate" = Total Commission / Total Revenue
+        const effectiveAverageRate = p.totalRevenue > 0 ? (p.commission / p.totalRevenue) * 100 : 0;
 
         return {
           ...p,
           accountEffectivePercentage: p.accountEffectivePercentageCount
             ? p.accountEffectivePercentageSum / p.accountEffectivePercentageCount
             : 0,
-          channelEffectivePercentage,
-          channelRules,
-          netIncome: p.totalRevenue - p.commission
+          channelEffectivePercentage: effectiveAverageRate,
+          channelRules: [], // We won't use this for hover anymore, we'll use details
+          netIncome: p.totalRevenue - p.commission // For promoter, net income is just commission? No, the page says "Net Income" = Revenue - Commission (Platform income). 
+          // Wait, the previous code was: netIncome: p.totalRevenue - p.commission. 
+          // If this page is for "Promoter Stats" from the platform perspective, then Net Income = Revenue - Payout. Correct.
         };
     });
 
