@@ -29,14 +29,53 @@ This guide explains how to deploy the ERP-Lite application using Docker Compose.
 
 You can modify the environment variables in `docker-compose.yml` directly or use a `.env` file.
 
-- `DATABASE_URL`: Connection string for the PostgreSQL database.
+- `DATABASE_URL`: 
+  - **Production (PostgreSQL)**: Set this to your PostgreSQL connection string (e.g., `postgresql://user:pass@host:5432/dbname`). The container will **automatically detect** this and switch the Prisma provider from SQLite to PostgreSQL on startup.
+  - **Development/Quick Start (SQLite)**: Defaults to `file:../data/erp-lite.db`.
 - `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`: A secret key for encrypting server action data. **Change this for production.**
 - `SEED_DB`: Set to `true` to run seed scripts (create admin user, etc.) on startup.
 
 ### Persistence
 
-- **Database**: Data is persisted in the named Docker volume `db_data`.
+- **Database**: 
+  - **PostgreSQL**: Managed externally or via a separate Docker service. Ensure your `DATABASE_URL` points to it.
+  - **SQLite**: Data is stored in `./data/erp-lite.db` on the host.
 - **Uploads**: Uploaded files (images, screenshots) are persisted in the `./uploads` directory on the host machine.
+
+## Advanced Setup
+
+### HTTPS with Nginx (Recommended)
+
+Run Nginx as a reverse proxy to handle SSL termination.
+
+Example `nginx.conf` snippet:
+
+```nginx
+server {
+    listen 80;
+    server_name example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name example.com;
+    
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+### Database Backups
+
+- **SQLite**: Set up a cron job to copy `d:\erp-lite\data\erp-lite.db` to a backup location.
+- **PostgreSQL**: Use `pg_dump` via a scheduled task.
 
 ## Maintenance
 

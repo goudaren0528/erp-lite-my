@@ -256,6 +256,8 @@ async function main() {
         // Parse dates
         const rentStartDate = o.rentStartDate ? new Date(o.rentStartDate) : null;
         const deliveryTime = o.deliveryTime ? new Date(o.deliveryTime) : null;
+        const actualDeliveryTime = o.actualDeliveryTime ? new Date(o.actualDeliveryTime) : null;
+        const completedAt = o.completedAt ? new Date(o.completedAt) : (o.status === 'COMPLETED' ? new Date(o.createdAt || new Date()) : null);
         const returnDeadline = o.returnDeadline ? new Date(o.returnDeadline) : null;
         const createdAt = o.createdAt ? new Date(o.createdAt) : new Date();
 
@@ -313,6 +315,8 @@ async function main() {
                     
                     rentStartDate,
                     deliveryTime,
+                    actualDeliveryTime,
+                    completedAt,
                     returnDeadline,
                     
                     remark: o.remark,

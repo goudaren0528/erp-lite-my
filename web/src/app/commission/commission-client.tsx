@@ -409,6 +409,11 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
                     </div>
                   </div>
                   <CardDescription>{group.description || "无描述"}</CardDescription>
+                  {group.settlementByCompleted ? (
+                    <div className="mt-2"><Badge variant="secondary">按已完成订单结算</Badge></div>
+                  ) : (
+                    <div className="mt-2"><Badge variant="outline">按创建时间结算</Badge></div>
+                  )}
                 </CardHeader>
                 
                 <CardContent className="space-y-6 flex-1">
@@ -458,7 +463,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
                         添加政策
                       </Button>
                     </div>
-                    {Array.from(new Set((group.rules || []).map((r: any) => normalizePolicyType(r.type)))).map((policyType: string) => {
+                    {Array.from(new Set<string>((group.rules || []).map((r: any) => normalizePolicyType(r.type)))).map((policyType) => {
                       const rules = getRulesByType(group.rules, policyType);
                       const label = POLICY_TYPES.find(p => p.value === policyType)?.label || policyType;
                       return (
@@ -530,6 +535,11 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
                       </Button>
                     </div>
                   </div>
+                  {channel.settlementByCompleted ? (
+                    <div className="mt-2"><Badge variant="secondary">按已完成订单结算</Badge></div>
+                  ) : (
+                    <div className="mt-2"><Badge variant="outline">按创建时间结算</Badge></div>
+                  )}
                 </CardHeader>
                 <CardContent className="space-y-6 flex-1">
                    {/* Associated Personnel (Promoters Count) */}
@@ -573,9 +583,9 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
                         添加政策
                       </Button>
                     </div>
-                    {(["QUANTITY", ...Array.from(new Set(channel.rules.map((r: any) => normalizePolicyType(r.type))))].filter(
+                    {(["QUANTITY", ...Array.from(new Set<string>(channel.rules.map((r: any) => normalizePolicyType(r.type))))].filter(
                       (v, i, arr) => arr.indexOf(v) === i
-                    )).map((policyType: string) => {
+                    )).map((policyType) => {
                       const rules = getRulesByType(channel.rules, policyType);
                       const label = POLICY_TYPES.find(p => p.value === policyType)?.label || policyType;
                       return (

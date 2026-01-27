@@ -46,7 +46,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { cn } from "@/lib/utils"
+import { cn, calculateOrderRevenue } from "@/lib/utils"
 import { updateOrderSourceInfo } from "@/app/actions"
 
 
@@ -104,6 +104,7 @@ import { useRouter } from "next/navigation"
 export function OrderTable({ orders, products, users = [], promoters = [] }: OrderTableProps) {
   const router = useRouter()
   const [filterOrderNo, setFilterOrderNo] = useState('')
+  const [filterXianyuOrderNo, setFilterXianyuOrderNo] = useState('')
   const [filterCustomer, setFilterCustomer] = useState('')
   const [filterPromoter, setFilterPromoter] = useState('')
   const [filterProduct, setFilterProduct] = useState('')
@@ -147,6 +148,9 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
         order.orderNo.toLowerCase().includes(filterOrderNo.toLowerCase()) || 
         (order.miniProgramOrderNo && order.miniProgramOrderNo.toLowerCase().includes(filterOrderNo.toLowerCase()))
 
+    const matchXianyuOrderNo = !filterXianyuOrderNo || 
+        (order.xianyuOrderNo && order.xianyuOrderNo.toLowerCase().includes(filterXianyuOrderNo.toLowerCase()))
+
     const matchCustomer = !filterCustomer || 
         order.customerXianyuId.toLowerCase().includes(filterCustomer.toLowerCase())
 
@@ -181,7 +185,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
         matchDate = matchDate && new Date(order.createdAt) < nextDay
     }
 
-    return matchOrderNo && matchCustomer && matchPromoter && matchProduct && matchCreator && matchDuration && matchRecipientName && matchRecipientPhone && matchSource && matchPlatform && matchDate
+    return matchOrderNo && matchXianyuOrderNo && matchCustomer && matchPromoter && matchProduct && matchCreator && matchDuration && matchRecipientName && matchRecipientPhone && matchSource && matchPlatform && matchDate
   })
 
   const filteredOrders = baseFilteredOrders.filter(order => {
@@ -247,6 +251,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
 
   const resetFilters = () => {
     setFilterOrderNo('')
+    setFilterXianyuOrderNo('')
     setFilterCustomer('')
     setFilterPromoter('')
     setFilterProduct('')
@@ -301,59 +306,90 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
       </Tabs>
 
       <div className="flex flex-col gap-4 bg-white p-4 rounded-md border mb-4">
-          <div className="flex flex-col gap-4">
-              {/* Row 1: Primary Filters */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  <div className="flex items-center space-x-2">
-                      <Search className="w-4 h-4 text-gray-500" />
-                      <Input 
-                          placeholder="订单号/小程序单号" 
-                          value={filterOrderNo}
-                          onChange={e => setFilterOrderNo(e.target.value)}
-                          className="h-8 text-xs"
-                      />
-                  </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+              {/* Always Visible (First 2 Rows approx) */}
+              <div className="flex items-center space-x-2">
+                  <Search className="w-4 h-4 text-gray-500 flex-shrink-0" />
                   <Input 
-                      placeholder="客户ID/昵称" 
-                      value={filterCustomer}
-                      onChange={e => setFilterCustomer(e.target.value)}
-                      className="h-8 text-xs"
-                  />
-                  <Input 
-                      placeholder="收货人姓名" 
-                      value={filterRecipientName}
-                      onChange={e => setFilterRecipientName(e.target.value)}
-                      className="h-8 text-xs"
-                  />
-                  <Input 
-                      placeholder="收货人手机" 
-                      value={filterRecipientPhone}
-                      onChange={e => setFilterRecipientPhone(e.target.value)}
-                      className="h-8 text-xs"
-                  />
-                   <Input 
-                      placeholder="商品名称" 
-                      value={filterProduct}
-                      onChange={e => setFilterProduct(e.target.value)}
+                      placeholder="订单号/小程序单号" 
+                      value={filterOrderNo}
+                      onChange={e => setFilterOrderNo(e.target.value)}
                       className="h-8 text-xs"
                   />
               </div>
+              <Input 
+                  placeholder="闲鱼订单号" 
+                  value={filterXianyuOrderNo}
+                  onChange={e => setFilterXianyuOrderNo(e.target.value)}
+                  className="h-8 text-xs"
+              />
+              <Input 
+                  placeholder="客户ID/昵称"  
+                  value={filterCustomer}
+                  onChange={e => setFilterCustomer(e.target.value)}
+                  className="h-8 text-xs"
+              />
+              <Input 
+                  placeholder="收货人姓名" 
+                  value={filterRecipientName}
+                  onChange={e => setFilterRecipientName(e.target.value)}
+                  className="h-8 text-xs"
+              />
+              <Input 
+                  placeholder="收货人手机" 
+                  value={filterRecipientPhone}
+                  onChange={e => setFilterRecipientPhone(e.target.value)}
+                  className="h-8 text-xs"
+              />
+              <Input 
+                  placeholder="商品名称" 
+                  value={filterProduct}
+                  onChange={e => setFilterProduct(e.target.value)}
+                  className="h-8 text-xs"
+              />
+              
+              <Select value={filterPlatform} onValueChange={setFilterPlatform}>
+                  <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="推广方式" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="ALL">所有方式</SelectItem>
+                      {Object.entries(platformMap).map(([k, v]) => (
+                          <SelectItem key={k} value={k}>{v}</SelectItem>
+                      ))}
+                  </SelectContent>
+              </Select>
 
-              {/* Collapsible Filters */}
+              <Select value={filterSource} onValueChange={setFilterSource}>
+                  <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="渠道筛选" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="ALL">推广渠道</SelectItem>
+                      {Object.entries(sourceMap)
+                          .filter(([k]) => k !== 'AGENT' && k !== 'PART_TIME')
+                          .map(([k, v]) => (
+                          <SelectItem key={k} value={k}>{v}</SelectItem>
+                      ))}
+                  </SelectContent>
+              </Select>
+
+              <Input 
+                  placeholder="推广员/电话" 
+                  value={filterPromoter}
+                  onChange={e => setFilterPromoter(e.target.value)}
+                  className="h-8 text-xs"
+              />
+               <Input 
+                  placeholder="创建人" 
+                  value={filterCreator}
+                  onChange={e => setFilterCreator(e.target.value)}
+                  className="h-8 text-xs"
+              />
+
+              {/* Collapsible Section (Row 3+) */}
               {isFilterExpanded && (
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-2 border-t border-dashed">
-                      <Input 
-                          placeholder="推广员/电话" 
-                          value={filterPromoter}
-                          onChange={e => setFilterPromoter(e.target.value)}
-                          className="h-8 text-xs"
-                      />
-                      <Input 
-                          placeholder="创建人" 
-                          value={filterCreator}
-                          onChange={e => setFilterCreator(e.target.value)}
-                          className="h-8 text-xs"
-                      />
+                  <>
                       <Input 
                           type="number"
                           placeholder="租期 (天)" 
@@ -362,73 +398,53 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
                           className="h-8 text-xs"
                       />
                       
-                      {/* Date Range Filter */}
-                      <div className="flex items-center space-x-2 col-span-2">
-                          <Label className="whitespace-nowrap text-sm text-gray-500">创建时间:</Label>
+                      <div className="flex items-center space-x-1 col-span-2 md:col-span-2 lg:col-span-2 xl:col-span-2">
+                          <Label className="whitespace-nowrap text-xs text-gray-500">创建时间:</Label>
                           <Input 
                               type="date" 
                               value={startDate} 
                               onChange={e => setStartDate(e.target.value)} 
-                              className="h-8 w-32 text-xs"
+                              className="h-8 w-full min-w-[110px] text-xs"
                           />
                           <span className="text-gray-400">-</span>
                           <Input 
                               type="date" 
                               value={endDate} 
                               onChange={e => setEndDate(e.target.value)} 
-                              className="h-8 w-32 text-xs"
+                              className="h-8 w-full min-w-[110px] text-xs"
                           />
-                          {(startDate || endDate) && (
-                              <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate('') }} className="h-8">
-                                  重置
-                              </Button>
-                          )}
                       </div>
-                  </div>
+                  </>
               )}
+              
+              {/* Action Buttons inside Grid to save space or aligned? 
+                  Better to keep actions separate or at the end of the grid?
+                  Let's put the toggle button at the end if it flows, or keep it in the footer.
+              */}
           </div>
           
           <div className="flex flex-wrap gap-2 items-center justify-between border-t pt-4">
-               <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => setIsFilterExpanded(!isFilterExpanded)} 
-                  className="h-9 px-3 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-              >
-                  {isFilterExpanded ? (
-                      <><ChevronUp className="mr-2 h-4 w-4" /> 收起筛选</>
-                  ) : (
-                      <><ChevronDown className="mr-2 h-4 w-4" /> 更多筛选</>
+               <div className="flex items-center gap-2">
+                   <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => setIsFilterExpanded(!isFilterExpanded)} 
+                      className="h-8 px-3 text-blue-600 hover:text-blue-700 hover:bg-blue-50 text-xs"
+                  >
+                      {isFilterExpanded ? (
+                          <><ChevronUp className="mr-1 h-3 w-3" /> 收起</>
+                      ) : (
+                          <><ChevronDown className="mr-1 h-3 w-3" /> 更多筛选</>
+                      )}
+                  </Button>
+                  {(startDate || endDate) && (
+                      <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate('') }} className="h-8 text-xs text-gray-500">
+                          清除日期
+                      </Button>
                   )}
-              </Button>
+               </div>
 
               <div className="flex gap-2 items-center">
-                  <Select value={filterPlatform} onValueChange={setFilterPlatform}>
-                      <SelectTrigger className="w-[120px] h-8 text-xs">
-                          <SelectValue placeholder="推广方式" />
-                      </SelectTrigger>
-                      <SelectContent>
-                          <SelectItem value="ALL">所有方式</SelectItem>
-                          {Object.entries(platformMap).map(([k, v]) => (
-                              <SelectItem key={k} value={k}>{v}</SelectItem>
-                          ))}
-                      </SelectContent>
-                  </Select>
-
-                  <Select value={filterSource} onValueChange={setFilterSource}>
-                      <SelectTrigger className="w-[120px] h-8 text-xs">
-                          <SelectValue placeholder="渠道筛选" />
-                      </SelectTrigger>
-                      <SelectContent>
-                          <SelectItem value="ALL">推广渠道</SelectItem>
-                          {Object.entries(sourceMap)
-                              .filter(([k]) => k !== 'AGENT' && k !== 'PART_TIME')
-                              .map(([k, v]) => (
-                              <SelectItem key={k} value={k}>{v}</SelectItem>
-                          ))}
-                      </SelectContent>
-                  </Select>
-
                   <Button variant="outline" size="sm" onClick={resetFilters} className="h-8 px-3 text-gray-600 text-xs">
                       <RotateCcw className="mr-2 h-3 w-3" /> 重置
                   </Button>
@@ -1078,7 +1094,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
     }
   }
 
-  const totalAmountWithExtensions = order.totalAmount + (order.extensions || []).reduce((acc, curr) => acc + curr.price, 0)
+  const totalAmountWithExtensions = calculateOrderRevenue(order)
   const totalExtensionDays = (order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)
 
   const copyToClipboard = (text: string) => {
@@ -1330,7 +1346,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
       <TableCell className="align-top">
         <div className="font-bold text-red-600">¥ {totalAmountWithExtensions}</div>
         <div className="text-xs text-gray-500 mt-1">
-            基础: {order.totalAmount}
+            基础: {(order.rentPrice || 0) + (order.insurancePrice || 0) + (order.overdueFee || 0)}
         </div>
         <div className="text-xs text-gray-500 mt-1">
             租: {order.rentPrice} | 保: {order.insurancePrice}

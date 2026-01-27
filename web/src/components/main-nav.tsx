@@ -117,7 +117,7 @@ export function MainNav({ user }: MainNavProps) {
     },
   ]
 
-  const hasPermission = (permission: string | null) => {
+  const hasPermission = (permission: string | null): boolean => {
     if (user.role === 'ADMIN') return true
     
     if (!permission) return true

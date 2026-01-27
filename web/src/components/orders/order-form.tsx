@@ -238,7 +238,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     }
   }
 
-  const totalAmount = (Number(rentPrice) || 0) + (Number(insurancePrice) || 0) + (Number(deposit) || 0) + (Number(overdueFee) || 0)
+  const totalAmount = (Number(rentPrice) || 0) + (Number(insurancePrice) || 0) + (Number(overdueFee) || 0)
   
   // Date Calculations
   const deliveryTime = rentStartDate ? format(subDays(new Date(rentStartDate), 2), "yyyy-MM-dd") : ""
