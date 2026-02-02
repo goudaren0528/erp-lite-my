@@ -45,8 +45,10 @@ fi
 # Start the application
 echo "Ensuring uploads directory exists and has correct permissions..."
 mkdir -p ./public/uploads
-# Since we run as root, this chmod is guaranteed to work
-chmod 777 ./public/uploads || echo "Warning: Could not chmod ./public/uploads, continuing..."
+# Since we run as root, this chmod is guaranteed to work, but we handle failure just in case
+set +e
+chmod 777 ./public/uploads 2>/dev/null || echo "Warning: Could not chmod ./public/uploads, continuing..."
+set -e
 
 echo "Starting application..."
 # Use Next.js built-in start command via npm if standalone fails, or direct node if standalone

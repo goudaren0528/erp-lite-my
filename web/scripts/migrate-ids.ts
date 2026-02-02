@@ -64,6 +64,12 @@ async function main() {
     let updatedCount = 0;
     let logCount = 0;
 
+    // Helper for smart normalization
+    const normalize = (s: string) => s.toLowerCase()
+        .replace(/\s+/g, '') // Remove spaces
+        .replace(/pro/g, 'p') // Normalize Pro -> p
+        .replace(/plus/g, '+'); // Normalize Plus -> +
+
     for (const order of orders) {
         let promoterId = order.promoterId;
         let productId = order.productId;
@@ -86,6 +92,12 @@ async function main() {
             // Try fuzzy match (contains)
             if (!promoter) {
                 promoter = promoters.find(p => p.name.includes(contactName) || contactName.includes(p.name));
+            }
+
+            // Try normalized match
+            if (!promoter) {
+                const nContact = normalize(contactName);
+                promoter = promoters.find(p => normalize(p.name) === nContact || normalize(p.name).includes(nContact) || nContact.includes(normalize(p.name)));
             }
 
             if (promoter) {

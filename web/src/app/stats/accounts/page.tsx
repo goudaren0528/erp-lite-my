@@ -106,7 +106,7 @@ export default async function StatsPage(props: PageProps) {
       rawStats = await prisma.$queryRaw`
         WITH ExtensionSums AS (
             SELECT orderId, SUM(price) as extTotal
-            FROM OrderExtension
+            FROM "OrderExtension"
             GROUP BY orderId
         )
         SELECT
