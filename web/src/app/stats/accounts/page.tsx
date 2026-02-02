@@ -95,7 +95,7 @@ export default async function StatsPage(props: PageProps) {
       const dateCondition = dateRange 
           ? `
             CASE 
-                WHEN COALESCE(ag."settlementByCompleted", 1) = 1 THEN 
+                WHEN COALESCE(ag."settlementByCompleted", true) = true THEN 
                     (o.status = 'COMPLETED' AND o."completedAt" >= ${startDate.getTime()} AND o."completedAt" <= ${endDate.getTime()})
                 ELSE
                     (o."createdAt" >= ${startDate.getTime()} AND o."createdAt" <= ${endDate.getTime()})
