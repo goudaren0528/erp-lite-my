@@ -131,6 +131,15 @@ async function main() {
             if (!product) {
                 product = products.find(p => p.name.includes(pName) || pName.includes(p.name));
             }
+
+            // Try normalized match
+            if (!product) {
+                const nPName = normalize(pName);
+                product = products.find(p => {
+                    const nDbName = normalize(p.name);
+                    return nDbName === nPName || nDbName.includes(nPName) || nPName.includes(nDbName);
+                });
+            }
             
             if (product) {
                 productId = product.id;
