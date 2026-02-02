@@ -96,9 +96,9 @@ export default async function StatsPage(props: PageProps) {
           ? `
             CASE 
                 WHEN COALESCE(ag."settlementByCompleted", true) = true THEN 
-                    (o.status = 'COMPLETED' AND o."completedAt" >= ${startDate.getTime()} AND o."completedAt" <= ${endDate.getTime()})
+                    (o.status = 'COMPLETED' AND o."completedAt" >= to_timestamp(${startDate.getTime()} / 1000.0) AND o."completedAt" <= to_timestamp(${endDate.getTime()} / 1000.0))
                 ELSE
-                    (o."createdAt" >= ${startDate.getTime()} AND o."createdAt" <= ${endDate.getTime()})
+                    (o."createdAt" >= to_timestamp(${startDate.getTime()} / 1000.0) AND o."createdAt" <= to_timestamp(${endDate.getTime()} / 1000.0))
             END
           `
           : '1=1';
