@@ -85,7 +85,7 @@ export default async function StatsPage(props: PageProps) {
       const endDate = dateRange ? dateRange.lte : new Date('2100-01-01');   // Default far future
       
       // Permission Filter
-      const userFilter = canViewAllOrders ? '1=1' : `o.creatorId = '${currentUser?.id}'`;
+      const userFilter = canViewAllOrders ? '1=1' : `o."creatorId" = '${currentUser?.id}'`;
       
       // Date/Status Filter Logic (mimics code logic)
       // If dateRange is null (cumulative), we still need valid SQL.
@@ -95,10 +95,10 @@ export default async function StatsPage(props: PageProps) {
       const dateCondition = dateRange 
           ? `
             CASE 
-                WHEN COALESCE(ag.settlementByCompleted, 1) = 1 THEN 
-                    (o.status = 'COMPLETED' AND o.completedAt >= ${startDate.getTime()} AND o.completedAt <= ${endDate.getTime()})
+                WHEN COALESCE(ag."settlementByCompleted", 1) = 1 THEN 
+                    (o.status = 'COMPLETED' AND o."completedAt" >= ${startDate.getTime()} AND o."completedAt" <= ${endDate.getTime()})
                 ELSE
-                    (o.createdAt >= ${startDate.getTime()} AND o.createdAt <= ${endDate.getTime()})
+                    (o."createdAt" >= ${startDate.getTime()} AND o."createdAt" <= ${endDate.getTime()})
             END
           `
           : '1=1';
