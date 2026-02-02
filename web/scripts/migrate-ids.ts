@@ -70,6 +70,12 @@ async function main() {
         .replace(/pro/g, 'p') // Normalize Pro -> p
         .replace(/plus/g, '+'); // Normalize Plus -> +
 
+    // Manual mappings for edge cases
+    const manualProductMap: Record<string, string> = {
+        'vivoX300U单机': 'vivoX300Pro单机',
+        // Add other manual mappings here if needed
+    };
+
     for (const order of orders) {
         let promoterId = order.promoterId;
         let productId = order.productId;
@@ -118,7 +124,13 @@ async function main() {
 
         // Match Product
         if (!productId && order.productName) {
-            const pName = order.productName.trim();
+            let pName = order.productName.trim();
+            
+            // Apply manual mapping
+            if (manualProductMap[pName]) {
+                pName = manualProductMap[pName];
+            }
+
             // Try exact match first
             let product = products.find(p => p.name.trim() === pName);
             
