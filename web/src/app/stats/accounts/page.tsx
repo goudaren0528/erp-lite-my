@@ -105,25 +105,25 @@ export default async function StatsPage(props: PageProps) {
 
       rawStats = await prisma.$queryRaw`
         WITH ExtensionSums AS (
-            SELECT orderId, SUM(price) as extTotal
+            SELECT "orderId", SUM(price) as extTotal
             FROM "OrderExtension"
-            GROUP BY orderId
+            GROUP BY "orderId"
         )
         SELECT
-            o.creatorId,
+            o."creatorId",
             o.source,
-            o.promoterId,
-            o.channelId,
-            o.sourceContact as promoterName,
-            SUM(CASE WHEN o.status != 'CLOSED' THEN 1 ELSE 0 END) as orderCount,
-            SUM(CASE WHEN o.status != 'CLOSED' THEN (o.rentPrice + o.insurancePrice + COALESCE(o.overdueFee, 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as totalRevenue,
-            SUM(CASE WHEN o.status = 'CLOSED' THEN (o.rentPrice + o.insurancePrice + COALESCE(o.overdueFee, 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as refundedAmount
+            o."promoterId",
+            o."channelId",
+            o."sourceContact" as "promoterName",
+            SUM(CASE WHEN o.status != 'CLOSED' THEN 1 ELSE 0 END) as "orderCount",
+            SUM(CASE WHEN o.status != 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as "totalRevenue",
+            SUM(CASE WHEN o.status = 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as "refundedAmount"
         FROM "Order" o
-        LEFT JOIN ExtensionSums es ON o.id = es.orderId
-        LEFT JOIN "User" u ON o.creatorId = u.id
-        LEFT JOIN "AccountGroup" ag ON u.accountGroupId = ag.id
+        LEFT JOIN ExtensionSums es ON o.id = es."orderId"
+        LEFT JOIN "User" u ON o."creatorId" = u.id
+        LEFT JOIN "AccountGroup" ag ON u."accountGroupId" = ag.id
         WHERE ${Prisma.raw(userFilter)} AND ${Prisma.raw(dateCondition)}
-        GROUP BY o.creatorId, o.source, o.promoterId, o.channelId, o.sourceContact
+        GROUP BY o."creatorId", o.source, o."promoterId", o."channelId", o."sourceContact"
       `;
   }
 
