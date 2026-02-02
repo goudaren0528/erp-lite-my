@@ -308,6 +308,8 @@ export default async function StatsPage(props: PageProps) {
           let totalPromoterCommission = 0;
           let totalVolumeGradientCommission = 0;
           let totalChannelCommission = 0;
+          let totalPeerCommission = 0;
+          let totalAgentCommission = 0;
 
           const effectiveBaseRate = getPercentage(uStats.totalOrderCount, defaultUserRules);
 
@@ -340,23 +342,23 @@ export default async function StatsPage(props: PageProps) {
                   const pEmployeeCommission = pStats.revenue * (employeeRateForOrder / 100);
                   
                   // Volume Gradient applies to Direct/Non-Promoter orders
-                // Channel Commission applies to Promoter orders
-                // Total Employee Commission = Volume Gradient + Channel Commission
-                
-                if (isPromoter) {
-                    channelSubordinateCommission += pEmployeeCommission;
-                } else {
-                    channelVolumeGradientCommission += pEmployeeCommission;
-                }
+                  // Channel Commission applies to Promoter orders
+                  // Total Employee Commission = Volume Gradient + Channel Commission
+                  
+                  if (isPromoter) {
+                      channelSubordinateCommission += pEmployeeCommission;
+                  } else {
+                      channelVolumeGradientCommission += pEmployeeCommission;
+                  }
 
-                return {
-                    ...pStats,
-                    rate: promoterRate,
-                    commission: pCommission,
-                    isPromoter,
-                    accountRate: employeeRateForOrder,
-                    accountCommission: pEmployeeCommission
-                };
+                  return {
+                      ...pStats,
+                      rate: promoterRate,
+                      commission: pCommission,
+                      isPromoter,
+                      accountRate: employeeRateForOrder,
+                      accountCommission: pEmployeeCommission
+                  };
             });
             
             // Recalculate employeeCommission based on the sum of its parts to ensure strict equality
@@ -366,6 +368,16 @@ export default async function StatsPage(props: PageProps) {
             totalPromoterCommission += channelPromoterCommission;
             totalVolumeGradientCommission += channelVolumeGradientCommission;
             totalChannelCommission += channelSubordinateCommission;
+            
+            // Split Channel Commission into Peer and Agent
+            if (channelSubordinateCommission > 0) {
+                if (cStats.channelName.includes('同行')) {
+                    totalPeerCommission += channelSubordinateCommission;
+                } else {
+                    totalAgentCommission += channelSubordinateCommission;
+                }
+            }
+
             totalEmployeeCommission += calculatedEmployeeCommission;
 
             return {
@@ -389,6 +401,8 @@ export default async function StatsPage(props: PageProps) {
               estimatedEmployeeCommission: totalEmployeeCommission,
               volumeGradientCommission: totalVolumeGradientCommission,
               channelCommission: totalChannelCommission,
+              peerCommission: totalPeerCommission,
+              agentCommission: totalAgentCommission,
               estimatedPromoterCommission: totalPromoterCommission,
               effectiveBaseRate,
               defaultUserRules,

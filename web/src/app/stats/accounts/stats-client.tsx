@@ -185,6 +185,8 @@ interface AccountStat {
     estimatedEmployeeCommission: number;
     volumeGradientCommission: number;
     channelCommission: number;
+    peerCommission: number;
+    agentCommission: number;
     estimatedPromoterCommission: number;
     effectiveBaseRate?: number;
     defaultUserRules?: Rule[];
@@ -196,6 +198,7 @@ interface AccountStat {
         revenue: number;
         employeeRate: number;
         employeeCommission: number;
+        subordinateCommission: number;
         promoters: {
             name: string;
             count: number;
@@ -397,7 +400,8 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                     "总订单数": stat.totalOrderCount,
                     "总营收": stat.totalRevenue,
                     "员工总提成": stat.estimatedEmployeeCommission,
-                    "渠道提成": stat.channelCommission,
+                    "同行提成": stat.peerCommission,
+                    "代理兼职提成": stat.agentCommission,
                     "单量阶梯提成": stat.volumeGradientCommission,
                     "渠道": c.channelName,
                     "渠道单量": c.orderCount,
@@ -418,7 +422,8 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                     "总订单数": stat.totalOrderCount,
                     "总营收": stat.totalRevenue,
                     "员工总提成": stat.estimatedEmployeeCommission,
-                    "渠道提成": stat.channelCommission,
+                    "同行提成": stat.peerCommission,
+                    "代理兼职提成": stat.agentCommission,
                     "单量阶梯提成": stat.volumeGradientCommission,
                     "渠道": c.channelName,
                     "渠道单量": c.orderCount,
@@ -632,7 +637,8 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                         <TableHead className="w-[140px]">账号</TableHead>
                         <TableHead className="w-[100px]">总单量</TableHead>
                         <TableHead className="w-[160px]">总营收</TableHead>
-                        <TableHead className="w-[120px]">渠道提成</TableHead>
+                        <TableHead className="w-[120px]">同行提成</TableHead>
+                        <TableHead className="w-[120px]">代理兼职提成</TableHead>
                         <TableHead className="w-[120px]">单量阶梯提成</TableHead>
                         <TableHead className="w-[140px]">员工总提成</TableHead>
                         <TableHead className="w-[140px]">推广员预计提成</TableHead>
@@ -647,7 +653,10 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                             <TableCell>{u.totalOrderCount}</TableCell>
                             <TableCell>¥ {u.totalRevenue.toLocaleString()}</TableCell>
                             <TableCell className="font-medium">
-                                ¥ {u.channelCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                ¥ {u.peerCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                            </TableCell>
+                            <TableCell className="font-medium">
+                                ¥ {u.agentCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                             </TableCell>
                             <TableCell className="font-medium">
                                 <div>

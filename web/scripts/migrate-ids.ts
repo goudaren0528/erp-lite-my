@@ -76,7 +76,18 @@ async function main() {
         // Match Promoter
         if (!promoterId && order.sourceContact && order.sourceContact !== 'self') {
             const contactName = order.sourceContact.trim();
-            const promoter = promoters.find(p => p.name.trim() === contactName);
+            let promoter = promoters.find(p => p.name.trim() === contactName);
+            
+            // Try case-insensitive match
+            if (!promoter) {
+                promoter = promoters.find(p => p.name.trim().toLowerCase() === contactName.toLowerCase());
+            }
+
+            // Try fuzzy match (contains)
+            if (!promoter) {
+                promoter = promoters.find(p => p.name.includes(contactName) || contactName.includes(p.name));
+            }
+
             if (promoter) {
                 promoterId = promoter.id;
                 needsUpdate = true;
@@ -98,8 +109,16 @@ async function main() {
             const pName = order.productName.trim();
             // Try exact match first
             let product = products.find(p => p.name.trim() === pName);
-            // Try contains if exact fails (risky? maybe just trim)
-            // if (!product) product = products.find(p => p.name.includes(pName) || pName.includes(p.name));
+            
+            // Try case-insensitive match
+            if (!product) {
+                product = products.find(p => p.name.trim().toLowerCase() === pName.toLowerCase());
+            }
+            
+            // Try contains if exact fails
+            if (!product) {
+                product = products.find(p => p.name.includes(pName) || pName.includes(p.name));
+            }
             
             if (product) {
                 productId = product.id;

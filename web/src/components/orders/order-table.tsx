@@ -1113,6 +1113,17 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
   const totalAmountWithExtensions = calculateOrderRevenue(order)
   const totalExtensionDays = (order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)
 
+  // Calculate overdue days for display
+  const isOrderActive = !['COMPLETED', 'BOUGHT_OUT', 'CLOSED', 'RETURNING'].includes(order.status)
+  const returnDeadlineDate = order.returnDeadline ? new Date(order.returnDeadline) : null
+  if (returnDeadlineDate) returnDeadlineDate.setHours(0, 0, 0, 0)
+  const todayDate = new Date()
+  todayDate.setHours(0, 0, 0, 0)
+  
+  const overdueDays = (isOrderActive && returnDeadlineDate && todayDate > returnDeadlineDate) 
+    ? differenceInDays(todayDate, returnDeadlineDate) 
+    : 0
+
   const copyToClipboard = (text: string) => {
     if (!text) return
 
@@ -1358,6 +1369,9 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         <div className="text-xs text-muted-foreground" title="起租日期">起租: {order.rentStartDate ? format(new Date(order.rentStartDate), 'yyyy-MM-dd') : '-'}</div>
         <div className="text-xs text-muted-foreground" title="租期结束">止租: {order.rentStartDate ? format(addDays(new Date(order.rentStartDate), order.duration + totalExtensionDays - 1), 'yyyy-MM-dd') : '-'}</div>
         <div className="text-xs text-muted-foreground" title="最晚归还">归还: {order.returnDeadline ? format(new Date(order.returnDeadline), 'yyyy-MM-dd') : '-'}</div>
+        {overdueDays > 0 && (
+             <div className="text-xs font-bold text-red-600 mt-0.5">逾期 {overdueDays} 天</div>
+        )}
       </TableCell>
       <TableCell className="align-top">
         <div className="font-bold text-red-600">¥ {totalAmountWithExtensions}</div>
