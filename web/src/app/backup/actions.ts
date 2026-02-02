@@ -33,29 +33,75 @@ export async function importData(formData: FormData) {
         const importedTypes: string[] = [];
 
         await prisma.$transaction(async (tx: TransactionClient) => {
+            const accountGroupIdMap = new Map<string, string>();
+            const channelIdMap = new Map<string, string>();
+
             if (data.accountGroups && Array.isArray(data.accountGroups)) {
                 let count = 0;
+                const accountGroupCache = new Map<string, string>();
+
                 for (const g of data.accountGroups) {
+                    // Check if we already processed this name
+                    if (g.name && accountGroupCache.has(g.name)) {
+                        const cachedId = accountGroupCache.get(g.name);
+                        if (g.id && cachedId) {
+                            accountGroupIdMap.set(g.id, cachedId);
+                        }
+                        continue;
+                    }
+
                     const updateData = {
                         name: g.name,
                         description: g.description ?? null,
                         settlementByCompleted: g.settlementByCompleted ?? true
                     };
-                    if (g.id) {
-                        await tx.accountGroup.upsert({
+
+                    let finalId = g.id;
+
+                    if (g.name) {
+                        const existingByName = await tx.accountGroup.findUnique({ where: { name: g.name } });
+                        if (existingByName) {
+                            await tx.accountGroup.update({
+                                where: { id: existingByName.id },
+                                data: updateData
+                            });
+                            finalId = existingByName.id;
+                        } else if (g.id) {
+                            const existingById = await tx.accountGroup.findUnique({ where: { id: g.id } });
+                            if (existingById) {
+                                await tx.accountGroup.update({
+                                    where: { id: existingById.id },
+                                    data: updateData
+                                });
+                                finalId = existingById.id;
+                            } else {
+                                const created = await tx.accountGroup.create({
+                                    data: {
+                                        id: g.id,
+                                        ...updateData
+                                    }
+                                });
+                                finalId = created.id;
+                            }
+                        } else {
+                            const created = await tx.accountGroup.create({
+                                data: updateData
+                            });
+                            finalId = created.id;
+                        }
+                        accountGroupCache.set(g.name, finalId!);
+                    } else if (g.id) {
+                         // Fallback for ID-only update (shouldn't happen for AccountGroup creation usually)
+                         await tx.accountGroup.upsert({
                             where: { id: g.id },
                             update: updateData,
-                            create: {
-                                id: g.id,
-                                ...updateData
-                            }
-                        });
-                    } else if (g.name) {
-                        await tx.accountGroup.upsert({
-                            where: { name: g.name },
-                            update: updateData,
-                            create: updateData
-                        });
+                            create: { id: g.id, ...updateData }
+                         });
+                         finalId = g.id;
+                    }
+
+                    if (g.id && finalId) {
+                        accountGroupIdMap.set(g.id, finalId);
                     }
                     count++;
                 }
@@ -64,26 +110,67 @@ export async function importData(formData: FormData) {
 
             if (data.channelConfigs && Array.isArray(data.channelConfigs)) {
                 let count = 0;
+                const channelConfigCache = new Map<string, string>();
+
                 for (const c of data.channelConfigs) {
+                    if (c.name && channelConfigCache.has(c.name)) {
+                        const cachedId = channelConfigCache.get(c.name);
+                        if (c.id && cachedId) {
+                            channelIdMap.set(c.id, cachedId);
+                        }
+                        continue;
+                    }
+
                     const updateData = {
                         name: c.name,
                         settlementByCompleted: c.settlementByCompleted ?? true
                     };
-                    if (c.id) {
+
+                    let finalId = c.id;
+
+                    if (c.name) {
+                        const existingByName = await tx.channelConfig.findUnique({ where: { name: c.name } });
+                        if (existingByName) {
+                            await tx.channelConfig.update({
+                                where: { id: existingByName.id },
+                                data: updateData
+                            });
+                            finalId = existingByName.id;
+                        } else if (c.id) {
+                            const existingById = await tx.channelConfig.findUnique({ where: { id: c.id } });
+                            if (existingById) {
+                                await tx.channelConfig.update({
+                                    where: { id: existingById.id },
+                                    data: updateData
+                                });
+                                finalId = existingById.id;
+                            } else {
+                                const created = await tx.channelConfig.create({
+                                    data: {
+                                        id: c.id,
+                                        ...updateData
+                                    }
+                                });
+                                finalId = created.id;
+                            }
+                        } else {
+                            const created = await tx.channelConfig.create({
+                                data: updateData
+                            });
+                            finalId = created.id;
+                        }
+                        channelConfigCache.set(c.name, finalId!);
+                    } else if (c.id) {
                         await tx.channelConfig.upsert({
                             where: { id: c.id },
                             update: updateData,
-                            create: {
-                                id: c.id,
-                                ...updateData
-                            }
+                            create: { id: c.id, ...updateData }
                         });
-                    } else if (c.name) {
-                        await tx.channelConfig.upsert({
-                            where: { name: c.name },
-                            update: updateData,
-                            create: updateData
-                        });
+                        finalId = c.id;
+                    }
+
+                    if (c.id && finalId) {
+                        channelIdMap.set(c.id, finalId);
                     }
                     count++;
                 }
@@ -98,8 +185,8 @@ export async function importData(formData: FormData) {
                         minCount: r.minCount,
                         maxCount: r.maxCount ?? null,
                         percentage: r.percentage,
-                        accountGroupId: r.accountGroupId || null,
-                        channelConfigId: r.channelConfigId || null
+                        accountGroupId: (r.accountGroupId && accountGroupIdMap.get(r.accountGroupId)) || r.accountGroupId || null,
+                        channelConfigId: (r.channelConfigId && channelIdMap.get(r.channelConfigId)) || r.channelConfigId || null
                     };
                     if (r.id) {
                         await tx.commissionRule.upsert({
@@ -128,15 +215,27 @@ export async function importData(formData: FormData) {
                     PART_TIME: "兼职",
                     RETAIL: "零售"
                 };
+                const channelConfigCache = new Map<string, any>();
                 let count = 0;
                 for (const c of data.commissionConfigs) {
                     const channelName = roleMap[c.role] || c.role;
                     if (!channelName) continue;
-                    const channelConfig = await tx.channelConfig.upsert({
-                        where: { name: channelName },
-                        update: { name: channelName, settlementByCompleted: true },
-                        create: { name: channelName, settlementByCompleted: true }
-                    });
+
+                    let channelConfig = channelConfigCache.get(channelName);
+                    if (!channelConfig) {
+                        const existing = await tx.channelConfig.findUnique({ where: { name: channelName } });
+                        if (existing) {
+                            channelConfig = await tx.channelConfig.update({
+                                where: { id: existing.id },
+                                data: { settlementByCompleted: true }
+                            });
+                        } else {
+                            channelConfig = await tx.channelConfig.create({
+                                data: { name: channelName, settlementByCompleted: true }
+                            });
+                        }
+                        channelConfigCache.set(channelName, channelConfig);
+                    }
                     if (c.id) {
                         await tx.commissionRule.upsert({
                             where: { id: c.id },

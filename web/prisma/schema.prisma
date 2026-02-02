@@ -44,6 +44,8 @@ model ChannelConfig {
   rules       CommissionRule[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  orders      Order[]
+  promoters   Promoter[]
 }
 
 model CommissionRule {
@@ -69,9 +71,14 @@ model Promoter {
   name      String
   phone     String?
   channel   String?
+  
+  channelConfigId String?
+  channelConfig   ChannelConfig? @relation(fields: [channelConfigId], references: [id])
+
   creatorId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  orders    Order[]
 }
 
 
@@ -90,6 +97,7 @@ model Product {
   variants  String   // Stored as JSON string
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  orders    Order[]
 }
 
 model Order {
@@ -135,6 +143,15 @@ model Order {
   remark          String?
   screenshot      String?
   
+  promoterId      String?
+  promoter        Promoter? @relation(fields: [promoterId], references: [id])
+  
+  productId       String?
+  product         Product?  @relation(fields: [productId], references: [id])
+  
+  channelId       String?
+  channel         ChannelConfig? @relation(fields: [channelId], references: [id])
+
   creatorId       String
   creatorName     String
   createdAt       DateTime @default(now())

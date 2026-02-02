@@ -334,6 +334,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
             <Table>
                 <TableHeader>
                     <TableRow>
+                        <TableHead className="w-[80px]">ID</TableHead>
                         <TableHead>渠道名称</TableHead>
                         <TableHead>启用状态</TableHead>
                         <TableHead>结算模式</TableHead>
@@ -344,6 +345,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
                 <TableBody>
                     {channelConfigs.map((channel: any) => (
                         <TableRow key={channel.id}>
+                            <TableCell className="font-mono text-xs" title={channel.id}>{channel.id.slice(0, 8)}</TableCell>
                             <TableCell className="font-medium">{channel.name}</TableCell>
                             <TableCell>
                                 <Switch 
@@ -373,7 +375,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
                     ))}
                     {channelConfigs.length === 0 && (
                         <TableRow>
-                            <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                            <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                                 暂无渠道配置
                             </TableCell>
                         </TableRow>

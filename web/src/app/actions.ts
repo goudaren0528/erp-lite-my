@@ -5,6 +5,11 @@ import { OrderStatus, User, Promoter } from "@/types";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 
+// Helper to determine query mode based on database type
+// SQLite does not support 'insensitive' mode, but Postgres does.
+const isPostgres = process.env.DATABASE_URL?.startsWith('postgres');
+const dbMode = isPostgres ? 'insensitive' : undefined;
+
 export async function createOrder(formData: FormData) {
   try {
       const currentUser = await getCurrentUser();
@@ -12,24 +17,8 @@ export async function createOrder(formData: FormData) {
       const creatorId = currentUser?.id || 'system'; 
       const creatorName = currentUser?.name || '系统';
 
-      // Simple sequence order number
-      // Note: In high concurrency, this needs a better strategy (e.g. database sequence or transaction)
-      // For SQLite/Postgres migration, we could use an atomic increment or just query max.
-      // const lastOrder = await prisma.order.findFirst({
-      //    orderBy: { createdAt: 'desc' } // heuristic, or try to parse orderNo
-      // });
-      // Actually we want max(orderNo). But orderNo is string.
-      // Let's stick to the logic: find max numeric orderNo.
-      // Fetching all orders is bad.
-      // Let's assume orderNo is incrementing.
-      // For now, let's use a simpler approach or fetch recent ones?
-      // fetching all orders ids/orderNos is better than full objects.
-      const allOrders = await prisma.order.findMany({ select: { orderNo: true } });
-      const maxOrderNo = allOrders.reduce((max: number, o: { orderNo: string }) => {
-          const num = parseInt(o.orderNo)
-          return !isNaN(num) && num > max ? num : max
-      }, 1000)
-      const orderNo = String(maxOrderNo + 1)
+      const now = new Date();
+      const orderNo = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}${String(now.getMilliseconds()).padStart(3, '0')}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
 
       const rawData = Object.fromEntries(formData.entries());
       
@@ -57,10 +46,13 @@ export async function createOrder(formData: FormData) {
             
             customerXianyuId: (rawData.customerXianyuId as string) || '',
             sourceContact: (rawData.sourceContact as string) || '',
+            promoterId: (rawData.promoterId as string) || null,
+            channelId: (rawData.channelId as string) || null,
             miniProgramOrderNo: (rawData.miniProgramOrderNo as string) || null,
             xianyuOrderNo: (rawData.xianyuOrderNo as string) || null,
             
             productName: (rawData.productName as string) || '',
+            productId: (rawData.productId as string) || null,
             variantName: (rawData.variantName as string) || '',
             sn: (rawData.sn as string) || null,
             
@@ -101,6 +93,267 @@ export async function createOrder(formData: FormData) {
     const message = error instanceof Error ? error.message : String(error)
     return { success: false, message: message || "创建订单失败" };
   }
+}
+
+export async function fetchOrders(params: {
+    page: number;
+    pageSize: number;
+    sortBy: 'status' | 'createdAt';
+    sortDirection: 'asc' | 'desc';
+    filterOrderNo?: string;
+    filterXianyuOrderNo?: string;
+    filterCustomer?: string;
+    filterPromoter?: string;
+    filterProduct?: string;
+    filterCreator?: string;
+    filterDuration?: string;
+    filterRecipientName?: string;
+    filterRecipientPhone?: string;
+    filterStatus?: string;
+    filterSource?: string;
+    filterPlatform?: string;
+    startDate?: string;
+    endDate?: string;
+}) {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+        throw new Error("Unauthorized");
+    }
+
+    const {
+        page,
+        pageSize,
+        sortBy,
+        sortDirection,
+        filterOrderNo: rawFilterOrderNo,
+        filterXianyuOrderNo: rawFilterXianyuOrderNo,
+        filterCustomer: rawFilterCustomer,
+        filterPromoter: rawFilterPromoter,
+        filterProduct: rawFilterProduct,
+        filterCreator: rawFilterCreator,
+        filterDuration,
+        filterRecipientName: rawFilterRecipientName,
+        filterRecipientPhone: rawFilterRecipientPhone,
+        filterStatus,
+        filterSource,
+        filterPlatform,
+        startDate,
+        endDate
+    } = params;
+
+    const filterOrderNo = rawFilterOrderNo?.trim();
+    const filterXianyuOrderNo = rawFilterXianyuOrderNo?.trim();
+    const filterCustomer = rawFilterCustomer?.trim();
+    const filterPromoter = rawFilterPromoter?.trim();
+    const filterProduct = rawFilterProduct?.trim();
+    const filterCreator = rawFilterCreator?.trim();
+    const filterRecipientName = rawFilterRecipientName?.trim();
+    const filterRecipientPhone = rawFilterRecipientPhone?.trim();
+
+    const isAdmin = currentUser.role === 'ADMIN';
+    const canViewAllOrders = isAdmin || currentUser.permissions?.includes('view_all_orders');
+
+    const baseWhere: any = canViewAllOrders ? {} : { creatorId: currentUser.id };
+
+    if (filterOrderNo) {
+        baseWhere.OR = [
+            { orderNo: { contains: filterOrderNo, mode: dbMode as any } },
+            { miniProgramOrderNo: { contains: filterOrderNo, mode: dbMode as any } }
+        ];
+    }
+
+    if (filterXianyuOrderNo) {
+        baseWhere.xianyuOrderNo = { contains: filterXianyuOrderNo, mode: dbMode as any };
+    }
+
+    if (filterCustomer) {
+        baseWhere.customerXianyuId = { contains: filterCustomer, mode: dbMode as any };
+    }
+
+    if (filterProduct) {
+        baseWhere.productName = { contains: filterProduct, mode: dbMode as any };
+    }
+
+    if (filterDuration) {
+        const durationNum = Number(filterDuration);
+        if (Number.isFinite(durationNum)) {
+            baseWhere.duration = durationNum;
+        }
+    }
+
+    if (filterRecipientName) {
+        baseWhere.recipientName = { contains: filterRecipientName, mode: dbMode as any };
+    }
+
+    if (filterRecipientPhone) {
+        baseWhere.recipientPhone = { contains: filterRecipientPhone };
+    }
+
+    if (filterSource && filterSource !== 'ALL') {
+        baseWhere.source = filterSource;
+    }
+
+    if (filterPlatform && filterPlatform !== 'ALL') {
+        baseWhere.platform = filterPlatform;
+    }
+
+    if (startDate || endDate) {
+        const createdAt: { gte?: Date; lt?: Date } = {};
+        if (startDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            createdAt.gte = start;
+        }
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setDate(end.getDate() + 1);
+            end.setHours(0, 0, 0, 0);
+            createdAt.lt = end;
+        }
+        baseWhere.createdAt = createdAt;
+    }
+
+    if (filterCreator) {
+        const creatorUsers = await prisma.user.findMany({
+            where: {
+                name: { contains: filterCreator, mode: dbMode } as any
+            },
+            select: { id: true }
+        });
+        const creatorIds = creatorUsers.map(u => u.id);
+        if (creatorIds.length > 0) {
+            baseWhere.creatorId = { in: creatorIds };
+        } else {
+            baseWhere.creatorId = 'no-match';
+        }
+    }
+
+    if (filterPromoter) {
+        const matchedPromoters = await prisma.promoter.findMany({
+            where: {
+                OR: [
+                    { name: { contains: filterPromoter, mode: dbMode } as any },
+                    { phone: { contains: filterPromoter } }
+                ]
+            },
+            select: { id: true, name: true }
+        });
+        const promoterIds = matchedPromoters.map(p => p.id);
+        const promoterNames = matchedPromoters.map(p => p.name);
+        baseWhere.OR = [
+            ...(baseWhere.OR || []),
+            { sourceContact: { contains: filterPromoter, mode: dbMode } as any },
+            ...(promoterIds.length > 0 ? [{ promoterId: { in: promoterIds } }] : []),
+            ...(promoterNames.length > 0 ? [{ sourceContact: { in: promoterNames } }] : [])
+        ];
+    }
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+
+    const overdueWhere = {
+        status: 'RENTING',
+        returnDeadline: { lt: todayStart }
+    };
+
+    const baseCount = await prisma.order.count({ where: baseWhere });
+
+    const statusGroups = await prisma.order.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+        where: baseWhere
+    });
+
+    const overdueCount = await prisma.order.count({
+        where: {
+            ...baseWhere,
+            ...overdueWhere
+        }
+    });
+
+    const statusCounts: Record<string, number> = statusGroups.reduce((acc, row) => {
+        acc[row.status] = row._count._all;
+        return acc;
+    }, {} as Record<string, number>);
+
+    statusCounts.OVERDUE = overdueCount;
+
+    if (statusCounts.RENTING) {
+        statusCounts.RENTING = Math.max(0, statusCounts.RENTING - overdueCount);
+    }
+
+    const where: any = { ...baseWhere };
+    if (filterStatus && filterStatus !== 'ALL') {
+        if (filterStatus === 'OVERDUE') {
+            where.status = overdueWhere.status;
+            where.returnDeadline = overdueWhere.returnDeadline;
+        } else {
+            where.status = filterStatus;
+        }
+    }
+
+    const orderBy =
+        sortBy === 'createdAt'
+            ? { createdAt: sortDirection }
+            : { createdAt: sortDirection };
+
+    const [orders, total, todayOrders] = await Promise.all([
+        prisma.order.findMany({
+            where,
+            orderBy,
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+            include: { extensions: true, logs: true }
+        }),
+        prisma.order.count({ where }),
+        prisma.order.findMany({
+            where: {
+                ...baseWhere,
+                createdAt: { gte: todayStart, lt: todayEnd }
+            },
+            select: {
+                totalAmount: true,
+                extensions: { select: { price: true } }
+            }
+        })
+    ]);
+
+    const formattedOrders = orders.map(o => ({
+        ...o,
+        createdAt: o.createdAt.toISOString(),
+        updatedAt: o.updatedAt.toISOString(),
+        rentStartDate: o.rentStartDate?.toISOString() || null,
+        deliveryTime: o.deliveryTime?.toISOString() || null,
+        returnDeadline: o.returnDeadline?.toISOString() || null,
+        completedAt: o.completedAt?.toISOString() || null,
+        extensions: o.extensions.map(e => ({
+            ...e,
+            createdAt: e.createdAt.toISOString()
+        })),
+        logs: o.logs.map(l => ({
+            ...l,
+            timestamp: l.createdAt.toISOString(),
+            details: l.desc || undefined,
+            createdAt: l.createdAt.toISOString()
+        }))
+    }));
+
+    const todayAmount = todayOrders.reduce((sum, o) => {
+        const extTotal = o.extensions.reduce((acc, e) => acc + e.price, 0);
+        return sum + o.totalAmount + extTotal;
+    }, 0);
+
+    return {
+        orders: formattedOrders,
+        total,
+        baseTotal: baseCount,
+        statusCounts,
+        todayCount: todayOrders.length,
+        todayAmount
+    };
 }
 
 export async function saveUser(user: Partial<User> & { id?: string }) {
@@ -168,7 +421,8 @@ export async function savePromoter(promoter: Partial<Promoter> & { id?: string }
                 data: {
                     name: promoter.name,
                     phone: promoter.phone,
-                    channel: promoter.channel
+                    channel: promoter.channel,
+                    channelConfigId: promoter.channelConfigId
                 }
             });
         } else {
@@ -177,6 +431,7 @@ export async function savePromoter(promoter: Partial<Promoter> & { id?: string }
                     name: promoter.name || '',
                     phone: promoter.phone,
                     channel: promoter.channel,
+                    channelConfigId: promoter.channelConfigId,
                     creatorId: currentUser?.id,
                 }
             });
@@ -305,10 +560,13 @@ export async function updateOrder(orderId: string, formData: FormData) {
                 platform: (rawData.platform as string) || null,
                 customerXianyuId: (rawData.customerXianyuId as string) || '',
                 sourceContact: (rawData.sourceContact as string) || '',
+                promoterId: (rawData.promoterId as string) || null,
+                channelId: (rawData.channelId as string) || null,
                 miniProgramOrderNo: (rawData.miniProgramOrderNo as string) || null,
                 xianyuOrderNo: (rawData.xianyuOrderNo as string) || null,
                 
                 productName: (rawData.productName as string) || '',
+                productId: (rawData.productId as string) || null,
                 variantName: (rawData.variantName as string) || '',
                 sn: (rawData.sn as string) || null,
                 
@@ -342,11 +600,13 @@ export async function updateOrder(orderId: string, formData: FormData) {
     }
 }
 
-export async function updateOrderSourceInfo(orderId: string, source: string, sourceContact: string, platform?: string) {
+export async function updateOrderSourceInfo(orderId: string, source: string, sourceContact: string, platform?: string, promoterId?: string, channelId?: string) {
     try {
-        const data: { source: string; sourceContact: string; platform?: string } = {
+        const data: { source: string; sourceContact: string; platform?: string; promoterId?: string | null; channelId?: string | null } = {
             source,
             sourceContact,
+            promoterId: promoterId || null,
+            channelId: channelId || null,
         }
         if (platform) {
             data.platform = platform

@@ -39,10 +39,26 @@ export async function GET(req: NextRequest) {
     }
 
     if (shouldExport('orders')) {
-        const orders = await prisma.order.findMany({
-            include: { extensions: true, logs: true }
-        });
-        exportData.orders = orders;
+        const batchSize = 500;
+        let page = 0;
+        const allOrders: unknown[] = [];
+        while (true) {
+            const batch = await prisma.order.findMany({
+                include: { extensions: true, logs: true },
+                orderBy: { createdAt: 'asc' },
+                skip: page * batchSize,
+                take: batchSize
+            });
+            if (batch.length === 0) {
+                break;
+            }
+            allOrders.push(...batch);
+            if (batch.length < batchSize) {
+                break;
+            }
+            page += 1;
+        }
+        exportData.orders = allOrders;
     }
 
     if (shouldExport('accountGroups')) {

@@ -4,7 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { format, getYear, getMonth } from "date-fns"
 import * as XLSX from "xlsx"
-import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Check } from "lucide-react"
+import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Check, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,6 +17,7 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
+  TabsContent,
 } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
@@ -52,6 +53,120 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+
+import { fetchAccountOrders } from "./actions";
+
+function _DeprecatedServerOrderList({ userId, period, start, end }: { userId: string, period?: string, start?: string, end?: string }) {
+    const [orders, setOrders] = React.useState<any[]>([]);
+    const [loading, setLoading] = React.useState(true);
+    const [page, setPage] = React.useState(1);
+    const [total, setTotal] = React.useState(0);
+    const pageSize = 20;
+
+    React.useEffect(() => {
+        setLoading(true);
+        fetchAccountOrders({ userId, period: period || 'cumulative', start, end, page, pageSize })
+            .then(res => {
+                setOrders(res.orders);
+                setTotal(res.total);
+            })
+            .catch(err => console.error(err))
+            .finally(() => setLoading(false));
+    }, [userId, period, start, end, page]);
+
+    const totalPages = Math.ceil(total / pageSize);
+
+    if (loading) {
+        return <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    }
+
+    return (
+        <div className="space-y-4">
+             <div className="rounded-md border">
+                <Table>
+                    <TableHeader>
+                        <TableRow className="bg-muted/50">
+                            <TableHead>订单号</TableHead>
+                            <TableHead>商品</TableHead>
+                            <TableHead>租期</TableHead>
+                            <TableHead>总金额</TableHead>
+                            <TableHead>状态</TableHead>
+                            <TableHead>创建时间</TableHead>
+                            <TableHead>推广员</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {orders.map((order) => (
+                            <TableRow key={order.id}>
+                                <TableCell className="font-mono text-xs">{order.orderNo}</TableCell>
+                                <TableCell>
+                                    <div className="text-sm">{order.productName}</div>
+                                    <div className="text-xs text-muted-foreground">{order.variantName}</div>
+                                </TableCell>
+                                <TableCell>{order.duration}天</TableCell>
+                                <TableCell>
+                                    <div>¥{order.totalAmount}</div>
+                                    <div className="text-xs text-muted-foreground">
+                                        (营收: ¥{order.orderRevenue.toLocaleString()})
+                                    </div>
+                                </TableCell>
+                                <TableCell>
+                                    <span className={cn(
+                                        "px-2 py-1 rounded-full text-xs font-medium",
+                                        order.status === 'COMPLETED' ? "bg-green-100 text-green-700" :
+                                        order.status === 'RENTING' ? "bg-blue-100 text-blue-700" :
+                                        order.status === 'CLOSED' ? "bg-gray-100 text-gray-700" :
+                                        "bg-yellow-100 text-yellow-700"
+                                    )}>
+                                        {order.status === 'COMPLETED' ? '已完成' :
+                                         order.status === 'RENTING' ? '租赁中' :
+                                         order.status === 'CLOSED' ? '已关闭' :
+                                         order.status === 'PENDING_PAYMENT' ? '待支付' :
+                                         order.status === 'PENDING_DELIVERY' ? '待发货' :
+                                         order.status}
+                                    </span>
+                                </TableCell>
+                                <TableCell className="text-xs text-muted-foreground">
+                                    {format(new Date(order.createdAt), 'yyyy-MM-dd HH:mm')}
+                                </TableCell>
+                                <TableCell className="text-xs">{order.promoterName}</TableCell>
+                            </TableRow>
+                        ))}
+                        {orders.length === 0 && (
+                            <TableRow>
+                                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">暂无订单数据</TableCell>
+                            </TableRow>
+                        )}
+                    </TableBody>
+                </Table>
+            </div>
+
+            {totalPages > 1 && (
+                <div className="flex items-center justify-end space-x-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                        disabled={page === 1}
+                    >
+                        上一页
+                    </Button>
+                    <div className="text-sm text-muted-foreground">
+                        {page} / {totalPages}
+                    </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                        disabled={page === totalPages}
+                    >
+                        下一页
+                    </Button>
+                </div>
+            )}
+        </div>
+    );
+}
 
 interface Rule {
   minCount: number;
@@ -93,6 +208,7 @@ interface AccountStat {
         }[]
     }[]
 }
+
 
 interface StatsClientProps {
   period?: string
@@ -205,6 +321,7 @@ function MonthPicker({ date, onSelect }: { date: Date, onSelect: (date: Date) =>
 
 export function StatsClient({ allStats, accountGroups, period = 'cumulative', start, end }: StatsClientProps) {
   const router = useRouter();
+  const [isPending, startTransition] = React.useTransition();
   const [selectedGroupId, setSelectedGroupId] = React.useState<string>("all");
   const [currentPage, setCurrentPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(10);
@@ -236,30 +353,36 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
 
   // Handle Period Change
   const handlePeriodChange = (value: string) => {
-    const params = new URLSearchParams();
-    params.set("period", value);
-    router.push(`?${params.toString()}`);
+    startTransition(() => {
+      const params = new URLSearchParams();
+      params.set("period", value);
+      router.push(`?${params.toString()}`);
+    });
   };
 
   // Handle Date Range Change (Custom)
   const handleDateRangeSelect = (range: DateRange | undefined) => {
     if (!range?.from) return;
     
-    const params = new URLSearchParams();
-    params.set("period", "custom");
-    params.set("start", format(range.from, "yyyy-MM-dd"));
-    if (range.to) {
-      params.set("end", format(range.to, "yyyy-MM-dd"));
-    }
-    router.push(`?${params.toString()}`);
+    startTransition(() => {
+      const params = new URLSearchParams();
+      params.set("period", "custom");
+      params.set("start", format(range.from!, "yyyy-MM-dd"));
+      if (range.to) {
+        params.set("end", format(range.to, "yyyy-MM-dd"));
+      }
+      router.push(`?${params.toString()}`);
+    });
   };
 
   // Handle Month Change
   const handleMonthSelect = (date: Date) => {
-     const params = new URLSearchParams();
-     params.set("period", "monthly");
-     params.set("start", format(date, "yyyy-MM-dd"));
-     router.push(`?${params.toString()}`);
+     startTransition(() => {
+       const params = new URLSearchParams();
+       params.set("period", "monthly");
+       params.set("start", format(date, "yyyy-MM-dd"));
+       router.push(`?${params.toString()}`);
+     });
   };
 
   // Export Stats
@@ -318,31 +441,61 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
     XLSX.writeFile(wb, `业绩统计_${period}_${format(new Date(), 'yyyyMMddHHmm')}.xlsx`);
   };
 
-  const handleExportOrders = (userName: string, orders: any[]) => {
-      const rows = orders.map(o => ({
-          "订单号": o.orderNo,
-          "创建时间": format(new Date(o.createdAt), 'yyyy-MM-dd HH:mm:ss'),
-          "完结时间": o.completedAt ? format(new Date(o.completedAt), 'yyyy-MM-dd HH:mm:ss') : '-',
-          "状态": o.status,
-          "来源/推广员": o.promoterName,
-          "营收": o.orderRevenue,
-          "退款": o.refundAmount || 0,
-          "租金": o.rentPrice,
-          "保险": o.insurancePrice,
-          "延期": o.extensions?.reduce((acc: number, e: any) => acc + e.price, 0) || 0,
-          "逾期": o.overdueFee || 0
-      }));
+  const handleExportOrders = async (userName: string, userId: string) => {
+      try {
+          // Fetch full list (unlimited)
+          const res = await fetchAccountOrders({ 
+             userId, 
+             period: period || 'cumulative', 
+             start, 
+             end, 
+             page: 1, 
+             pageSize: -1 // Unlimited
+          });
+          
+          const orders = res.orders;
+          const rows = orders.map((o: any) => ({
+              "订单号": o.orderNo,
+              "商品": o.productName,
+              "规格": o.variantName,
+              "推广员": o.promoterName,
+              "状态": o.status === 'COMPLETED' ? '已完成' : 
+                  o.status === 'RENTING' ? '租赁中' : 
+                  o.status === 'CLOSED' ? '已关闭' : 
+                  o.status === 'PENDING_PAYMENT' ? '待支付' :
+                  o.status === 'PENDING_DELIVERY' ? '待发货' :
+                  o.status,
+              "总金额": o.totalAmount,
+              "营收": o.revenue,
+              "退款": o.refundAmount || 0,
+              "租金": o.rentPrice,
+              "保险": o.insurancePrice,
+              "延期": o.extensionsTotal || 0,
+              "逾期": o.overdueFee || 0
+          }));
 
-      const ws = XLSX.utils.json_to_sheet(rows);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "订单明细");
-      XLSX.writeFile(wb, `${userName}_订单明细_${format(new Date(), 'yyyyMMddHHmm')}.xlsx`);
+          const ws = XLSX.utils.json_to_sheet(rows);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "订单明细");
+          XLSX.writeFile(wb, `${userName}_订单明细_${format(new Date(), 'yyyyMMddHHmm')}.xlsx`);
+      } catch (error) {
+          console.error("Export failed", error);
+          alert("导出失败，请重试");
+      }
   };
 
   const dateRange: DateRange | undefined = (start && end) ? { from: new Date(start), to: new Date(end) } : (start ? { from: new Date(start), to: undefined } : undefined);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative min-h-[500px]">
+      {isPending && (
+        <div className="absolute inset-0 bg-background/50 backdrop-blur-[1px] flex items-center justify-center z-50 rounded-lg pointer-events-auto">
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <span className="text-sm text-muted-foreground font-medium">数据加载中...</span>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center gap-4">
             <Tabs value={period} onValueChange={handlePeriodChange} className="w-[400px]">
@@ -520,7 +673,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                         <SheetHeader>
                                             <div className="flex justify-between items-center pr-8">
                                                 <SheetTitle>{u.userName} - 提成详情</SheetTitle>
-                                                <Button variant="outline" size="sm" onClick={() => handleExportOrders(u.userName, u.orders)}>
+                                                <Button variant="outline" size="sm" onClick={() => handleExportOrders(u.userName, u.userId)}>
                                                     <Download className="mr-2 h-4 w-4" />
                                                     导出详情
                                                 </Button>
@@ -533,38 +686,55 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                         <div className="mt-6 space-y-8">
                                             {/* 1. Volume Gradient Commission Section */}
                                             <div>
-                                                <div className="flex items-center gap-2 mb-3">
+                                                <div className="flex items-center gap-2 mb-1">
                                                     <h3 className="text-lg font-semibold">单量阶梯提成</h3>
                                                     <span className="text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">
                                                         总计: ¥{u.volumeGradientCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                                                     </span>
                                                 </div>
+                                                <p className="text-sm text-muted-foreground mb-3">包含所有推广渠道订单（零售、代理兼职、同行）</p>
                                                 <div className="rounded-md border">
                                                     <Table>
                                                         <TableHeader>
                                                             <TableRow className="bg-muted/50">
-                                                                <TableHead>来源</TableHead>
+                                                                <TableHead>项目</TableHead>
                                                                 <TableHead>单量</TableHead>
                                                                 <TableHead>营收</TableHead>
-                                                                <TableHead>员工点数</TableHead>
-                                                                <TableHead>员工提成</TableHead>
+                                                                <TableHead>账号点数</TableHead>
+                                                                <TableHead>账号提成</TableHead>
                                                             </TableRow>
                                                         </TableHeader>
                                                         <TableBody>
-                                                            {u.channels.flatMap(c => c.promoters.filter(p => !p.isPromoter).map(p => ({...p, channelName: c.channelName}))).map((item, idx) => (
-                                                                <TableRow key={idx}>
-                                                                    <TableCell>{item.name === 'self' || item.name === '未标记' ? item.channelName : item.name}</TableCell>
-                                                                    <TableCell>{item.count}</TableCell>
-                                                                    <TableCell>¥{item.revenue.toLocaleString()}</TableCell>
-                                                                    <TableCell>{item.accountRate}%</TableCell>
-                                                                    <TableCell>¥{item.accountCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                                                                </TableRow>
-                                                            ))}
-                                                            {u.channels.flatMap(c => c.promoters.filter(p => !p.isPromoter)).length === 0 && (
-                                                                <TableRow>
-                                                                    <TableCell colSpan={5} className="text-center text-muted-foreground py-4">无阶梯提成数据</TableCell>
-                                                                </TableRow>
-                                                            )}
+                                                            {(() => {
+                                                                const items = u.channels.flatMap(c => c.promoters.filter(p => !p.isPromoter));
+                                                                const totalCount = items.reduce((acc, cur) => acc + cur.count, 0);
+                                                                const totalRevenue = items.reduce((acc, cur) => acc + cur.revenue, 0);
+                                                                const rate = items.length > 0 ? items[0].accountRate : 0;
+                                                                const totalCommission = items.reduce((acc, cur) => acc + cur.accountCommission, 0);
+
+                                                                if (items.length === 0) {
+                                                                    return (
+                                                                        <TableRow>
+                                                                            <TableCell colSpan={5} className="text-center text-muted-foreground py-4">无阶梯提成数据</TableCell>
+                                                                        </TableRow>
+                                                                    );
+                                                                }
+
+                                                                return (
+                                                                    <TableRow>
+                                                                        <TableCell>所有订单</TableCell>
+                                                                        <TableCell>{totalCount}</TableCell>
+                                                                        <TableCell>¥{totalRevenue.toLocaleString()}</TableCell>
+                                                                        <TableCell>
+                                                                            <div className="flex items-center gap-1">
+                                                                                {rate}%
+                                                                                <RuleHoverCard rules={u.defaultUserRules} />
+                                                                            </div>
+                                                                        </TableCell>
+                                                                        <TableCell>¥{totalCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                                                                    </TableRow>
+                                                                );
+                                                            })()}
                                                         </TableBody>
                                                     </Table>
                                                 </div>
@@ -578,37 +748,49 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                                         总计: ¥{u.channelCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                                                     </span>
                                                 </div>
-                                                <div className="rounded-md border">
-                                                    <Table>
-                                                        <TableHeader>
-                                                            <TableRow className="bg-muted/50">
-                                                                <TableHead>渠道</TableHead>
-                                                                <TableHead>推广员</TableHead>
-                                                                <TableHead>单量</TableHead>
-                                                                <TableHead>营收</TableHead>
-                                                                <TableHead>员工点数</TableHead>
-                                                                <TableHead>员工提成</TableHead>
-                                                            </TableRow>
-                                                        </TableHeader>
-                                                        <TableBody>
-                                                            {u.channels.flatMap(c => c.promoters.filter(p => p.isPromoter).map(p => ({...p, channelName: c.channelName}))).map((item, idx) => (
-                                                                <TableRow key={idx}>
-                                                                    <TableCell>{item.channelName}</TableCell>
-                                                                    <TableCell>{item.name}</TableCell>
-                                                                    <TableCell>{item.count}</TableCell>
-                                                                    <TableCell>¥{item.revenue.toLocaleString()}</TableCell>
-                                                                    <TableCell>{item.accountRate}%</TableCell>
-                                                                    <TableCell>¥{item.accountCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                                                                </TableRow>
+                                                {(() => {
+                                                    const promoterChannels = u.channels.filter(c => c.promoters.some(p => p.isPromoter));
+                                                    if (promoterChannels.length === 0) {
+                                                        return <div className="text-muted-foreground text-sm border rounded-md p-4 text-center">暂无渠道推广员提成数据</div>;
+                                                    }
+                                                    return (
+                                                        <Tabs defaultValue={promoterChannels[0].channelName} className="w-full">
+                                                            <TabsList className="mb-2">
+                                                                {promoterChannels.map(c => (
+                                                                    <TabsTrigger key={c.channelName} value={c.channelName}>{c.channelName}</TabsTrigger>
+                                                                ))}
+                                                            </TabsList>
+                                                            {promoterChannels.map(c => (
+                                                                <TabsContent key={c.channelName} value={c.channelName}>
+                                                                    <div className="rounded-md border">
+                                                                        <Table>
+                                                                            <TableHeader>
+                                                                                <TableRow className="bg-muted/50">
+                                                                                    <TableHead>推广员</TableHead>
+                                                                                    <TableHead>单量</TableHead>
+                                                                                    <TableHead>营收</TableHead>
+                                                    <TableHead>账号点数</TableHead>
+                                                    <TableHead>账号提成</TableHead>
+                                                </TableRow>
+                                                                            </TableHeader>
+                                                                            <TableBody>
+                                                                                {c.promoters.filter(p => p.isPromoter).map((item, idx) => (
+                                                                                    <TableRow key={idx}>
+                                                                                        <TableCell>{item.name}</TableCell>
+                                                                                        <TableCell>{item.count}</TableCell>
+                                                                                        <TableCell>¥{item.revenue.toLocaleString()}</TableCell>
+                                                                                        <TableCell>{item.accountRate}%</TableCell>
+                                                                                        <TableCell>¥{item.accountCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                                                                                    </TableRow>
+                                                                                ))}
+                                                                            </TableBody>
+                                                                        </Table>
+                                                                    </div>
+                                                                </TabsContent>
                                                             ))}
-                                                            {u.channels.flatMap(c => c.promoters.filter(p => p.isPromoter)).length === 0 && (
-                                                                <TableRow>
-                                                                    <TableCell colSpan={6} className="text-center text-muted-foreground py-4">无渠道推广员提成数据</TableCell>
-                                                                </TableRow>
-                                                            )}
-                                                        </TableBody>
-                                                    </Table>
-                                                </div>
+                                                        </Tabs>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     </SheetContent>
@@ -627,57 +809,85 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
             </Table>
         </div>
         
-        {totalPages > 1 && (
-            <div className="flex justify-end mt-4">
-                <Pagination>
-                    <PaginationContent>
-                        <PaginationItem>
-                            <PaginationPrevious 
-                                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                                className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                            />
-                        </PaginationItem>
-                        {Array.from({length: totalPages}).map((_, idx) => {
-                            const page = idx + 1;
-                             const shouldShow = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1
-                             if (!shouldShow) {
-                               if (page === 2 && currentPage > 3) {
-                                 return (
-                                   <PaginationItem key={`ellipsis-start-${page}`}>
-                                     <PaginationEllipsis />
-                                   </PaginationItem>
-                                 )
-                               }
-                               if (page === totalPages - 1 && currentPage < totalPages - 2) {
-                                 return (
-                                   <PaginationItem key={`ellipsis-end-${page}`}>
-                                     <PaginationEllipsis />
-                                   </PaginationItem>
-                                 )
-                               }
-                               return null
-                             }
-
-                            return (
-                                <PaginationItem key={page}>
-                                    <PaginationLink 
-                                        isActive={page === currentPage}
-                                        onClick={() => setCurrentPage(page)}
-                                        className="cursor-pointer"
-                                    >
-                                        {page}
-                                    </PaginationLink>
+        {totalPages > 0 && (
+            <div className="flex items-center justify-between mt-4 px-2">
+                <div className="text-sm text-muted-foreground">
+                    共 {filteredStats.length} 条数据，本页显示 {paginatedStats.length} 条
+                </div>
+                <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                        <p className="text-sm font-medium text-gray-500">每页行数</p>
+                        <Select
+                            value={`${pageSize}`}
+                            onValueChange={(value) => {
+                                setPageSize(Number(value))
+                                setCurrentPage(1)
+                            }}
+                        >
+                            <SelectTrigger className="h-8 w-[70px]">
+                                <SelectValue placeholder={pageSize} />
+                            </SelectTrigger>
+                            <SelectContent side="top">
+                                {[10, 20, 50, 100].map((size) => (
+                                    <SelectItem key={size} value={`${size}`}>
+                                        {size}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    {totalPages > 1 && (
+                        <Pagination className="justify-end w-auto mx-0">
+                            <PaginationContent>
+                                <PaginationItem>
+                                    <PaginationPrevious
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                    />
                                 </PaginationItem>
-                            )
-                        })}
-                        <PaginationItem>
-                            <PaginationNext 
-                                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                                className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                            />
-                        </PaginationItem>
-                    </PaginationContent>
-                </Pagination>
+                                {Array.from({ length: totalPages }).map((_, idx) => {
+                                    const page = idx + 1;
+                                    const shouldShow = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1
+                                    if (!shouldShow) {
+                                        if (page === 2 && currentPage > 3) {
+                                            return (
+                                                <PaginationItem key={`ellipsis-start-${page}`}>
+                                                    <PaginationEllipsis />
+                                                </PaginationItem>
+                                            )
+                                        }
+                                        if (page === totalPages - 1 && currentPage < totalPages - 2) {
+                                            return (
+                                                <PaginationItem key={`ellipsis-end-${page}`}>
+                                                    <PaginationEllipsis />
+                                                </PaginationItem>
+                                            )
+                                        }
+                                        return null
+                                    }
+
+                                    return (
+                                        <PaginationItem key={page}>
+                                            <PaginationLink
+                                                isActive={page === currentPage}
+                                                onClick={() => setCurrentPage(page)}
+                                                className="cursor-pointer"
+                                            >
+                                                {page}
+                                            </PaginationLink>
+                                        </PaginationItem>
+                                    )
+                                })}
+                                <PaginationItem>
+                                    <PaginationNext
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                    />
+                                </PaginationItem>
+                            </PaginationContent>
+                        </Pagination>
+                    )}
+                </div>
             </div>
         )}
       </div>

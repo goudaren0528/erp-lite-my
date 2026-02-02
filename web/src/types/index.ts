@@ -54,11 +54,14 @@ export interface Order {
   // 客户信息
   customerXianyuId: string;
   sourceContact: string;
+  promoterId?: string;
+  channelId?: string;
   miniProgramOrderNo?: string; // 小程序订单号
   xianyuOrderNo?: string; // 闲鱼订单号
   
   // 设备信息
   productName: string;
+  productId?: string;
   variantName: string;
   sn?: string; // SN码
   
@@ -111,6 +114,7 @@ export interface Promoter {
   name: string;
   phone?: string;
   channel?: string;
+  channelConfigId?: string;
   creatorId?: string;
   createdAt: string;
 }

@@ -23,7 +23,7 @@ export default async function RootLayout({
 
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className={`${inter.className} h-screen overflow-hidden`}>
         <ThemeProvider
             attribute="class"
             defaultTheme="system"

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,7 +37,7 @@ import {
     DialogTrigger,
     DialogFooter,
 } from "@/components/ui/dialog"
-import { Plus, Pencil, Trash } from "lucide-react"
+import { Plus, Pencil, Trash, Loader2 } from "lucide-react"
 import { UserForm } from "./user-form"
 import { deleteUser } from "@/app/actions"
 import { Badge } from "@/components/ui/badge"
@@ -60,6 +61,8 @@ const PERMISSIONS_MAP: Record<string, string> = {
 }
 
 export function UserList({ users }: UserListProps) {
+    const router = useRouter()
+    const [isPending, startTransition] = useTransition()
     const [open, setOpen] = useState(false)
     const [isDeleteOpen, setIsDeleteOpen] = useState(false)
     const [editingUser, setEditingUser] = useState<User | null>(null)
@@ -69,7 +72,7 @@ export function UserList({ users }: UserListProps) {
   const [pageSize, setPageSize] = useState(10)
 
   const filteredUsers = users.filter(user => {
-        const q = searchQuery.toLowerCase()
+        const q = searchQuery.trim().toLowerCase()
         const nameMatch = user.name.toLowerCase().includes(q)
         const usernameMatch = user.username.toLowerCase().includes(q)
         const permissionMatch = user.permissions?.some(p => 
@@ -102,6 +105,9 @@ export function UserList({ users }: UserListProps) {
             if (res?.success) {
                 toast.success(res.message)
                 setIsDeleteOpen(false)
+                startTransition(() => {
+                    router.refresh()
+                })
             } else {
                 toast.error(res?.message || "操作失败")
             }
@@ -142,7 +148,15 @@ export function UserList({ users }: UserListProps) {
                 />
             </div>
 
-            <div className="rounded-md border">
+            <div className="rounded-md border relative min-h-[200px]">
+                {isPending && (
+                    <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-10">
+                        <div className="flex flex-col items-center gap-2">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <span className="text-sm text-muted-foreground">加载中...</span>
+                        </div>
+                    </div>
+                )}
                 <Table>
                     <TableHeader>
                         <TableRow>

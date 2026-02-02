@@ -4,7 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { format, getYear, getMonth } from "date-fns"
 import * as XLSX from "xlsx"
-import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight } from "lucide-react"
+import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -366,6 +366,7 @@ function OrderDetailsTable({ orders }: { orders: PromoterStatsClientProps["promo
 
 export function PromoterStatsClient({ promoterStats, period = 'cumulative', start, end }: PromoterStatsClientProps) {
   const router = useRouter();
+  const [isPending, startTransition] = React.useTransition();
   
   const [selectedChannel, setSelectedChannel] = React.useState<string>("all");
   const [selectedGroup, setSelectedGroup] = React.useState<string>("all");
@@ -429,33 +430,39 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
 
   // Handle Period Change
   const handlePeriodChange = (value: string) => {
-    const params = new URLSearchParams();
-    params.set("period", value);
-    if (value === 'monthly') {
-        // Default to current month if switching to monthly
-    }
-    router.push(`?${params.toString()}`);
+    startTransition(() => {
+      const params = new URLSearchParams();
+      params.set("period", value);
+      if (value === 'monthly') {
+          // Default to current month if switching to monthly
+      }
+      router.push(`?${params.toString()}`);
+    });
   };
 
   // Handle Date Range Change (Custom)
   const handleDateRangeSelect = (range: DateRange | undefined) => {
     if (!range?.from) return;
     
-    const params = new URLSearchParams();
-    params.set("period", "custom");
-    params.set("start", format(range.from, "yyyy-MM-dd"));
-    if (range.to) {
-      params.set("end", format(range.to, "yyyy-MM-dd"));
-    }
-    router.push(`?${params.toString()}`);
+    startTransition(() => {
+      const params = new URLSearchParams();
+      params.set("period", "custom");
+      params.set("start", format(range.from!, "yyyy-MM-dd"));
+      if (range.to) {
+        params.set("end", format(range.to, "yyyy-MM-dd"));
+      }
+      router.push(`?${params.toString()}`);
+    });
   };
 
   // Handle Month Change
   const handleMonthSelect = (date: Date) => {
-     const params = new URLSearchParams();
-     params.set("period", "monthly");
-     params.set("start", format(date, "yyyy-MM-dd"));
-     router.push(`?${params.toString()}`);
+     startTransition(() => {
+       const params = new URLSearchParams();
+       params.set("period", "monthly");
+       params.set("start", format(date, "yyyy-MM-dd"));
+       router.push(`?${params.toString()}`);
+     });
   };
 
   // Export Promoter Stats (Summary)
@@ -503,7 +510,15 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
   const dateRange: DateRange | undefined = (start && end) ? { from: new Date(start), to: new Date(end) } : (start ? { from: new Date(start), to: undefined } : undefined);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative min-h-[500px]">
+      {isPending && (
+        <div className="absolute inset-0 bg-background/50 backdrop-blur-[1px] flex items-center justify-center z-50 rounded-lg pointer-events-auto">
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <span className="text-sm text-muted-foreground font-medium">数据加载中...</span>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col gap-4">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <Tabs value={period} onValueChange={handlePeriodChange} className="w-[400px]">

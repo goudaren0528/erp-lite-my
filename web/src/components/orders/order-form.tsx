@@ -117,6 +117,8 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
   const [recipientPhone, setRecipientPhone] = useState(initialData?.recipientPhone || '')
   const [smartAddress, setSmartAddress] = useState('')
   const [sourceContact, setSourceContact] = useState(initialData?.sourceContact || "")
+  const [selectedPromoterId, setSelectedPromoterId] = useState(initialData?.promoterId || promoters.find(p => p.name === initialData?.sourceContact)?.id || "")
+  const [selectedChannelId, setSelectedChannelId] = useState(initialData?.channelId || "")
   const [miniProgramOrderNo, setMiniProgramOrderNo] = useState(initialData?.miniProgramOrderNo || "")
   const [customerXianyuId, setCustomerXianyuId] = useState(initialData?.customerXianyuId || "")
   const [xianyuOrderNo, setXianyuOrderNo] = useState(initialData?.xianyuOrderNo || "")
@@ -125,6 +127,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
   const [extensions, setExtensions] = useState(initialData?.extensions || [])
   const [openPromoterSearch, setOpenPromoterSearch] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Filter promoters based on source
   const filteredPromoters = safePromoters.filter(p => {
@@ -141,7 +144,12 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     
     // Check legacy channels array (backward compatibility)
     const legacyChannels = (p as any).channels as string[] | undefined
-    if (legacyChannels && legacyChannels.some(c => allowedChannels.includes(c))) return true
+    if (legacyChannels) {
+        if (legacyChannels.some(c => allowedChannels.includes(c))) return true
+        // Fuzzy matching for legacy channels
+        if (source === 'PEER' && legacyChannels.some(c => c.includes('同行'))) return true
+        if (source === 'PART_TIME_AGENT' && legacyChannels.some(c => c.includes('兼职') || c.includes('代理'))) return true
+    }
     
     return false
   })
@@ -267,6 +275,8 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     : ""
 
   async function handleSubmit(formData: FormData) {
+      if (isSubmitting) return
+
       // Validate Mandatory Fields
       if (!selectedProductId) {
           toast.error("请选择设备型号")
@@ -314,6 +324,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
 
       formData.set('address', fullAddress)
 
+      setIsSubmitting(true)
       try {
         let res;
         if (isEdit && initialData) {
@@ -333,6 +344,8 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
       } catch (error) {
         console.error(error)
         toast.error("操作失败: 请刷新页面重试")
+      } finally {
+        setIsSubmitting(false)
       }
   }
 
@@ -461,7 +474,14 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                                         key={p.id}
                                         value={p.name}
                                         onSelect={(currentValue) => {
-                                            setSourceContact(currentValue === sourceContact ? "" : currentValue)
+                                            const isSame = currentValue === sourceContact
+                                            setSourceContact(isSame ? "" : currentValue)
+                                            setSelectedPromoterId(isSame ? "" : p.id)
+                                            if (!isSame && p.channelConfigId) {
+                                                setSelectedChannelId(p.channelConfigId)
+                                            } else {
+                                                setSelectedChannelId("")
+                                            }
                                             setOpenPromoterSearch(false)
                                         }}
                                     >
@@ -478,6 +498,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                                     value="self"
                                     onSelect={() => {
                                         setSourceContact("self")
+                                        setSelectedPromoterId("")
                                         setOpenPromoterSearch(false)
                                     }}
                                 >
@@ -496,6 +517,8 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             </Popover>
             {source === 'RETAIL' && <input type="hidden" name="sourceContact" value="" />}
             {source !== 'RETAIL' && <input type="hidden" name="sourceContact" value={sourceContact} />}
+            <input type="hidden" name="promoterId" value={selectedPromoterId} />
+            <input type="hidden" name="channelId" value={selectedChannelId} />
         </div>
       </div>
 
@@ -647,6 +670,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
               </PopoverContent>
             </Popover>
             <input type="hidden" name="productName" value={selectedProduct?.name || ''} />
+            <input type="hidden" name="productId" value={selectedProductId} />
           </div>
 
           <div className="space-y-2">
@@ -916,7 +940,9 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
         />
       </div>
 
-      <Button type="submit" size="lg" className="w-full">{isEdit ? '保存修改' : '创建订单'}</Button>
+      <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+        {isSubmitting ? '提交中...' : (isEdit ? '保存修改' : '创建订单')}
+      </Button>
     </form>
   )
 }

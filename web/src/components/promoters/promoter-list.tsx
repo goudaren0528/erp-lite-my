@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { OrderSource, Promoter, User } from "@/types"
+import { OrderSource, Promoter, User, ChannelConfig } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -39,20 +39,21 @@ import {
   PaginationEllipsis,
 } from "@/components/ui/pagination"
 import { savePromoter, deletePromoter } from "@/app/actions"
-import { Plus, Trash2, Edit2 } from "lucide-react"
+import { Plus, Trash2, Edit2, Loader2, Copy } from "lucide-react"
 
 import { toast } from "sonner"
 
 interface PromoterListProps {
     promoters: Promoter[]
     users?: User[]
-    channels?: string[]
+    channels?: ChannelConfig[]
 }
 
 type LegacyPromoter = Promoter & { channels?: OrderSource[] }
 
 export function PromoterList({ promoters, users = [], channels = [] }: PromoterListProps) {
     const router = useRouter()
+    const [isPending, startTransition] = useTransition()
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
     const [editingPromoter, setEditingPromoter] = useState<Promoter | null>(null)
@@ -63,7 +64,7 @@ export function PromoterList({ promoters, users = [], channels = [] }: PromoterL
     const [currentPage, setCurrentPage] = useState(1)
     const [pageSize, setPageSize] = useState(10)
 
-    const channelOptions = useMemo(() => channels.map(c => ({ value: c, label: c })), [channels])
+    const channelOptions = useMemo(() => channels.map(c => ({ value: c.id, label: c.name })), [channels])
 
     const legacyChannelLabels: Record<string, string> = {
         PEER: "同行",
@@ -83,20 +84,31 @@ export function PromoterList({ promoters, users = [], channels = [] }: PromoterL
     const filteredPromoters = promoters.filter(p => {
         const matchCreator = creatorFilter === "all" || p.creatorId === creatorFilter
         if (channelFilter === "all") return matchCreator
+        
+        // New ID-based check
+        if (p.channelConfigId && p.channelConfigId === channelFilter) {
+            return true
+        }
+
+        // Fallback for legacy data without channelConfigId
         const possibleChannels = new Set<string>()
         if (p.channel) {
             possibleChannels.add(p.channel)
-            const mapped = legacyChannelLabels[p.channel]
-            if (mapped) possibleChannels.add(mapped)
+            // Try to map name to ID if possible
+            const matchedChannel = channels.find(c => c.name === p.channel || (p.channel && c.name === legacyChannelLabels[p.channel]))
+            if (matchedChannel) {
+                possibleChannels.add(matchedChannel.id)
+            }
         }
+        
         const legacyChannels = (p as LegacyPromoter).channels || []
         legacyChannels.forEach(c => {
-            possibleChannels.add(c)
-            const mapped = legacyChannelLabels[c]
-            if (mapped) possibleChannels.add(mapped)
+             const matchedChannel = channels.find(ch => ch.name === c || ch.name === legacyChannelLabels[c])
+             if (matchedChannel) {
+                 possibleChannels.add(matchedChannel.id)
+             }
         })
-        const resolved = getSelectableChannelValue(p.channel)
-        if (resolved) possibleChannels.add(resolved)
+
         return matchCreator && possibleChannels.has(channelFilter)
     })
 
@@ -158,6 +170,9 @@ export function PromoterList({ promoters, users = [], channels = [] }: PromoterL
             if (res?.success) {
                 toast.success(res.message)
                 setIsDeleteDialogOpen(false)
+                startTransition(() => {
+                    router.refresh()
+                })
             } else {
                 toast.error(res?.message || "操作失败")
             }
@@ -182,7 +197,9 @@ export function PromoterList({ promoters, users = [], channels = [] }: PromoterL
             if (res?.success) {
                 toast.success(res.message)
                 setIsDialogOpen(false)
-                router.refresh()
+                startTransition(() => {
+                    router.refresh()
+                })
             } else {
                 toast.error(res?.message || "操作失败")
             }
@@ -222,11 +239,13 @@ export function PromoterList({ promoters, users = [], channels = [] }: PromoterL
                             <div className="space-y-2">
                                 <Label>渠道类型</Label>
                                 <Select 
-                                    value={formData.channel} 
+                                    value={formData.channelConfigId || ''} 
                                     onValueChange={(val: string) => {
+                                        const selectedChannel = channels.find(c => c.id === val);
                                         setFormData({
                                             ...formData, 
-                                            channel: val
+                                            channelConfigId: val,
+                                            channel: selectedChannel ? selectedChannel.name : ''
                                         })
                                     }}
                                 >
@@ -309,10 +328,19 @@ export function PromoterList({ promoters, users = [], channels = [] }: PromoterL
                 </div>
             </div>
 
-            <div className="rounded-md border">
+            <div className="rounded-md border relative min-h-[300px]">
+                {isPending && (
+                    <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-10">
+                        <div className="flex flex-col items-center gap-2">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <span className="text-sm text-muted-foreground">加载中...</span>
+                        </div>
+                    </div>
+                )}
                 <Table>
                     <TableHeader>
                         <TableRow>
+                            <TableHead className="w-[80px]">ID</TableHead>
                             <TableHead className="w-[150px]">姓名</TableHead>
                             <TableHead className="w-[150px]">联系方式</TableHead>
                             <TableHead className="w-[150px]">渠道类型</TableHead>
@@ -324,6 +352,22 @@ export function PromoterList({ promoters, users = [], channels = [] }: PromoterL
                     <TableBody>
                         {paginatedPromoters.map((promoter) => (
                             <TableRow key={promoter.id}>
+                                <TableCell className="font-mono text-xs" title={promoter.id}>
+                                    <div className="flex items-center gap-1">
+                                        <span>{promoter.id.slice(0, 8)}</span>
+                                        <Button 
+                                            variant="ghost" 
+                                            size="icon" 
+                                            className="h-5 w-5" 
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(promoter.id)
+                                                toast.success("ID 已复制")
+                                            }}
+                                        >
+                                            <Copy className="h-3 w-3 text-muted-foreground" />
+                                        </Button>
+                                    </div>
+                                </TableCell>
                                 <TableCell className="font-medium">{promoter.name}</TableCell>
                                 <TableCell>{promoter.phone || '-'}</TableCell>
                                 <TableCell>
@@ -353,7 +397,7 @@ export function PromoterList({ promoters, users = [], channels = [] }: PromoterL
                         ))}
                         {filteredPromoters.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={6} className="text-center h-24">暂无推广人员</TableCell>
+                                <TableCell colSpan={7} className="text-center h-24">暂无推广人员</TableCell>
                             </TableRow>
                         )}
                     </TableBody>

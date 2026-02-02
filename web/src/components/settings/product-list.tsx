@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { Product } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,7 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Trash2, Edit2 } from "lucide-react"
+import { Plus, Trash2, Edit2, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
 import { ProductForm } from "./product-form"
 import { deleteProduct } from "@/app/actions"
@@ -33,6 +34,8 @@ interface ProductListProps {
 }
 
 export function ProductList({ products }: ProductListProps) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
@@ -42,7 +45,7 @@ export function ProductList({ products }: ProductListProps) {
   const [pageSize, setPageSize] = useState(10)
 
   const filteredProducts = products.filter(p => 
-      p.name.toLowerCase().includes(searchQuery.toLowerCase())
+      p.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
   )
 
   const totalPages = Math.ceil(filteredProducts.length / pageSize)
@@ -69,6 +72,9 @@ export function ProductList({ products }: ProductListProps) {
         if (res?.success) {
             toast.success(res.message)
             setIsDeleteOpen(false)
+            startTransition(() => {
+                router.refresh()
+            })
         } else {
             toast.error(res?.message || "操作失败")
         }
@@ -106,7 +112,15 @@ export function ProductList({ products }: ProductListProps) {
         />
       </div>
 
-      <div className="rounded-md border">
+      <div className="rounded-md border relative min-h-[200px]">
+        {isPending && (
+            <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-10">
+                <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">加载中...</span>
+                </div>
+            </div>
+        )}
         <Table>
           <TableHeader>
             <TableRow>
@@ -118,6 +132,7 @@ export function ProductList({ products }: ProductListProps) {
           <TableBody>
             {paginatedProducts.map((product) => (
               <TableRow key={product.id}>
+                <TableCell className="font-mono text-xs">{product.id}</TableCell>
                 <TableCell className="font-medium">{product.name}</TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
@@ -140,7 +155,7 @@ export function ProductList({ products }: ProductListProps) {
             ))}
             {products.length === 0 && (
                 <TableRow>
-                    <TableCell colSpan={3} className="text-center h-24">暂无商品</TableCell>
+                    <TableCell colSpan={4} className="text-center h-24">暂无商品</TableCell>
                 </TableRow>
             )}
           </TableBody>

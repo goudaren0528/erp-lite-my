@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState, useTransition } from "react"
 import Image from "next/image"
-import { Order, OrderStatus, Product, User, OrderSource, Promoter } from "@/types"
+import { useRouter } from "next/navigation"
+import { Order, OrderStatus, Product, OrderSource, Promoter } from "@/types"
 import { compressImage } from "@/lib/image-utils"
 import {
   Table,
@@ -32,9 +33,9 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot } from "@/app/actions"
+import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot, fetchOrders } from "@/app/actions"
 import { format, addDays, differenceInDays } from "date-fns"
-import { Edit2, Plus, Search, ArrowUpDown, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy, Upload, Image as ImageIcon } from "lucide-react"
+import { Edit2, Plus, Search, ArrowUpDown, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy, Upload, Image as ImageIcon, Loader2 } from "lucide-react"
 import { closeOrder } from "@/app/actions"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { OrderForm } from "./order-form"
@@ -53,8 +54,12 @@ import { updateOrderSourceInfo } from "@/app/actions"
 interface OrderTableProps {
   orders: Order[]
   products: Product[] // Passed down for edit form
-  users?: User[]
   promoters?: Promoter[]
+  initialTotal: number
+  initialBaseTotal: number
+  initialStatusCounts: Record<string, number>
+  initialTodayCount: number
+  initialTodayAmount: number
 }
 
 const statusMap: Record<string, { label: string; color: string; order: number }> = {
@@ -99,10 +104,8 @@ import {
 
 import { toast } from "sonner"
 
-import { useRouter } from "next/navigation"
 
-export function OrderTable({ orders, products, users = [], promoters = [] }: OrderTableProps) {
-  const router = useRouter()
+export function OrderTable({ orders, products, promoters = [], initialTotal, initialBaseTotal, initialStatusCounts, initialTodayCount, initialTodayAmount }: OrderTableProps) {
   const [filterOrderNo, setFilterOrderNo] = useState('')
   const [filterXianyuOrderNo, setFilterXianyuOrderNo] = useState('')
   const [filterCustomer, setFilterCustomer] = useState('')
@@ -125,9 +128,18 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  const [currentOrders, setCurrentOrders] = useState<Order[]>(orders)
+  const [total, setTotal] = useState(initialTotal)
+  const [baseTotal, setBaseTotal] = useState(initialBaseTotal)
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>(initialStatusCounts)
+  const [todayCount, setTodayCount] = useState(initialTodayCount)
+  const [todayAmount, setTodayAmount] = useState(initialTodayAmount)
+  const [isLoading, setIsLoading] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [isPending, startTransition] = useTransition()
 
   // Pre-process orders to calculate OVERDUE status dynamically
-  const processedOrders = orders.map(order => {
+  const processedOrders = currentOrders.map(order => {
     let status = order.status;
     // Check if Overdue: Status is RENTING and today > returnDeadline
     if (status === 'RENTING' && order.returnDeadline) {
@@ -143,61 +155,13 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
     return { ...order, status };
   });
 
-  const baseFilteredOrders = processedOrders.filter(order => {
-    const matchOrderNo = !filterOrderNo || 
-        order.orderNo.toLowerCase().includes(filterOrderNo.toLowerCase()) || 
-        (order.miniProgramOrderNo && order.miniProgramOrderNo.toLowerCase().includes(filterOrderNo.toLowerCase()))
-
-    const matchXianyuOrderNo = !filterXianyuOrderNo || 
-        (order.xianyuOrderNo && order.xianyuOrderNo.toLowerCase().includes(filterXianyuOrderNo.toLowerCase()))
-
-    const matchCustomer = !filterCustomer || 
-        order.customerXianyuId.toLowerCase().includes(filterCustomer.toLowerCase())
-
-    const matchPromoter = !filterPromoter || 
-        order.sourceContact.toLowerCase().includes(filterPromoter.toLowerCase()) ||
-        (promoters.find(p => p.name === order.sourceContact)?.phone?.includes(filterPromoter))
-
-    const matchProduct = !filterProduct || 
-        order.productName.toLowerCase().includes(filterProduct.toLowerCase())
-
-    const matchCreator = !filterCreator || 
-        (users.find(u => u.id === order.creatorId)?.name || '').toLowerCase().includes(filterCreator.toLowerCase())
-
-    const matchDuration = !filterDuration || order.duration?.toString() === filterDuration
-
-    const matchRecipientName = !filterRecipientName || 
-        (order.recipientName || '').toLowerCase().includes(filterRecipientName.toLowerCase())
-
-    const matchRecipientPhone = !filterRecipientPhone || 
-        (order.recipientPhone || '').includes(filterRecipientPhone)
-
-    const matchSource = filterSource === 'ALL' || order.source === filterSource
-    const matchPlatform = filterPlatform === 'ALL' || order.platform === filterPlatform
-
-    let matchDate = true
-    if (startDate) {
-        matchDate = matchDate && order.createdAt >= startDate
-    }
-    if (endDate) {
-        const nextDay = new Date(endDate)
-        nextDay.setDate(nextDay.getDate() + 1)
-        matchDate = matchDate && new Date(order.createdAt) < nextDay
-    }
-
-    return matchOrderNo && matchXianyuOrderNo && matchCustomer && matchPromoter && matchProduct && matchCreator && matchDuration && matchRecipientName && matchRecipientPhone && matchSource && matchPlatform && matchDate
-  })
-
-  const filteredOrders = baseFilteredOrders.filter(order => {
-      return filterStatus === 'ALL' || order.status === filterStatus
-  }).sort((a, b) => {
+  const displayOrders = [...processedOrders].sort((a, b) => {
       if (sortBy === 'createdAt') {
           const dateA = new Date(a.createdAt).getTime()
           const dateB = new Date(b.createdAt).getTime()
           return sortDirection === 'asc' ? dateA - dateB : dateB - dateA
       }
 
-      // Primary Sort: Status Order
       const orderA = statusMap[a.status]?.order || 99
       const orderB = statusMap[b.status]?.order || 99
       
@@ -205,29 +169,12 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
           return orderA - orderB
       }
 
-      // Secondary Sort: Date
       const dateA = new Date(a.rentStartDate).getTime()
       const dateB = new Date(b.rentStartDate).getTime()
       return sortDirection === 'asc' ? dateA - dateB : dateB - dateA
   })
 
-  // Pagination Logic
-  const totalPages = Math.ceil(filteredOrders.length / pageSize)
-  const paginatedOrders = filteredOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
-
-  // Today Stats (from ALL orders, not just filtered page, but applying current filters if user wants? 
-  // Requirement says "Order list... display today's order and amount". Usually implies the filtered view or global today?
-  // Let's assume it implies "Today's stats of the current list view" OR "Global Today Stats". 
-  // Given it's "above the filter component", it might be global for the current user/scope.
-  // I will use `orders` prop which contains all orders accessible to this user.
-  
-  const today = new Date().toISOString().split('T')[0]
-  const todayOrders = orders.filter(o => o.createdAt.startsWith(today))
-  const todayCount = todayOrders.length
-  const todayAmount = todayOrders.reduce((sum, o) => {
-    const extensionTotal = (o.extensions || []).reduce((acc, curr) => acc + curr.price, 0)
-    return sum + o.totalAmount + extensionTotal
-  }, 0)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const toggleSort = () => {
       if (sortBy === 'status') {
@@ -249,6 +196,48 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
        }
   }
 
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, filterStatus, filterSource, filterPlatform, startDate, endDate, pageSize])
+
+  useEffect(() => {
+    setIsLoading(true)
+    startTransition(async () => {
+      try {
+        const res = await fetchOrders({
+          page: currentPage,
+          pageSize,
+          sortBy,
+          sortDirection,
+          filterOrderNo: filterOrderNo || undefined,
+          filterXianyuOrderNo: filterXianyuOrderNo || undefined,
+          filterCustomer: filterCustomer || undefined,
+          filterPromoter: filterPromoter || undefined,
+          filterProduct: filterProduct || undefined,
+          filterCreator: filterCreator || undefined,
+          filterDuration: filterDuration || undefined,
+          filterRecipientName: filterRecipientName || undefined,
+          filterRecipientPhone: filterRecipientPhone || undefined,
+          filterStatus,
+          filterSource,
+          filterPlatform,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined
+        })
+        setCurrentOrders(res.orders as unknown as Order[])
+        setTotal(res.total)
+        setBaseTotal(res.baseTotal)
+        setStatusCounts(res.statusCounts || {})
+        setTodayCount(res.todayCount)
+        setTodayAmount(res.todayAmount)
+      } catch {
+        toast.error("加载订单失败")
+      } finally {
+        setIsLoading(false)
+      }
+    })
+  }, [currentPage, pageSize, sortBy, sortDirection, filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, filterStatus, filterSource, filterPlatform, startDate, endDate, refreshKey])
+
   const resetFilters = () => {
     setFilterOrderNo('')
     setFilterXianyuOrderNo('')
@@ -269,7 +258,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
   }
 
   const refreshList = () => {
-    router.refresh()
+    setRefreshKey(prev => prev + 1)
     toast.success("列表已刷新")
   }
 
@@ -295,10 +284,10 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
       <Tabs defaultValue="ALL" value={filterStatus} onValueChange={setFilterStatus} className="w-full">
         <div className="overflow-x-auto pb-2">
             <TabsList>
-                <TabsTrigger value="ALL">全部 ({baseFilteredOrders.length})</TabsTrigger>
+                <TabsTrigger value="ALL">全部 ({baseTotal})</TabsTrigger>
                 {Object.entries(statusMap).sort((a, b) => a[1].order - b[1].order).map(([k, v]) => (
                     <TabsTrigger key={k} value={k}>
-                        {v.label} ({baseFilteredOrders.filter(o => o.status === k).length})
+                        {v.label} ({statusCounts[k] || 0})
                     </TabsTrigger>
                 ))}
             </TabsList>
@@ -455,7 +444,15 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
           </div>
       </div>
 
-      <div className="rounded-md border bg-white">
+      <div className="rounded-md border bg-white relative min-h-[300px]">
+          {(isLoading || isPending) && (
+            <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-10">
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <span className="text-sm text-muted-foreground">加载中...</span>
+              </div>
+            </div>
+          )}
           <Table>
           <TableHeader>
               <TableRow>
@@ -485,13 +482,13 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
               </TableRow>
           </TableHeader>
           <TableBody>
-              {paginatedOrders.map((order) => (
-              <OrderRow key={order.id} order={order} products={products} promoters={promoters} />
+              {displayOrders.map((order) => (
+              <OrderRow key={order.id} order={order} products={products} promoters={promoters} onOrderUpdated={refreshList} />
               ))}
-              {paginatedOrders.length === 0 && (
+              {displayOrders.length === 0 && (
               <TableRow>
                   <TableCell colSpan={11} className="text-center h-24">
-                  暂无匹配订单
+                      {isLoading || isPending ? "加载中..." : "暂无符合条件的订单"}
                   </TableCell>
               </TableRow>
               )}
@@ -501,7 +498,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
 
       <div className="flex items-center justify-between mt-4 px-2">
           <div className="text-sm text-muted-foreground">
-              共 {filteredOrders.length} 条数据，本页显示 {paginatedOrders.length} 条
+              共 {total} 条数据，本页显示 {displayOrders.length} 条
           </div>
 
           <div className="flex items-center space-x-4">
@@ -573,7 +570,7 @@ export function OrderTable({ orders, products, users = [], promoters = [] }: Ord
                     return items;
                   };
 
-                  return generatePaginationItems(currentPage, totalPages).map((item, index) => (
+                  return generatePaginationItems(currentPage, totalPages).map((item) => (
                     <PaginationItem key={typeof item === 'string' ? item : item}>
                       {typeof item === 'number' ? (
                         <PaginationLink
@@ -756,10 +753,12 @@ function PlatformEditPopover({ order, onSave }: { order: Order, onSave: (p: stri
     )
 }
 
-function SourceEditPopover({ order, promoters, onSave }: { order: Order, promoters: Promoter[], onSave: (s: string, c: string) => Promise<void> }) {
+function SourceEditPopover({ order, promoters, onSave }: { order: Order, promoters: Promoter[], onSave: (s: string, c: string, pId?: string, cId?: string) => Promise<void> }) {
     const [open, setOpen] = useState(false)
     const [source, setSource] = useState(order.source)
     const [contact, setContact] = useState(order.sourceContact)
+    const [promoterId, setPromoterId] = useState(order.promoterId || '')
+    const [channelId, setChannelId] = useState(order.channelId || '')
     
     return (
         <Popover open={open} onOpenChange={(v) => {
@@ -767,6 +766,8 @@ function SourceEditPopover({ order, promoters, onSave }: { order: Order, promote
             if (v) {
                 setSource(order.source)
                 setContact(order.sourceContact)
+                setPromoterId(order.promoterId || '')
+                setChannelId(order.channelId || '')
             }
         }}>
             <PopoverTrigger asChild>
@@ -784,6 +785,8 @@ function SourceEditPopover({ order, promoters, onSave }: { order: Order, promote
                     <Select value={source} onValueChange={(v) => {
                         setSource(v as OrderSource)
                         setContact('') 
+                        setPromoterId('')
+                        setChannelId('')
                     }}>
                         <SelectTrigger className="h-8">
                             <SelectValue />
@@ -797,7 +800,19 @@ function SourceEditPopover({ order, promoters, onSave }: { order: Order, promote
                 </div>
                 <div className="space-y-2">
                     <Label>推广员</Label>
-                    <Select value={contact} onValueChange={setContact} disabled={source === 'RETAIL'}>
+                    <Select value={contact} onValueChange={(val) => {
+                        setContact(val)
+                        if (val === 'self') {
+                            setPromoterId('')
+                            setChannelId('')
+                        } else {
+                            const p = promoters.find(promoter => promoter.name === val)
+                            if (p) {
+                                setPromoterId(p.id)
+                                setChannelId(p.channelConfigId || '')
+                            }
+                        }
+                    }} disabled={source === 'RETAIL'}>
                         <SelectTrigger className="h-8">
                             <SelectValue placeholder={source === 'RETAIL' ? "零售无需填写" : "选择推广员"} />
                         </SelectTrigger>
@@ -815,7 +830,7 @@ function SourceEditPopover({ order, promoters, onSave }: { order: Order, promote
                     </Select>
                 </div>
                 <Button size="sm" className="w-full" onClick={async () => {
-                    await onSave(source, contact)
+                    await onSave(source, contact, promoterId, channelId)
                     setOpen(false)
                 }}>保存</Button>
             </PopoverContent>
@@ -823,7 +838,7 @@ function SourceEditPopover({ order, promoters, onSave }: { order: Order, promote
     )
 }
 
-function OrderRow({ order, products, promoters }: { order: Order, products: Product[], promoters: Promoter[] }) {
+function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order, products: Product[], promoters: Promoter[], onOrderUpdated: () => void }) {
   const router = useRouter()
   const [remark, setRemark] = useState(order.remark || '')
   const [isExtensionOpen, setIsExtensionOpen] = useState(false)
@@ -938,10 +953,10 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
           if (data.success) {
               const newScreenshots = [...currentScreenshots, data.url].join(',')
               const updateRes = await updateOrderScreenshot(order.id, newScreenshots)
-              if (updateRes.success) {
-                  toast.success("截图上传更新成功", { id: toastId })
-                  router.refresh()
-              } else {
+                if (updateRes.success) {
+                    toast.success("截图上传更新成功", { id: toastId })
+                    onOrderUpdated()
+                } else {
                   toast.error("截图上传成功但更新订单失败", { id: toastId })
               }
           } else {
@@ -978,9 +993,9 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
       setIsDragOver(false)
   }
 
-  const handleUpdateSourceInfo = async (newSource: string, newContact: string, newPlatform?: string) => {
+  const handleUpdateSourceInfo = async (newSource: string, newContact: string, newPlatform?: string, newPromoterId?: string, newChannelId?: string) => {
       try {
-          const res = await updateOrderSourceInfo(order.id, newSource, newContact, newPlatform)
+          const res = await updateOrderSourceInfo(order.id, newSource, newContact, newPlatform, newPromoterId, newChannelId)
           if (res.success) {
               toast.success(res.message)
           } else {
@@ -1013,6 +1028,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
           if (res?.success) {
               toast.success(res.message)
               setIsDeleteOpen(false)
+              onOrderUpdated()
           } else {
               toast.error(res?.message || "操作失败")
           }
@@ -1039,7 +1055,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         if (res?.success) {
             toast.success(res.message)
             setIsRejectOpen(false)
-            router.refresh()
+            onOrderUpdated()
         }
         else toast.error(res?.message || "操作失败")
     } catch (error) {
@@ -1053,7 +1069,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         const res = await confirmShipment(order.id)
         if (res?.success) {
             toast.success(res.message)
-            router.refresh()
+            onOrderUpdated()
         } else {
             toast.error(res?.message || "操作失败")
         }
@@ -1069,7 +1085,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         if (res?.success) {
             toast.success(res.message)
             setIsCloseOpen(false)
-            router.refresh()
+            onOrderUpdated()
         }
         else toast.error(res?.message || "操作失败")
     } catch (error) {
@@ -1084,7 +1100,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         if (res?.success) {
             toast.success(res.message)
             setIsOverdueOpen(false)
-            router.refresh()
+            onOrderUpdated()
         } else {
             toast.error(res?.message || "操作失败")
         }
@@ -1118,7 +1134,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
         } else {
             toast.error("复制失败")
         }
-      } catch (err) {
+      } catch {
           toast.error("复制失败")
       }
     }
@@ -1244,7 +1260,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
          <PlatformEditPopover order={order} onSave={(p) => handleUpdateSourceInfo(order.source, p !== order.platform ? "" : order.sourceContact, p)} />
       </TableCell>
       <TableCell className="align-top">
-         <SourceEditPopover order={order} promoters={promoters} onSave={(s, c) => handleUpdateSourceInfo(s, c)} />
+         <SourceEditPopover order={order} promoters={promoters} onSave={(s, c, pId, cId) => handleUpdateSourceInfo(s, c, undefined, pId, cId)} />
       </TableCell>
       <TableCell className="align-top space-y-2">
         <div className="space-y-1">
@@ -1292,8 +1308,8 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
 
         {order.returnLogisticsCompany && (
             <div className="space-y-1 pt-2 border-t border-dashed border-gray-200">
-                <div className="text-xs font-semibold text-gray-500">归还物流</div>
-                <div className="text-xs">
+                <div className="text-[10px] font-semibold text-gray-500">归还物流</div>
+                <div className="text-[10px]">
                     {order.returnLogisticsCompany === '线下自提' ? (
                         <div className="flex items-center text-orange-600 font-medium">
                             <RotateCcw className="w-3 h-3 mr-1" />
@@ -1725,7 +1741,7 @@ function OrderRow({ order, products, promoters }: { order: Order, products: Prod
                             initialData={order} 
                             onSuccess={() => {
                                 setIsEditOpen(false)
-                                router.refresh()
+                                onOrderUpdated()
                             }} 
                         />
                     </DialogContent>

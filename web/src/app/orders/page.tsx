@@ -1,14 +1,16 @@
-import { prisma } from "@/lib/db";
 import { OrderTable } from "@/components/orders/order-table";
 import { CreateOrderDialog } from "@/components/orders/create-order-dialog";
 import { getCurrentUser } from "@/lib/auth";
-import { Order, OrderSource, Role } from "@/types";
+import { Order, OrderSource } from "@/types";
+import { prisma } from "@/lib/db";
+import { fetchOrders } from "@/app/actions";
 
 type PromoterRaw = {
   id: string;
   name: string;
   phone: string | null;
   channel: string | null;
+  channelConfigId: string | null;
   creatorId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -20,85 +22,11 @@ type ProductRaw = {
   variants: string;
 };
 
-type UserRaw = {
-  id: string;
-  name: string;
-  username: string;
-  role: string;
-  password: string | null;
-  permissions: string;
-};
-
-type OrderExtensionRaw = {
-  id: string;
-  days: number;
-  price: number;
-  createdAt: Date;
-};
-
-type OrderLogRaw = {
-  action: string;
-  operator: string;
-  desc?: string | null;
-  createdAt: Date;
-};
-
-type OrderRaw = {
-  id: string;
-  orderNo: string;
-  source: string;
-  platform?: string | null;
-  status: string;
-  customerXianyuId: string;
-  sourceContact: string;
-  miniProgramOrderNo?: string | null;
-  xianyuOrderNo?: string | null;
-  productName: string;
-  variantName: string;
-  sn?: string | null;
-  duration: number;
-  rentPrice: number;
-  deposit: number;
-  insurancePrice: number;
-  overdueFee?: number | null;
-  totalAmount: number;
-  address: string;
-  recipientName?: string | null;
-  recipientPhone?: string | null;
-  trackingNumber?: string | null;
-  logisticsCompany?: string | null;
-  latestLogisticsInfo?: string | null;
-  returnTrackingNumber?: string | null;
-  returnLogisticsCompany?: string | null;
-  returnLatestLogisticsInfo?: string | null;
-  rentStartDate?: Date | null;
-  deliveryTime?: Date | null;
-  returnDeadline?: Date | null;
-  remark?: string | null;
-  creatorId?: string | null;
-  creatorName?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  extensions: OrderExtensionRaw[];
-  logs: OrderLogRaw[];
-  screenshot?: string | null;
-};
-
 export default async function OrdersPage() {
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
   const canViewAllOrders = isAdmin || currentUser?.permissions?.includes('view_all_orders');
   const canViewAllPromoters = isAdmin || currentUser?.permissions?.includes('view_all_promoters') || canViewAllOrders;
-
-  // Filter orders
-  const orders = await prisma.order.findMany({
-    where: canViewAllOrders ? {} : { creatorId: currentUser?.id },
-    orderBy: { createdAt: 'desc' },
-    include: {
-      extensions: true,
-      logs: true
-    }
-  });
 
   // Filter promoters for dropdowns
   const promotersRaw = await prisma.promoter.findMany({
@@ -109,6 +37,7 @@ export default async function OrdersPage() {
       ...p,
       phone: p.phone ?? undefined,
       channel: (p.channel as OrderSource) ?? undefined,
+      channelConfigId: p.channelConfigId ?? undefined,
       creatorId: p.creatorId ?? undefined,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString()
@@ -120,47 +49,13 @@ export default async function OrdersPage() {
     variants: JSON.parse(p.variants)
   }));
   
-  const usersRaw = await prisma.user.findMany();
-  const users = usersRaw.map((u: UserRaw) => ({
-    ...u,
-    role: u.role as Role,
-    password: u.password ?? undefined,
-    permissions: JSON.parse(u.permissions)
-  }));
-
-  // Fix order dates to strings if needed by components? 
-  // Components likely expect strings for ISO dates if they use `new Date(string)`.
-  // Prisma returns Date objects.
-  // If types/index.ts says createdAt: string, then we have a mismatch.
-  // Let's check Order interface in types/index.ts (previous tool call).
-  // Line 42: createdAt: string; (for Extension)
-  // Line 69? (didn't see Order fully).
-  // Usually types match JSON.
-  // If I pass Date object to component that expects string, Next.js Server Components serialization might warn, 
-  // but if it's Client Component receiving props, it must be serializable (Date is not directly serializable to JSON in Client Component props unless converted).
-  // OrderTable is likely a client component (it has interactive bits).
-  // So I should convert Date objects to ISO strings.
-
-  const formattedOrders = orders.map((o: OrderRaw) => ({
-    ...o,
-    createdAt: o.createdAt.toISOString(),
-    updatedAt: o.updatedAt.toISOString(),
-    rentStartDate: o.rentStartDate?.toISOString() || null,
-    deliveryTime: o.deliveryTime?.toISOString() || null,
-    returnDeadline: o.returnDeadline?.toISOString() || null,
-    extensions: o.extensions.map((e: OrderExtensionRaw) => ({
-        ...e,
-        createdAt: e.createdAt.toISOString()
-    })),
-    logs: o.logs.map((l: OrderLogRaw) => ({
-        ...l,
-        timestamp: l.createdAt.toISOString(),
-        details: l.desc || undefined,
-        createdAt: l.createdAt.toISOString()
-    }))
-  }));
-  // Wait, types might be loose.
-  // Let's assume strict types.
+  const pageSize = 20
+  const initialData = await fetchOrders({
+    page: 1,
+    pageSize,
+    sortBy: 'status',
+    sortDirection: 'asc'
+  })
   
   return (
     <div className="space-y-6">
@@ -171,8 +66,16 @@ export default async function OrdersPage() {
         </div>
         <CreateOrderDialog products={products} promoters={promoters} />
       </div>
-      
-      <OrderTable orders={formattedOrders as unknown as Order[]} products={products} users={users} promoters={promoters} />
+      <OrderTable 
+        orders={initialData.orders as unknown as Order[]} 
+        products={products} 
+        promoters={promoters} 
+        initialTotal={initialData.total}
+        initialBaseTotal={initialData.baseTotal}
+        initialStatusCounts={initialData.statusCounts}
+        initialTodayCount={initialData.todayCount}
+        initialTodayAmount={initialData.todayAmount}
+      />
     </div>
   );
 }

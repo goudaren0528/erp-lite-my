@@ -7,6 +7,8 @@ type StatsOrder = {
   creatorId: string | null;
   creatorName: string | null;
   sourceContact: string;
+  promoterId?: string | null;
+  channelId?: string | null;
   orderNo: string;
   productName: string;
   variantName: string;
@@ -106,8 +108,13 @@ export default async function PromoterStatsPage(props: PageProps) {
 
   // 2. Build Lookup Maps
   const userMap = new Map(users.map(u => [u.id, u]));
-  const promoterChannelMap = new Map(promoters.map(p => [p.name, p.channel]));
-  const channelConfigMap = new Map(channelConfigs.map(c => [c.name, c]));
+  // Maps for ID-based lookup
+  const promoterIdMap = new Map(promoters.map(p => [p.id, p]));
+  const channelConfigIdMap = new Map(channelConfigs.map(c => [c.id, c]));
+  
+  // Maps for Name-based fallback lookup
+  const promoterNameMap = new Map(promoters.map(p => [p.name, p]));
+  const channelConfigNameMap = new Map(channelConfigs.map(c => [c.name, c]));
 
   const getPercentage = (count: number, rules: { type?: string; minCount: number; maxCount: number | null; percentage: number }[]) => {
     const match = rules.find(r => count >= r.minCount && (r.maxCount === null || count <= r.maxCount));
@@ -168,10 +175,36 @@ export default async function PromoterStatsPage(props: PageProps) {
       const revenue = calculateOrderRevenue(order);
       const extensionsTotal = order.extensions?.reduce((acc, ext) => acc + (ext.price || 0), 0) || 0;
 
-      const promoterName = order.sourceContact || '未标记';
+      // Determine Promoter and Channel using ID priority
+      const promoterId = order.promoterId;
+      let promoter = promoterId ? promoterIdMap.get(promoterId) : null;
+      if (!promoter) {
+        // Fallback to name
+        promoter = promoterNameMap.get(order.sourceContact);
+      }
+      
+      const promoterName = promoter ? promoter.name : (order.sourceContact || '未标记');
       const displayPromoterName = promoterName === 'OFFLINE' ? '线下' : promoterName;
-      const channelName = promoterChannelMap.get(promoterName) || promoterChannelMap.get(displayPromoterName);
-      const channelConfig = channelName ? channelConfigMap.get(channelName) : null;
+
+      // Determine Channel Config
+      let channelConfig: any = null;
+      if (order.channelId) {
+          channelConfig = channelConfigIdMap.get(order.channelId);
+      }
+      if (!channelConfig && promoter) {
+          if (promoter.channelConfigId) {
+             channelConfig = channelConfigIdMap.get(promoter.channelConfigId);
+          } else if (promoter.channel) {
+             channelConfig = channelConfigNameMap.get(promoter.channel);
+          }
+      }
+      if (!channelConfig && !promoter) {
+           // Fallback for orders without promoter but with sourceContact name that matches a channel (rare legacy case?)
+           // Or just try to find channel by name from sourceContact? (Unlikely but possible if sourceContact IS channel name)
+      }
+
+      const channelName = channelConfig?.name || undefined;
+
       const settlementByCompleted = channelConfig?.settlementByCompleted ?? true;
       const includeOrder = settlementByCompleted
         ? order.status === 'COMPLETED' && isInRange(order.completedAt)
@@ -287,7 +320,7 @@ export default async function PromoterStatsPage(props: PageProps) {
           let specificRules: any[] = [];
 
           if (p.channelName) {
-              channelConfig = channelConfigMap.get(p.channelName);
+              channelConfig = channelConfigNameMap.get(p.channelName);
               if (channelConfig && accountGroup) {
                   const currentChannelConfig = channelConfig;
                   // Find promoter rules defined in the Account Group for this Channel

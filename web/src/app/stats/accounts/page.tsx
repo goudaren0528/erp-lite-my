@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateOrderRevenue } from "@/lib/utils";
@@ -58,28 +59,9 @@ export default async function StatsPage(props: PageProps) {
      }
   }
 
-  // 1. Fetch all necessary data
-  const orderDateFilter = invalidRange
-    ? { id: 'nothing_to_match' }
-    : dateRange
-      ? {
-          OR: [
-            { createdAt: dateRange },
-            { completedAt: dateRange }
-          ]
-        }
-      : {};
-
-  const [ordersToAnalyze, users, channelConfigs, promoters] = await Promise.all([
-    prisma.order.findMany({
-      where: {
-        ...(canViewAllOrders ? {} : { creatorId: currentUser?.id }),
-        ...orderDateFilter
-      },
-      include: {
-        extensions: true
-      }
-    }),
+  // 1. Fetch Users and Configs first (needed for raw sql logic? No, logic is in SQL)
+  // Actually we need users to map the results back.
+  const [users, channelConfigs, promoters] = await Promise.all([
     prisma.user.findMany({
       include: {
         accountGroup: {
@@ -95,14 +77,71 @@ export default async function StatsPage(props: PageProps) {
     prisma.promoter.findMany()
   ]);
 
+  // Execute Raw SQL for Aggregation
+  let rawStats: any[] = [];
+  
+  if (!invalidRange) {
+      const startDate = dateRange ? dateRange.gte : new Date('2000-01-01'); // Default far past if cumulative
+      const endDate = dateRange ? dateRange.lte : new Date('2100-01-01');   // Default far future
+      
+      // Permission Filter
+      const userFilter = canViewAllOrders ? '1=1' : `o.creatorId = '${currentUser?.id}'`;
+      
+      // Date/Status Filter Logic (mimics code logic)
+      // If dateRange is null (cumulative), we still need valid SQL.
+      // If cumulative, we generally include all relevant orders.
+      // Existing code: if !dateRange return true (include all).
+      
+      const dateCondition = dateRange 
+          ? `
+            CASE 
+                WHEN COALESCE(ag.settlementByCompleted, 1) = 1 THEN 
+                    (o.status = 'COMPLETED' AND o.completedAt >= ${startDate.getTime()} AND o.completedAt <= ${endDate.getTime()})
+                ELSE
+                    (o.createdAt >= ${startDate.getTime()} AND o.createdAt <= ${endDate.getTime()})
+            END
+          `
+          : '1=1';
+
+      rawStats = await prisma.$queryRaw`
+        WITH ExtensionSums AS (
+            SELECT orderId, SUM(price) as extTotal
+            FROM OrderExtension
+            GROUP BY orderId
+        )
+        SELECT
+            o.creatorId,
+            o.source,
+            o.promoterId,
+            o.channelId,
+            o.sourceContact as promoterName,
+            SUM(CASE WHEN o.status != 'CLOSED' THEN 1 ELSE 0 END) as orderCount,
+            SUM(CASE WHEN o.status != 'CLOSED' THEN (o.rentPrice + o.insurancePrice + COALESCE(o.overdueFee, 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as totalRevenue,
+            SUM(CASE WHEN o.status = 'CLOSED' THEN (o.rentPrice + o.insurancePrice + COALESCE(o.overdueFee, 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as refundedAmount
+        FROM "Order" o
+        LEFT JOIN ExtensionSums es ON o.id = es.orderId
+        LEFT JOIN "User" u ON o.creatorId = u.id
+        LEFT JOIN "AccountGroup" ag ON u.accountGroupId = ag.id
+        WHERE ${Prisma.raw(userFilter)} AND ${Prisma.raw(dateCondition)}
+        GROUP BY o.creatorId, o.source, o.promoterId, o.channelId, o.sourceContact
+      `;
+  }
+
+
   // 2. Build Lookup Maps
   const userMap = new Map(users.map(u => [u.id, u]));
-  // Promoter Name -> Channel Config ID
-  const promoterMap = new Map<string, string>();
+  // Promoter ID -> Name, Channel ID
+  const promoterIdMap = new Map<string, { name: string, channelId: string | null }>();
+  promoters.forEach(p => {
+    promoterIdMap.set(p.id, { name: p.name, channelId: p.channelConfigId });
+  });
+
+  // Legacy Name Map (Fallback)
+  const promoterNameMap = new Map<string, string>();
   promoters.forEach(p => {
     const config = channelConfigs.find(c => c.name === p.channel);
     if (config) {
-      promoterMap.set(p.name, config.id);
+      promoterNameMap.set(p.name, config.id);
     }
   });
 
@@ -143,24 +182,18 @@ export default async function StatsPage(props: PageProps) {
     }>
   }>();
 
-  const isInRange = (value?: Date | null) => {
-    if (!dateRange) return true;
-    if (!value) return false;
-    return value >= dateRange.gte && value <= dateRange.lte;
-  };
+  // 3.1 Aggregate Raw Stats
+  rawStats.forEach((stat: any) => {
+      const creatorId = stat.creatorId || 'unknown';
+      const promoterName = stat.promoterName || '未标记';
+      // const source = stat.source; // Not used in existing logic, relying on promoterName
 
-  // 3.1 First Pass: Aggregate Orders by User & Channel
-  ordersToAnalyze.forEach((order: StatsOrder) => {
-      const creatorId = order.creatorId || 'unknown';
+      const orderCount = Number(stat.orderCount || 0);
+      const revenue = Number(stat.totalRevenue || 0);
+      const refund = Number(stat.refundedAmount || 0);
+
       const user = userMap.get(creatorId);
       
-      const settlementByCompleted = user?.accountGroup?.settlementByCompleted ?? true;
-      const includeOrder = settlementByCompleted
-        ? order.status === 'COMPLETED' && isInRange(order.completedAt)
-        : isInRange(order.createdAt);
-
-      if (!includeOrder) return;
-
       const groupId = user?.accountGroupId || 'ungrouped';
       const groupName = user?.accountGroup?.name || '未分组';
       
@@ -170,43 +203,46 @@ export default async function StatsPage(props: PageProps) {
       const group = accountGroupsMap.get(groupId)!;
 
       if (!group.users.has(creatorId)) {
-          group.users.set(creatorId, {
-              user: user || { id: creatorId, name: order.creatorName || 'Unknown', username: 'Unknown' },
-              totalOrderCount: 0,
-              totalRevenue: 0,
+            group.users.set(creatorId, {
+                user: user || { id: creatorId, name: 'Unknown', username: 'Unknown' } as any,
+                totalOrderCount: 0,
+                totalRevenue: 0,
               refundedAmount: 0,
               channels: new Map(),
-              orders: []
+              orders: [] // Empty by default (Server Side Pagination)
           });
       }
       const userStats = group.users.get(creatorId)!;
-      const revenue = calculateOrderRevenue(order);
 
-      if (order.status === 'CLOSED') {
-          userStats.refundedAmount += revenue;
-          userStats.orders.push({
-              ...order,
-              orderRevenue: revenue,
-              refundAmount: revenue,
-              promoterName: order.sourceContact || '未标记'
-          });
-      } else {
-          userStats.totalOrderCount++;
+      // Add Refund (CLOSED orders)
+      userStats.refundedAmount += refund;
+
+      // Add Revenue/Count (Non-CLOSED orders)
+      if (orderCount > 0) {
+          userStats.totalOrderCount += orderCount;
           userStats.totalRevenue += revenue;
-          userStats.orders.push({
-              ...order,
-              orderRevenue: revenue,
-              refundAmount: 0,
-              promoterName: order.sourceContact || '未标记'
-          });
 
-          const promoterName = order.sourceContact || '未标记';
-          let channelId = promoterMap.get(promoterName);
+          let channelId = stat.channelId;
+          const pId = stat.promoterId;
+          
+          // If channelId is missing, try to find it via Promoter ID
+          if (!channelId && pId && promoterIdMap.has(pId)) {
+              channelId = promoterIdMap.get(pId)!.channelId;
+          }
+
+          // Legacy Fallback: try to find via Promoter Name
+          if (!channelId) {
+             channelId = promoterNameMap.get(promoterName);
+          }
+
           let channelName = channelId ? channelIdToName.get(channelId) : undefined;
 
           if (!channelId) {
-             channelId = channelNameToId.get(promoterName);
-             if (channelId) channelName = promoterName;
+             // Fallback: check if promoterName itself is a channel name
+             const idByName = channelNameToId.get(promoterName);
+             if (idByName) {
+                 // channelName = promoterName; // Already matches
+             }
           }
           
           const safeChannelId = channelId || 'default'; 
@@ -222,17 +258,23 @@ export default async function StatsPage(props: PageProps) {
               });
           }
           const channelStats = userStats.channels.get(safeChannelId)!;
-          channelStats.orderCount++;
+          channelStats.orderCount += orderCount;
           channelStats.revenue += revenue;
 
-          if (!channelStats.promoters.has(promoterName)) {
-              channelStats.promoters.set(promoterName, { name: promoterName, count: 0, revenue: 0 });
+          // Use ID-based name if available to ensure consistency even if sourceContact was old name
+          const displayPromoterName = (pId && promoterIdMap.has(pId)) 
+              ? promoterIdMap.get(pId)!.name 
+              : promoterName;
+
+          if (!channelStats.promoters.has(displayPromoterName)) {
+              channelStats.promoters.set(displayPromoterName, { name: displayPromoterName, count: 0, revenue: 0 });
           }
-          const promoterStats = channelStats.promoters.get(promoterName)!;
-          promoterStats.count++;
+          const promoterStats = channelStats.promoters.get(displayPromoterName)!;
+          promoterStats.count += orderCount;
           promoterStats.revenue += revenue;
       }
   });
+
 
   // 4. Flatten Data for Client
   const allStats: any[] = [];

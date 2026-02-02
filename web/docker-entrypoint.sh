@@ -9,12 +9,19 @@ if echo "$DATABASE_URL" | grep -q "^postgresql://"; then
   # For mixed environments (SQLite local, Postgres prod), we must use db push
   # instead of migrate deploy because migrations are provider-specific.
   echo "Running database push (skipping migrations for cross-provider compatibility)..."
-  npx prisma db push --accept-data-loss
+  npx prisma db push
 else
   # Default to standard migrations for SQLite (or matching provider)
   echo "Running database migrations..."
   npx prisma migrate deploy
 fi
+
+# Run ID migration script to ensure data consistency
+if [ -f "scripts/migrate-ids.ts" ]; then
+    echo "Running ID migration script..."
+    npx tsx scripts/migrate-ids.ts || echo "ID migration script encountered errors (possibly already migrated), continuing..."
+fi
+
 
 # Seed data if enabled
 if [ "$SEED_DB" = "true" ]; then
