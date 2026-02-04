@@ -30,6 +30,7 @@ model AccountGroup {
   name        String   @unique
   description String?
   settlementByCompleted Boolean @default(true)
+  highTicketRate Float @default(0) // Percentage for high ticket commission
   users       User[]
   rules       CommissionRule[]
   createdAt   DateTime @default(now())
@@ -122,6 +123,8 @@ model Order {
   insurancePrice  Float
   overdueFee      Float?
   totalAmount     Float
+  
+  standardPrice   Float @default(0) // Standard price snapshot from product config
   
   address           String
   recipientName     String?

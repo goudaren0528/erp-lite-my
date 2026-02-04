@@ -59,6 +59,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
   // Policy Manager
   const [isPolicyManagerOpen, setIsPolicyManagerOpen] = useState(false);
   const [policyManagerGroup, setPolicyManagerGroup] = useState<any>(null);
+  const [generalHighTicketRate, setGeneralHighTicketRate] = useState<string>("0");
 
   // Channel Basic Info
   const [isChannelBasicOpen, setIsChannelBasicOpen] = useState(false);
@@ -125,16 +126,18 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
   // 3. Policy Manager
   const handleOpenPolicyManager = (group: any) => {
     setPolicyManagerGroup(group);
+    setGeneralHighTicketRate(group.highTicketRate?.toString() || "0");
     setIsPolicyManagerOpen(true);
   };
 
-  const handleSavePolicyManager = async (rules: CommissionRuleInput[], settlementByCompleted: boolean) => {
+  const handleSavePolicyManager = async (rules: CommissionRuleInput[], settlementByCompleted: boolean, highTicketRate: number) => {
     if (!policyManagerGroup) return;
     const res = await upsertAccountGroup({
       id: policyManagerGroup.id,
       name: policyManagerGroup.name,
       rules: rules,
-      settlementByCompleted: settlementByCompleted
+      settlementByCompleted: settlementByCompleted,
+      highTicketRate: highTicketRate
     });
 
     if (res.success) {
@@ -526,16 +529,18 @@ function GroupPolicyManager({
     channels: any[], 
     isOpen: boolean, 
     onOpenChange: (open: boolean) => void, 
-    onSave: (rules: CommissionRuleInput[], settlementByCompleted: boolean) => Promise<void> 
+    onSave: (rules: CommissionRuleInput[], settlementByCompleted: boolean, highTicketRate: number) => Promise<void> 
 }) {
     const [defaultRules, setDefaultRules] = useState<CommissionRuleInput[]>([]);
     const [channelRates, setChannelRates] = useState<Record<string, { employee: string, promoter: string }>>({});
     const [settlementByCompleted, setSettlementByCompleted] = useState(true);
+    const [highTicketRate, setHighTicketRate] = useState<string>("0");
 
     useEffect(() => {
         // Initialize rules
         const rules = group.rules || [];
         setSettlementByCompleted(group.settlementByCompleted ?? true);
+        setHighTicketRate(group.highTicketRate?.toString() || "0");
         
         // Default rules: channelConfigId is null (Keep as Ladder)
         const def = rules.filter((r: any) => !r.channelConfigId);
@@ -585,7 +590,7 @@ function GroupPolicyManager({
             });
         });
 
-        await onSave(allRules, settlementByCompleted);
+        await onSave(allRules, settlementByCompleted, parseFloat(highTicketRate) || 0);
     };
 
     return (
@@ -615,6 +620,7 @@ function GroupPolicyManager({
                             <TabsList className="w-full justify-start">
                                 <TabsTrigger value="group_rules">账号组规则</TabsTrigger>
                                 <TabsTrigger value="channel_rules">下属渠道配置</TabsTrigger>
+                                <TabsTrigger value="general_rules">通用提成</TabsTrigger>
                             </TabsList>
                         </div>
 
@@ -688,6 +694,39 @@ function GroupPolicyManager({
                                         暂无配置的渠道，请先在“渠道管理”中添加。
                                     </div>
                                 )}
+                            </TabsContent>
+
+                            <TabsContent value="general_rules" className="mt-0 space-y-4">
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle className="text-base">高客单提成</CardTitle>
+                                        <CardDescription>
+                                            订单金额超过标准价的部分将按此比例计算提成。
+                                            <br />
+                                            计算公式：(订单金额 - 租期标准价) × 提成比例
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="space-y-4">
+                                            <div className="space-y-2">
+                                                <Label>高客单提成比例</Label>
+                                                <div className="flex items-center gap-2 max-w-xs">
+                                                    <Input 
+                                                        type="number" 
+                                                        min="0" 
+                                                        step="0.1"
+                                                        value={highTicketRate} 
+                                                        onChange={(e) => setHighTicketRate(e.target.value)}
+                                                    />
+                                                    <span className="text-sm font-medium">%</span>
+                                                </div>
+                                                <p className="text-sm text-muted-foreground">
+                                                    支持小数点后1位，例如 15.5
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
                             </TabsContent>
                         </div>
                     </Tabs>

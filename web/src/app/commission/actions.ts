@@ -34,11 +34,12 @@ export async function upsertAccountGroup(data: {
   name: string;
   description?: string;
   settlementByCompleted?: boolean;
+  highTicketRate?: number;
   rules?: CommissionRuleInput[]; // Optional now as we might only update name
   userIds?: string[];
 }) {
   try {
-    const { id, name, description, settlementByCompleted, rules, userIds } = data;
+    const { id, name, description, settlementByCompleted, highTicketRate, rules, userIds } = data;
 
     if (id) {
       // Update
@@ -46,6 +47,7 @@ export async function upsertAccountGroup(data: {
         name,
         description,
         settlementByCompleted,
+        highTicketRate
       };
 
       if (rules) {
@@ -83,6 +85,7 @@ export async function upsertAccountGroup(data: {
           name,
           description,
           settlementByCompleted,
+          highTicketRate: highTicketRate || 0,
           rules: {
             create: (rules || []).map(r => ({
               type: r.type || "QUANTITY",

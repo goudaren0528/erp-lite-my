@@ -4,7 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { format, getYear, getMonth } from "date-fns"
 import * as XLSX from "xlsx"
-import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Check, Loader2 } from "lucide-react"
+import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Check, Loader2, RefreshCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -54,18 +54,18 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
-import { fetchAccountOrders } from "./actions";
+import { fetchAccountOrders, syncAllOrdersStandardPrice } from "./actions";
 
-function _DeprecatedServerOrderList({ userId, period, start, end }: { userId: string, period?: string, start?: string, end?: string }) {
+function RetailOrderList({ userId, period, start, end, highTicketRate }: { userId: string, period?: string, start?: string, end?: string, highTicketRate: number }) {
     const [orders, setOrders] = React.useState<any[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [page, setPage] = React.useState(1);
     const [total, setTotal] = React.useState(0);
-    const pageSize = 20;
+    const pageSize = 10;
 
     React.useEffect(() => {
         setLoading(true);
-        fetchAccountOrders({ userId, period: period || 'cumulative', start, end, page, pageSize })
+        fetchAccountOrders({ userId, period: period || 'cumulative', start, end, page, pageSize, isRetail: true })
             .then(res => {
                 setOrders(res.orders);
                 setTotal(res.total);
@@ -76,8 +76,32 @@ function _DeprecatedServerOrderList({ userId, period, start, end }: { userId: st
 
     const totalPages = Math.ceil(total / pageSize);
 
+    const getChannelName = (order: any) => {
+        const source = order.channel?.name || order.source;
+        if (!source) return '-';
+        
+        // Map common sources to Chinese
+        const map: Record<string, string> = {
+            'MINI_PROGRAM': '小程序',
+            'XIANYU': '闲鱼',
+            'OFFLINE': '线下',
+            'H5': 'H5',
+            'WECHAT': '微信',
+            'PEER': '同行',
+            'PART_TIME_AGENT': '兼职代理',
+            'Official': '官方',
+            'RETAIL': '零售'
+        };
+        
+        return map[source] || source;
+    };
+
     if (loading) {
         return <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    }
+
+    if (total === 0) {
+        return <div className="text-muted-foreground text-sm border rounded-md p-4 text-center">暂无零售订单数据</div>;
     }
 
     return (
@@ -87,29 +111,34 @@ function _DeprecatedServerOrderList({ userId, period, start, end }: { userId: st
                     <TableHeader>
                         <TableRow className="bg-muted/50">
                             <TableHead>订单号</TableHead>
+                            <TableHead>推广渠道</TableHead>
                             <TableHead>商品</TableHead>
                             <TableHead>租期</TableHead>
-                            <TableHead>总金额</TableHead>
+                            <TableHead>标准价</TableHead>
+                            <TableHead>租金</TableHead>
+                            <TableHead>高客单提成</TableHead>
                             <TableHead>状态</TableHead>
                             <TableHead>创建时间</TableHead>
-                            <TableHead>推广员</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {orders.map((order) => (
+                        {orders.map((order) => {
+                            const standardPrice = order.standardPrice || 0;
+                            const highTicketBase = Math.max(0, (order.rentPrice || 0) - standardPrice);
+                            const commission = highTicketBase * (highTicketRate / 100);
+
+                            return (
                             <TableRow key={order.id}>
                                 <TableCell className="font-mono text-xs">{order.orderNo}</TableCell>
+                                <TableCell className="text-sm">{getChannelName(order)}</TableCell>
                                 <TableCell>
                                     <div className="text-sm">{order.productName}</div>
                                     <div className="text-xs text-muted-foreground">{order.variantName}</div>
                                 </TableCell>
                                 <TableCell>{order.duration}天</TableCell>
-                                <TableCell>
-                                    <div>¥{order.totalAmount}</div>
-                                    <div className="text-xs text-muted-foreground">
-                                        (营收: ¥{order.orderRevenue.toLocaleString()})
-                                    </div>
-                                </TableCell>
+                                <TableCell className="text-muted-foreground">¥{standardPrice}</TableCell>
+                                <TableCell>¥{order.rentPrice}</TableCell>
+                                <TableCell className="font-medium text-green-600">¥{commission.toFixed(2)}</TableCell>
                                 <TableCell>
                                     <span className={cn(
                                         "px-2 py-1 rounded-full text-xs font-medium",
@@ -122,21 +151,16 @@ function _DeprecatedServerOrderList({ userId, period, start, end }: { userId: st
                                          order.status === 'RENTING' ? '租赁中' :
                                          order.status === 'CLOSED' ? '已关闭' :
                                          order.status === 'PENDING_PAYMENT' ? '待支付' :
-                                         order.status === 'PENDING_DELIVERY' ? '待发货' :
+                                         order.status === 'PENDING_DELIVERY' || order.status === 'PENDING_SHIPMENT' ? '待发货' :
+                                         order.status === 'PENDING_RECEIPT' ? '待收货' :
                                          order.status}
                                     </span>
                                 </TableCell>
                                 <TableCell className="text-xs text-muted-foreground">
                                     {format(new Date(order.createdAt), 'yyyy-MM-dd HH:mm')}
                                 </TableCell>
-                                <TableCell className="text-xs">{order.promoterName}</TableCell>
                             </TableRow>
-                        ))}
-                        {orders.length === 0 && (
-                            <TableRow>
-                                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">暂无订单数据</TableCell>
-                            </TableRow>
-                        )}
+                        )})}
                     </TableBody>
                 </Table>
             </div>
@@ -179,6 +203,7 @@ interface AccountStat {
     userName: string;
     accountGroupId: string;
     accountGroupName: string;
+    highTicketRate?: number;
     totalOrderCount: number;
     totalRevenue: number;
     refundedAmount: number;
@@ -187,6 +212,7 @@ interface AccountStat {
     channelCommission: number;
     peerCommission: number;
     agentCommission: number;
+    highTicketCommission: number;
     estimatedPromoterCommission: number;
     effectiveBaseRate?: number;
     defaultUserRules?: Rule[];
@@ -199,6 +225,7 @@ interface AccountStat {
         employeeRate: number;
         employeeCommission: number;
         subordinateCommission: number;
+        highTicketCommission: number;
         promoters: {
             name: string;
             count: number;
@@ -208,6 +235,7 @@ interface AccountStat {
             isPromoter: boolean;
             accountRate: number;
             accountCommission: number;
+            highTicketCommission: number;
         }[]
     }[]
 }
@@ -353,6 +381,10 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
   const totalEmployeeCommission = filteredStats.reduce((acc, s) => acc + s.estimatedEmployeeCommission, 0);
   const totalPromoterCommission = filteredStats.reduce((acc, s) => acc + s.estimatedPromoterCommission, 0);
   const totalNetIncome = totalRevenue - totalEmployeeCommission - totalPromoterCommission;
+  
+  const totalVolumeGradientCommission = filteredStats.reduce((acc, s) => acc + s.volumeGradientCommission, 0);
+  const totalHighTicketCommission = filteredStats.reduce((acc, s) => acc + s.highTicketCommission, 0);
+  const totalChannelCommission = filteredStats.reduce((acc, s) => acc + s.channelCommission, 0);
 
   // Handle Period Change
   const handlePeriodChange = (value: string) => {
@@ -388,6 +420,36 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
      });
   };
 
+  // Handle Sync
+  const [syncOpen, setSyncOpen] = React.useState(false);
+  const [syncType, setSyncType] = React.useState<'all' | 'month' | 'custom'>('month');
+  const [syncMonth, setSyncMonth] = React.useState<Date>(new Date());
+  const [syncDateRange, setSyncDateRange] = React.useState<DateRange | undefined>(undefined);
+  
+  const handleSync = () => {
+      startTransition(async () => {
+          let params: any = { type: syncType };
+          
+          if (syncType === 'month') {
+              params.month = format(syncMonth, 'yyyy-MM');
+          } else if (syncType === 'custom' && syncDateRange?.from) {
+              params.start = format(syncDateRange.from, 'yyyy-MM-dd');
+              if (syncDateRange.to) {
+                  params.end = format(syncDateRange.to, 'yyyy-MM-dd');
+              }
+          }
+          
+          const res = await syncAllOrdersStandardPrice(params);
+          if (res.success) {
+              alert(res.message);
+              setSyncOpen(false);
+              router.refresh();
+          } else {
+              alert(res.message);
+          }
+      });
+  };
+
   // Export Stats
   const handleExport = () => {
     const rows: any[] = [];
@@ -403,11 +465,13 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                     "同行提成": stat.peerCommission,
                     "代理兼职提成": stat.agentCommission,
                     "单量阶梯提成": stat.volumeGradientCommission,
+                    "高客单提成": stat.highTicketCommission,
                     "渠道": c.channelName,
                     "渠道单量": c.orderCount,
                     "渠道营收": c.revenue,
                     "员工提成点数": c.employeeRate + '%',
                     "员工渠道提成": c.employeeCommission,
+                    "员工高客单提成": c.highTicketCommission,
                     "推广员": p.name,
                     "推广员单量": p.count,
                     "推广员营收": p.revenue,
@@ -425,11 +489,13 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                     "同行提成": stat.peerCommission,
                     "代理兼职提成": stat.agentCommission,
                     "单量阶梯提成": stat.volumeGradientCommission,
+                    "高客单提成": stat.highTicketCommission,
                     "渠道": c.channelName,
                     "渠道单量": c.orderCount,
                     "渠道营收": c.revenue,
                     "员工提成点数": c.employeeRate + '%',
                     "员工渠道提成": c.employeeCommission,
+                    "员工高客单提成": c.highTicketCommission,
                     "推广员": "无",
                     "推广员单量": 0,
                     "推广员营收": 0,
@@ -458,30 +524,73 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
              pageSize: -1 // Unlimited
           });
           
-          const orders = res.orders;
-          const rows = orders.map((o: any) => ({
-              "订单号": o.orderNo,
-              "商品": o.productName,
-              "规格": o.variantName,
-              "推广员": o.promoterName,
-              "状态": o.status === 'COMPLETED' ? '已完成' : 
-                  o.status === 'RENTING' ? '租赁中' : 
-                  o.status === 'CLOSED' ? '已关闭' : 
-                  o.status === 'PENDING_PAYMENT' ? '待支付' :
-                  o.status === 'PENDING_DELIVERY' ? '待发货' :
-                  o.status,
-              "总金额": o.totalAmount,
-              "营收": o.revenue,
-              "退款": o.refundAmount || 0,
-              "租金": o.rentPrice,
-              "保险": o.insurancePrice,
-              "延期": o.extensionsTotal || 0,
-              "逾期": o.overdueFee || 0
-          }));
+          const stat = allStats.find(s => s.userId === userId);
+          const highTicketRate = stat?.highTicketRate || 0;
 
-          const ws = XLSX.utils.json_to_sheet(rows);
+          const orders = res.orders;
+          const mapStatus = (status: string) => {
+              const map: Record<string, string> = {
+                'COMPLETED': '已完成',
+                'RENTING': '租赁中',
+                'CLOSED': '已关闭',
+                'PENDING_PAYMENT': '待支付',
+                'PENDING_DELIVERY': '待发货',
+                'PENDING_SHIPMENT': '待发货',
+                'PENDING_RECEIPT': '待收货'
+              };
+              return map[status] || status;
+          };
+
+          const formatOrderRow = (o: any) => {
+              const standardPrice = o.standardPrice || 0;
+              const highTicketBase = Math.max(0, (o.rentPrice || 0) - standardPrice);
+              const highTicketCommission = highTicketBase * (highTicketRate / 100);
+
+              return {
+                "订单号": o.orderNo,
+                "商品": o.productName,
+                "规格": o.variantName,
+                "推广员": o.promoterName,
+                "状态": mapStatus(o.status),
+                "总金额": o.totalAmount,
+                "营收": o.revenue,
+                "退款": o.refundAmount || 0,
+                "租金": o.rentPrice,
+                "标准价": standardPrice,
+                "高客单提成(估算)": highTicketCommission,
+                "保险": o.insurancePrice,
+                "延期": o.extensionsTotal || 0,
+                "逾期": o.overdueFee || 0
+            };
+          };
+
+          const rows = orders.map(formatOrderRow);
+
+          // Fetch High Ticket Orders (Retail only)
+          const resRetail = await fetchAccountOrders({ 
+             userId, 
+             period: period || 'cumulative', 
+             start, 
+             end, 
+             page: 1, 
+             pageSize: -1, // Unlimited
+             isRetail: true
+          });
+
+          const highTicketRows = resRetail.orders.map(formatOrderRow);
+
           const wb = XLSX.utils.book_new();
+          
+          // Sheet 1: All Orders
+          const ws = XLSX.utils.json_to_sheet(rows);
           XLSX.utils.book_append_sheet(wb, ws, "订单明细");
+          
+          // Sheet 2: High Ticket Orders
+          if (highTicketRows.length > 0) {
+            const wsHighTicket = XLSX.utils.json_to_sheet(highTicketRows);
+            XLSX.utils.book_append_sheet(wb, wsHighTicket, "高客单提成明细");
+          }
+
           XLSX.writeFile(wb, `${userName}_订单明细_${format(new Date(), 'yyyyMMddHHmm')}.xlsx`);
       } catch (error) {
           console.error("Export failed", error);
@@ -573,6 +682,101 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                 </div>
             )}
 
+            <Popover open={syncOpen} onOpenChange={setSyncOpen}>
+                <PopoverTrigger asChild>
+                    <Button variant="outline">
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                        同步标准价
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-96">
+                    <div className="grid gap-4">
+                        <div className="space-y-2">
+                            <h4 className="font-medium leading-none">同步标准价</h4>
+                            <p className="text-sm text-muted-foreground">
+                                选择要同步的订单范围（按创建时间）。
+                            </p>
+                        </div>
+                        <div className="grid gap-4">
+                            <div className="grid gap-2">
+                                <label className="text-sm font-medium">同步范围</label>
+                                <Tabs value={syncType} onValueChange={(v: any) => setSyncType(v)} className="w-full">
+                                    <TabsList className="grid w-full grid-cols-3">
+                                        <TabsTrigger value="month">按月份</TabsTrigger>
+                                        <TabsTrigger value="custom">自定义</TabsTrigger>
+                                        <TabsTrigger value="all">全部</TabsTrigger>
+                                    </TabsList>
+                                </Tabs>
+                            </div>
+                            
+                            {syncType === 'month' && (
+                                <div className="flex items-center gap-2">
+                                    <label className="text-sm font-medium w-16">选择月份</label>
+                                    <MonthPicker 
+                                        date={syncMonth}
+                                        onSelect={setSyncMonth}
+                                    />
+                                </div>
+                            )}
+
+                            {syncType === 'custom' && (
+                                <div className="grid gap-2">
+                                    <label className="text-sm font-medium">选择日期范围</label>
+                                    <div className={cn("grid gap-2")}>
+                                        <Popover>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    id="sync-date"
+                                                    variant={"outline"}
+                                                    className={cn(
+                                                        "w-full justify-start text-left font-normal",
+                                                        !syncDateRange && "text-muted-foreground"
+                                                    )}
+                                                >
+                                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                                    {syncDateRange?.from ? (
+                                                        syncDateRange.to ? (
+                                                            <>
+                                                                {format(syncDateRange.from, "yyyy-MM-dd")} -{" "}
+                                                                {format(syncDateRange.to, "yyyy-MM-dd")}
+                                                            </>
+                                                        ) : (
+                                                            format(syncDateRange.from, "yyyy-MM-dd")
+                                                        )
+                                                    ) : (
+                                                        <span>选择日期范围</span>
+                                                    )}
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto p-0" align="start">
+                                                <Calendar
+                                                    initialFocus
+                                                    mode="range"
+                                                    defaultMonth={syncDateRange?.from}
+                                                    selected={syncDateRange}
+                                                    onSelect={setSyncDateRange}
+                                                    numberOfMonths={2}
+                                                />
+                                            </PopoverContent>
+                                        </Popover>
+                                    </div>
+                                </div>
+                            )}
+
+                            {syncType === 'all' && (
+                                <div className="rounded-md bg-yellow-50 p-3 text-sm text-yellow-800">
+                                    注意：同步全部订单可能需要较长时间，请耐心等待。
+                                </div>
+                            )}
+
+                            <Button onClick={handleSync} disabled={isPending}>
+                                {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                开始同步
+                            </Button>
+                        </div>
+                    </div>
+                </PopoverContent>
+            </Popover>
             <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" />
                 导出明细
@@ -580,7 +784,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">总订单数</CardTitle>
@@ -597,6 +801,33 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
           <CardContent>
             <div className="text-2xl font-bold">¥ {totalRevenue.toLocaleString()}</div>
             <p className="text-xs text-muted-foreground">不含已关闭/退款订单</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">渠道提成</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">¥ {totalChannelCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            <p className="text-xs text-muted-foreground">含同行/代理兼职等</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">单量阶梯提成</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600">¥ {totalVolumeGradientCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            <p className="text-xs text-muted-foreground">基于单量阶梯规则</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">高客单提成</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">¥ {totalHighTicketCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            <p className="text-xs text-muted-foreground">基于标准价溢价</p>
           </CardContent>
         </Card>
         <Card>
@@ -640,6 +871,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                         <TableHead className="w-[120px]">同行提成</TableHead>
                         <TableHead className="w-[120px]">代理兼职提成</TableHead>
                         <TableHead className="w-[120px]">单量阶梯提成</TableHead>
+                        <TableHead className="w-[120px]">高客单提成</TableHead>
                         <TableHead className="w-[140px]">员工总提成</TableHead>
                         <TableHead className="w-[140px]">推广员预计提成</TableHead>
                         <TableHead className="w-[100px]"></TableHead>
@@ -669,6 +901,16 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                     </div>
                                 )}
                             </TableCell>
+                            <TableCell className="font-medium">
+                                <div>
+                                    ¥ {u.highTicketCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                </div>
+                                {u.highTicketRate !== undefined && u.highTicketRate > 0 && (
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                        (生效点数: {u.highTicketRate}%)
+                                    </div>
+                                )}
+                            </TableCell>
                             <TableCell className="text-green-600 font-medium">
                                 ¥ {u.estimatedEmployeeCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                             </TableCell>
@@ -678,7 +920,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                     <SheetTrigger asChild>
                                         <Button variant="outline" size="sm">详情</Button>
                                     </SheetTrigger>
-                                    <SheetContent className="min-w-[800px] overflow-y-auto">
+                                    <SheetContent className="min-w-[1000px] sm:max-w-[1000px] overflow-y-auto">
                                         <SheetHeader>
                                             <div className="flex justify-between items-center pr-8">
                                                 <SheetTitle>{u.userName} - 提成详情</SheetTitle>
@@ -691,6 +933,41 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                                 按渠道拆分的员工及推广员提成明细 (当前总单量级别: {u.totalOrderCount})
                                             </SheetDescription>
                                         </SheetHeader>
+                                        
+                                        <div className="grid gap-4 md:grid-cols-4 my-6">
+                                            <Card>
+                                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                                    <CardTitle className="text-sm font-medium">总订单数</CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <div className="text-2xl font-bold">{u.totalOrderCount}</div>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                                    <CardTitle className="text-sm font-medium">总营收</CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <div className="text-2xl font-bold">¥ {u.totalRevenue.toLocaleString()}</div>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                                    <CardTitle className="text-sm font-medium">员工总提成</CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <div className="text-2xl font-bold text-green-600">¥ {u.estimatedEmployeeCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                                    <CardTitle className="text-sm font-medium">推广员预计提成</CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <div className="text-2xl font-bold text-orange-600">¥ {u.estimatedPromoterCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                                                </CardContent>
+                                            </Card>
+                                        </div>
                                         
                                         <div className="mt-6 space-y-8">
                                             {/* 1. Volume Gradient Commission Section */}
@@ -749,10 +1026,12 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                                 </div>
                                             </div>
 
+                                            {/* 1.5 High Ticket Commission Section - REMOVED per user request */}
+
                                             {/* 2. Channel Promoter Commission Section */}
                                             <div>
                                                 <div className="flex items-center gap-2 mb-3">
-                                                    <h3 className="text-lg font-semibold">渠道推广员提成</h3>
+                                                    <h3 className="text-lg font-semibold">渠道推广提成</h3>
                                                     <span className="text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">
                                                         总计: ¥{u.channelCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                                                     </span>
@@ -778,18 +1057,18 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                                                                     <TableHead>推广员</TableHead>
                                                                                     <TableHead>单量</TableHead>
                                                                                     <TableHead>营收</TableHead>
-                                                    <TableHead>账号点数</TableHead>
-                                                    <TableHead>账号提成</TableHead>
-                                                </TableRow>
+                                                                                    <TableHead>账号点数</TableHead>
+                                                                                    <TableHead>账号提成</TableHead>
+                                                                                </TableRow>
                                                                             </TableHeader>
                                                                             <TableBody>
-                                                                                {c.promoters.filter(p => p.isPromoter).map((item, idx) => (
-                                                                                    <TableRow key={idx}>
-                                                                                        <TableCell>{item.name}</TableCell>
-                                                                                        <TableCell>{item.count}</TableCell>
-                                                                                        <TableCell>¥{item.revenue.toLocaleString()}</TableCell>
-                                                                                        <TableCell>{item.accountRate}%</TableCell>
-                                                                                        <TableCell>¥{item.accountCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                                                                                {c.promoters.filter(p => p.isPromoter).map(p => (
+                                                                                    <TableRow key={p.name}>
+                                                                                        <TableCell>{p.name}</TableCell>
+                                                                                        <TableCell>{p.count}</TableCell>
+                                                                                        <TableCell>¥{p.revenue.toLocaleString()}</TableCell>
+                                                                                        <TableCell>{p.accountRate}%</TableCell>
+                                                                                        <TableCell>¥{p.accountCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
                                                                                     </TableRow>
                                                                                 ))}
                                                                             </TableBody>
@@ -801,6 +1080,28 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                                                     );
                                                 })()}
                                             </div>
+
+                                            {/* 3. Retail High Ticket Orders Section */}
+                                            {u.highTicketCommission > 0 && (
+                                                <div>
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                        <h3 className="text-lg font-semibold">高客单提成 - 零售订单明细</h3>
+                                                        <span className="text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                                                            总计: ¥{u.highTicketCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                                        </span>
+                                                        <span className="text-sm text-muted-foreground bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-100">
+                                                            生效点数: {u.highTicketRate || 0}%
+                                                        </span>
+                                                    </div>
+                                                    <RetailOrderList 
+                                                        userId={u.userId}
+                                                        period={period}
+                                                        start={start}
+                                                        end={end}
+                                                        highTicketRate={u.highTicketRate || 0}
+                                                    />
+                                                </div>
+                                            )}
                                         </div>
                                     </SheetContent>
                                 </Sheet>

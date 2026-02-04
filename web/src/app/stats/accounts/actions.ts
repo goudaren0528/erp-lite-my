@@ -2,12 +2,128 @@
 
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+
+interface ProductVariant {
+    name: string;
+    priceRules: Record<string, number>;
+}
+
+import { startOfMonth, endOfMonth, parse, startOfDay, endOfDay } from "date-fns";
+
+export async function syncAllOrdersStandardPrice(params: { type: 'all' | 'month' | 'custom', month?: string, start?: string, end?: string }) {
+    try {
+        const currentUser = await getCurrentUser();
+        if (currentUser?.role !== 'ADMIN' && !currentUser?.permissions?.includes('manage_orders')) {
+            throw new Error("无权限执行此操作");
+        }
+
+        // 1. Load products
+        const products = await prisma.product.findMany();
+        
+        const productMap = new Map<string, any>();
+        const productNameMap = new Map<string, any>();
+
+        products.forEach(p => {
+            try {
+                const variants = JSON.parse(p.variants) as ProductVariant[];
+                const productData = { ...p, parsedVariants: variants };
+                productMap.set(p.id, productData);
+                productNameMap.set(p.name, productData);
+            } catch (e) {
+                console.error(`Failed to parse variants for product ${p.name}`);
+            }
+        });
+
+        // 2. Load orders
+        let whereOrder: any = {};
+        
+        if (params.type === 'month' && params.month) {
+            try {
+                // Parse month string (e.g. "2023-10")
+                const date = parse(params.month, 'yyyy-MM', new Date());
+                const start = startOfMonth(date);
+                const end = endOfMonth(date);
+                
+                whereOrder.createdAt = {
+                    gte: start,
+                    lte: end
+                };
+            } catch (e) {
+                console.error("Invalid month format:", params.month);
+                return { success: false, message: "无效的月份格式" };
+            }
+        } else if (params.type === 'custom' && params.start) {
+            try {
+                const start = startOfDay(new Date(params.start));
+                const end = params.end ? endOfDay(new Date(params.end)) : endOfDay(new Date(params.start));
+                
+                whereOrder.createdAt = {
+                    gte: start,
+                    lte: end
+                };
+            } catch (e) {
+                console.error("Invalid date range:", params.start, params.end);
+                return { success: false, message: "无效的日期范围" };
+            }
+        }
+        // If type is 'all', whereOrder remains empty {}
+
+        const orders = await prisma.order.findMany({
+            where: whereOrder,
+            select: {
+                id: true,
+                productId: true,
+                productName: true,
+                variantName: true,
+                duration: true,
+                standardPrice: true
+            }
+        });
+
+        let updatedCount = 0;
+
+        // 3. Update orders
+        for (const order of orders) {
+            let product = order.productId ? productMap.get(order.productId) : null;
+            if (!product) {
+                product = productNameMap.get(order.productName);
+            }
+
+            if (!product) continue;
+
+            const variant = product.parsedVariants.find((v: ProductVariant) => v.name === order.variantName);
+            if (!variant || !variant.priceRules) continue;
+
+            const newStandardPrice = variant.priceRules[String(order.duration)] || 0;
+
+            // Update if price differs (allowing small float diff)
+            if (Math.abs((order.standardPrice || 0) - newStandardPrice) > 0.01) {
+                await prisma.order.update({
+                    where: { id: order.id },
+                    data: { standardPrice: newStandardPrice }
+                });
+                updatedCount++;
+            }
+        }
+
+        revalidatePath('/stats/accounts');
+        revalidatePath('/stats/promoters');
+        
+        return { success: true, message: `已成功同步 ${updatedCount} 个订单的标准价` };
+    } catch (error) {
+        console.error("Sync error:", error);
+        return { success: false, message: "同步失败: " + (error instanceof Error ? error.message : String(error)) };
+    }
+}
+
 import { calculateOrderRevenue } from "@/lib/utils";
 
 export async function fetchAccountOrders(params: {
     userId: string;
     channelName?: string;
     promoterName?: string;
+    isRetail?: boolean;
     period: string;
     start?: string;
     end?: string;
@@ -19,7 +135,7 @@ export async function fetchAccountOrders(params: {
         throw new Error("Unauthorized");
     }
 
-    const { userId, channelName: rawChannelName, promoterName: rawPromoterName, period, start, end, page, pageSize } = params;
+    const { userId, channelName: rawChannelName, promoterName: rawPromoterName, isRetail, period, start, end, page, pageSize } = params;
 
     const channelName = rawChannelName?.trim();
     const promoterName = rawPromoterName?.trim();
@@ -93,6 +209,31 @@ export async function fetchAccountOrders(params: {
         where.sourceContact = promoterName;
     }
 
+    // Retail Filter: Exclude all known promoters AND non-retail sources
+    if (isRetail) {
+        const allPromoters = await prisma.promoter.findMany({ select: { id: true, name: true } });
+        const promoterNames = allPromoters.map(p => p.name);
+        const promoterIds = allPromoters.map(p => p.id);
+        
+        where.AND = [
+            {
+                OR: [
+                    { promoterId: null },
+                    { promoterId: { notIn: promoterIds } }
+                ]
+            },
+            {
+                sourceContact: { notIn: promoterNames }
+            },
+            {
+                source: { notIn: ['PEER', 'PART_TIME_AGENT'] }
+            },
+            {
+                channelId: null
+            }
+        ];
+    }
+
     // Apply Date Filter
     if (dateRange) {
         if (settlementByCompleted) {
@@ -106,7 +247,10 @@ export async function fetchAccountOrders(params: {
     // Fetch Orders
     const queryOptions: any = {
         where,
-        include: { extensions: true },
+        include: { 
+            extensions: true,
+            channel: { select: { name: true } }
+        },
         orderBy: { createdAt: 'desc' },
     };
 

@@ -13,6 +13,7 @@ type StatsOrder = {
   productName: string;
   variantName: string;
   rentPrice: number;
+  standardPrice: number | null;
   insurancePrice: number;
   overdueFee: number | null;
   extensions: { price: number }[];
@@ -134,11 +135,14 @@ export default async function PromoterStatsPage(props: PageProps) {
       revenue: number, 
       refundedAmount: number, 
       channelName?: string,
+      highTicketCommission: number,
       orders: {
         orderNo: string;
         productName: string;
         variantName: string;
         rentPrice: number;
+        standardPrice: number;
+        highTicketCommission: number;
         insurancePrice: number;
         overdueFee: number | null;
         extensionsTotal: number;
@@ -174,6 +178,13 @@ export default async function PromoterStatsPage(props: PageProps) {
       const stats = userStatsMap[creatorId];
       const revenue = calculateOrderRevenue(order);
       const extensionsTotal = order.extensions?.reduce((acc, ext) => acc + (ext.price || 0), 0) || 0;
+      
+      const user = userMap.get(creatorId);
+      const accountGroup = user?.accountGroup;
+      const highTicketRate = accountGroup?.highTicketRate || 0;
+      const standardPrice = order.standardPrice || 0;
+      const highTicketBase = Math.max(0, (order.rentPrice || 0) - standardPrice);
+      const highTicketCommission = highTicketBase * (highTicketRate / 100);
 
       // Determine Promoter and Channel using ID priority
       const promoterId = order.promoterId;
@@ -234,6 +245,7 @@ export default async function PromoterStatsPage(props: PageProps) {
               revenue: 0,
               refundedAmount: 0,
               channelName: channelName || undefined,
+              highTicketCommission: 0,
               orders: []
           };
       }
@@ -244,6 +256,8 @@ export default async function PromoterStatsPage(props: PageProps) {
           productName: order.productName,
           variantName: order.variantName,
           rentPrice: order.rentPrice,
+          standardPrice,
+          highTicketCommission,
           insurancePrice: order.insurancePrice,
           overdueFee: order.overdueFee,
           extensionsTotal,
@@ -258,6 +272,7 @@ export default async function PromoterStatsPage(props: PageProps) {
       } else {
           promoterStats.count++;
           promoterStats.revenue += revenue;
+          promoterStats.highTicketCommission += highTicketCommission;
       }
   });
 
@@ -273,6 +288,7 @@ export default async function PromoterStatsPage(props: PageProps) {
       accountGroupRules: any[];
       accountGroupOrderCount: number;
       commission: number;
+      highTicketCommission: number;
       details: {
         userId: string;
         userName: string;
@@ -283,6 +299,7 @@ export default async function PromoterStatsPage(props: PageProps) {
         accountEffectivePercentage: number;
         channelCostPercentage: number;
         commission: number;
+        highTicketCommission: number;
         accountGroupRules: any[];
         channelRules: any[];
       }[];
@@ -291,6 +308,8 @@ export default async function PromoterStatsPage(props: PageProps) {
         productName: string;
         variantName: string;
         rentPrice: number;
+        standardPrice: number;
+        highTicketCommission: number;
         insurancePrice: number;
         overdueFee: number | null;
         extensionsTotal: number;
@@ -347,6 +366,8 @@ export default async function PromoterStatsPage(props: PageProps) {
                   accountGroupRules: [],
                   accountGroupOrderCount: 0,
                   commission: 0,
+                  highTicketCommission: 0,
+                  highTicketRates: new Set(),
                   details: [],
                   orders: []
               });
@@ -356,6 +377,10 @@ export default async function PromoterStatsPage(props: PageProps) {
           agg.totalRevenue += p.revenue;
           agg.refundedAmount += p.refundedAmount;
           agg.commission += commission;
+          agg.highTicketCommission += p.highTicketCommission;
+          if (accountGroup?.highTicketRate) {
+            agg.highTicketRates.add(accountGroup.highTicketRate);
+          }
           agg.accountEffectivePercentageSum += accountEffectivePercentage * p.count;
           agg.accountEffectivePercentageCount += p.count;
           if (p.count >= agg.accountGroupOrderCount) {
@@ -372,6 +397,7 @@ export default async function PromoterStatsPage(props: PageProps) {
               accountEffectivePercentage,
               channelCostPercentage: promoterRate, // Renaming for consistency, but this is Promoter Rate
               commission,
+              highTicketCommission: p.highTicketCommission,
               accountGroupRules: accountGroup?.rules || [],
               channelRules: specificRules // Store the specific promoter rules here
           });
@@ -402,6 +428,7 @@ export default async function PromoterStatsPage(props: PageProps) {
 
         return {
           ...p,
+          highTicketRate: p.highTicketRates.size > 0 ? Math.max(...Array.from(p.highTicketRates)) : 0,
           accountEffectivePercentage: p.accountEffectivePercentageCount
             ? p.accountEffectivePercentageSum / p.accountEffectivePercentageCount
             : 0,

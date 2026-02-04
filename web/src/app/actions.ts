@@ -1,7 +1,7 @@
 'use server'
 
 import { prisma } from "@/lib/db";
-import { OrderStatus, User, Promoter } from "@/types";
+import { OrderStatus, User, Promoter, ProductVariant } from "@/types";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -37,6 +37,16 @@ export async function createOrder(formData: FormData) {
           }
       }
 
+      // Calculate standard price
+      let standardPrice = 0;
+      const productId = rawData.productId as string;
+      const variantName = rawData.variantName as string;
+      const duration = Number(rawData.duration);
+
+      if (productId && variantName && duration > 0) {
+          standardPrice = await getStandardPrice(productId, variantName, duration);
+      }
+
       const order = await prisma.order.create({
         data: {
             orderNo,
@@ -62,6 +72,7 @@ export async function createOrder(formData: FormData) {
             insurancePrice: Number(rawData.insurancePrice) || 0,
             overdueFee: 0,
             totalAmount: Number(rawData.totalAmount) || 0,
+            standardPrice,
             
             address: (rawData.address as string) || '',
             recipientName: (rawData.recipientName as string) || null,
@@ -458,6 +469,25 @@ export async function deletePromoter(promoterId: string) {
     }
 }
 
+async function getStandardPrice(productId: string, variantName: string, duration: number): Promise<number> {
+    try {
+        const product = await prisma.product.findUnique({
+            where: { id: productId }
+        });
+        if (!product || !product.variants) return 0;
+        
+        const variants = JSON.parse(product.variants) as ProductVariant[];
+        const variant = variants.find(v => v.name === variantName);
+        if (!variant || !variant.priceRules) return 0;
+        
+        const price = variant.priceRules[String(duration)];
+        return price || 0;
+    } catch (e) {
+        console.error("Error calculating standard price:", e);
+        return 0;
+    }
+}
+
 const STATUS_LABELS: Record<string, string> = {
   PENDING_REVIEW: '待审核',
   PENDING_SHIPMENT: '待发货',
@@ -553,6 +583,16 @@ export async function updateOrder(orderId: string, formData: FormData) {
 
         const totalAmount = Number(rawData.totalAmount) || 0
 
+        // Calculate standard price
+        let standardPrice = 0;
+        const productId = rawData.productId as string;
+        const variantName = rawData.variantName as string;
+        const duration = Number(rawData.duration);
+
+        if (productId && variantName && duration > 0) {
+            standardPrice = await getStandardPrice(productId, variantName, duration);
+        }
+
         await prisma.order.update({
             where: { id: orderId },
             data: {
@@ -572,6 +612,7 @@ export async function updateOrder(orderId: string, formData: FormData) {
                 
                 duration: Number(rawData.duration) || 0,
                 rentPrice: Number(rawData.rentPrice) || 0,
+                standardPrice,
                 deposit: Number(rawData.deposit) || 0,
                 insurancePrice: Number(rawData.insurancePrice) || 0,
                 overdueFee: Number(rawData.overdueFee) || 0,

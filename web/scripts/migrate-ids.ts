@@ -201,32 +201,6 @@ async function main() {
     }
 
     console.log(`Migration completed. Updated ${updatedCount} orders.`);
-
-    // 3. Diagnostic Report for Unmatched Orders
-    console.log('\n--- Unmatched Orders Report ---');
-    const unmatchedOrders = await prisma.order.findMany({
-        where: { promoterId: null },
-        select: { sourceContact: true, orderNo: true }
-    });
-
-    const contactCounts: Record<string, number> = {};
-    unmatchedOrders.forEach(o => {
-        const contact = o.sourceContact ? o.sourceContact.trim() : 'NULL';
-        contactCounts[contact] = (contactCounts[contact] || 0) + 1;
-    });
-
-    const sortedContacts = Object.entries(contactCounts)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 20);
-
-    console.log(`Remaining orders with NULL promoterId: ${unmatchedOrders.length}`);
-    if (unmatchedOrders.length > 0) {
-        console.log('Top 20 unmatched Source Contacts:');
-        sortedContacts.forEach(([contact, count]) => {
-            console.log(`  "${contact}": ${count} orders`);
-        });
-        console.log('-------------------------------\n');
-    }
 }
 
 main()

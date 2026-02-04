@@ -4,10 +4,11 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { format, getYear, getMonth } from "date-fns"
 import * as XLSX from "xlsx"
-import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
+import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Loader2, RefreshCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { syncAllOrdersStandardPrice } from "../accounts/actions";
 import {
   Popover,
   PopoverContent,
@@ -73,6 +74,8 @@ interface PromoterStatsClientProps {
     channelEffectivePercentage: number
     channelRules: Rule[]
     commission: number
+    highTicketCommission: number
+    highTicketRate?: number
     netIncome: number
     details: {
         userId: string
@@ -84,23 +87,26 @@ interface PromoterStatsClientProps {
         accountEffectivePercentage: number
         channelCostPercentage: number
         commission: number
+        highTicketCommission: number
         accountGroupRules: Rule[]
         channelRules: Rule[]
     }[]
     orders: {
         orderNo: string
-        productName: string
-        variantName: string
-        rentPrice: number
-        insurancePrice: number
-        overdueFee: number | null
-        extensionsTotal: number
-        orderRevenue: number
-        refundAmount: number
-        status: string
-        orderDate: string
-        accountEffectivePercentage: number
-        channelCostPercentage: number
+        productName: string;
+        variantName: string;
+        rentPrice: number;
+        standardPrice: number;
+        highTicketCommission: number;
+        insurancePrice: number;
+        overdueFee: number | null;
+        extensionsTotal: number;
+        orderRevenue: number;
+        refundAmount: number;
+        status: string;
+        orderDate: string;
+        accountEffectivePercentage: number;
+        channelCostPercentage: number;
         accountGroupRules: Rule[]
         channelRules: Rule[]
     }[]
@@ -276,6 +282,8 @@ function OrderDetailsTable({ orders }: { orders: PromoterStatsClientProps["promo
             <TableHead>订单日期</TableHead>
             <TableHead>订单商品</TableHead>
             <TableHead>租金</TableHead>
+            <TableHead>标准价</TableHead>
+            <TableHead>高客单提成</TableHead>
             <TableHead>保险</TableHead>
             <TableHead>续租</TableHead>
             <TableHead>逾期</TableHead>
@@ -293,6 +301,8 @@ function OrderDetailsTable({ orders }: { orders: PromoterStatsClientProps["promo
                 <div className="text-muted-foreground text-sm">{orderItem.variantName}</div>
               </TableCell>
               <TableCell>¥ {orderItem.rentPrice.toLocaleString()}</TableCell>
+              <TableCell>¥ {orderItem.standardPrice?.toLocaleString() || '-'}</TableCell>
+              <TableCell>¥ {orderItem.highTicketCommission?.toLocaleString() || 0}</TableCell>
               <TableCell>¥ {orderItem.insurancePrice.toLocaleString()}</TableCell>
               <TableCell>¥ {orderItem.extensionsTotal.toLocaleString()}</TableCell>
               <TableCell>¥ {((orderItem.overdueFee || 0)).toLocaleString()}</TableCell>
@@ -302,7 +312,7 @@ function OrderDetailsTable({ orders }: { orders: PromoterStatsClientProps["promo
           ))}
           {orders.length === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+              <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                 暂无数据
               </TableCell>
             </TableRow>
@@ -413,7 +423,9 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
   const totalOrdersCount = filteredStats.reduce((acc, curr) => acc + curr.orderCount, 0);
   const totalRevenue = filteredStats.reduce((acc, curr) => acc + curr.totalRevenue, 0);
   const totalRefunded = filteredStats.reduce((acc, curr) => acc + curr.refundedAmount, 0);
-  const totalCommission = filteredStats.reduce((acc, curr) => acc + curr.commission, 0);
+  const totalOrderCommission = filteredStats.reduce((acc, curr) => acc + curr.commission, 0);
+  const totalHighTicketCommission = filteredStats.reduce((acc, curr) => acc + curr.highTicketCommission, 0);
+  const totalCommission = totalOrderCommission + totalHighTicketCommission;
   const totalNetIncome = totalRevenue - totalCommission;
 
   const [currentPage, setCurrentPage] = React.useState(1)
@@ -465,6 +477,36 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
      });
   };
 
+  // Handle Sync
+  const [syncOpen, setSyncOpen] = React.useState(false);
+  const [syncType, setSyncType] = React.useState<'all' | 'month' | 'custom'>('month');
+  const [syncMonth, setSyncMonth] = React.useState<Date>(new Date());
+  const [syncDateRange, setSyncDateRange] = React.useState<DateRange | undefined>(undefined);
+  
+  const handleSync = () => {
+      startTransition(async () => {
+          let params: any = { type: syncType };
+          
+          if (syncType === 'month') {
+              params.month = format(syncMonth, 'yyyy-MM');
+          } else if (syncType === 'custom' && syncDateRange?.from) {
+              params.start = format(syncDateRange.from, 'yyyy-MM-dd');
+              if (syncDateRange.to) {
+                  params.end = format(syncDateRange.to, 'yyyy-MM-dd');
+              }
+          }
+          
+          const res = await syncAllOrdersStandardPrice(params);
+          if (res.success) {
+              alert(res.message);
+              setSyncOpen(false);
+              router.refresh();
+          } else {
+              alert(res.message);
+          }
+      });
+  };
+
   // Export Promoter Stats (Summary)
   const handleExportPromoters = () => {
     const rows: any[] = [];
@@ -475,8 +517,10 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
             "总订单数": p.orderCount,
             "总营收": p.totalRevenue,
             "已退款金额": p.refundedAmount,
-            "预计提成": p.commission,
-            "提成后收入": p.netIncome
+            "订单提成": p.commission,
+            "高客单提成": p.highTicketCommission,
+            "预计总提成": p.commission + p.highTicketCommission,
+            "提成后收入": p.totalRevenue - (p.commission + p.highTicketCommission)
         });
     });
 
@@ -494,6 +538,8 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
         "商品": orderItem.productName,
         "规格": orderItem.variantName,
         "租金": orderItem.rentPrice,
+        "标准价": orderItem.standardPrice,
+        "高客单提成": orderItem.highTicketCommission,
         "保险": orderItem.insurancePrice,
         "续租": orderItem.extensionsTotal,
         "逾期": orderItem.overdueFee || 0,
@@ -578,6 +624,101 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
                     </div>
                 )}
 
+                <Popover open={syncOpen} onOpenChange={setSyncOpen}>
+                    <PopoverTrigger asChild>
+                        <Button variant="outline" disabled={isPending}>
+                            <RefreshCcw className={cn("mr-2 h-4 w-4", isPending && "animate-spin")} />
+                            同步标准价
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-96">
+                        <div className="grid gap-4">
+                            <div className="space-y-2">
+                                <h4 className="font-medium leading-none">同步标准价</h4>
+                                <p className="text-sm text-muted-foreground">
+                                    选择要同步的订单范围（按创建时间）。
+                                </p>
+                            </div>
+                            <div className="grid gap-4">
+                                <div className="grid gap-2">
+                                    <label className="text-sm font-medium">同步范围</label>
+                                    <Tabs value={syncType} onValueChange={(v: any) => setSyncType(v)} className="w-full">
+                                        <TabsList className="grid w-full grid-cols-3">
+                                            <TabsTrigger value="month">按月份</TabsTrigger>
+                                            <TabsTrigger value="custom">自定义</TabsTrigger>
+                                            <TabsTrigger value="all">全部</TabsTrigger>
+                                        </TabsList>
+                                    </Tabs>
+                                </div>
+                                
+                                {syncType === 'month' && (
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-sm font-medium w-16">选择月份</label>
+                                        <MonthPicker 
+                                            date={syncMonth}
+                                            onSelect={setSyncMonth}
+                                        />
+                                    </div>
+                                )}
+
+                                {syncType === 'custom' && (
+                                    <div className="grid gap-2">
+                                        <label className="text-sm font-medium">选择日期范围</label>
+                                        <div className={cn("grid gap-2")}>
+                                            <Popover>
+                                                <PopoverTrigger asChild>
+                                                    <Button
+                                                        id="sync-date"
+                                                        variant={"outline"}
+                                                        className={cn(
+                                                            "w-full justify-start text-left font-normal",
+                                                            !syncDateRange && "text-muted-foreground"
+                                                        )}
+                                                    >
+                                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                                        {syncDateRange?.from ? (
+                                                            syncDateRange.to ? (
+                                                                <>
+                                                                    {format(syncDateRange.from, "yyyy-MM-dd")} -{` `}
+                                                                    {format(syncDateRange.to, "yyyy-MM-dd")}
+                                                                </>
+                                                            ) : (
+                                                                format(syncDateRange.from, "yyyy-MM-dd")
+                                                            )
+                                                        ) : (
+                                                            <span>选择日期范围</span>
+                                                        )}
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-auto p-0" align="start">
+                                                    <Calendar
+                                                        initialFocus
+                                                        mode="range"
+                                                        defaultMonth={syncDateRange?.from}
+                                                        selected={syncDateRange}
+                                                        onSelect={setSyncDateRange}
+                                                        numberOfMonths={2}
+                                                    />
+                                                </PopoverContent>
+                                            </Popover>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {syncType === 'all' && (
+                                    <div className="rounded-md bg-yellow-50 p-3 text-sm text-yellow-800">
+                                        注意：同步全部订单可能需要较长时间，请耐心等待。
+                                    </div>
+                                )}
+
+                                <Button onClick={handleSync} disabled={isPending}>
+                                    {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    开始同步
+                                </Button>
+                            </div>
+                        </div>
+                    </PopoverContent>
+                </Popover>
                 <Button variant="outline" onClick={handleExportPromoters}>
                     <Download className="mr-2 h-4 w-4" />
                     导出报表
@@ -618,7 +759,7 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">总订单数</CardTitle>
@@ -648,11 +789,29 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">单量提成</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">¥ {totalOrderCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            <p className="text-xs text-muted-foreground">基于单量阶梯规则</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">高客单提成</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">¥ {totalHighTicketCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            <p className="text-xs text-muted-foreground">基于标准价溢价计算</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">预计总提成</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">¥ {totalCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-            <p className="text-xs text-muted-foreground">根据当前配置估算</p>
+            <p className="text-xs text-muted-foreground">单量提成 + 高客单提成</p>
           </CardContent>
         </Card>
         <Card>
@@ -680,7 +839,9 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
                 <TableHead>总营收</TableHead>
                 <TableHead>已退款金额</TableHead>
                 <TableHead>单量提成点数</TableHead>
-                <TableHead>预计提成</TableHead>
+                <TableHead>单量提成</TableHead>
+                <TableHead>高客单提成</TableHead>
+                <TableHead>预计总提成</TableHead>
                 <TableHead className="w-[100px]"></TableHead>
               </TableRow>
             </TableHeader>
@@ -708,7 +869,18 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
                       <RuleHoverCard details={stat.details} />
                     </div>
                   </TableCell>
-                  <TableCell className="text-green-600 font-medium">¥ {stat.commission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                  <TableCell className="font-medium">
+                    ¥ {stat.commission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    <div>¥ {stat.highTicketCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    {stat.highTicketRate !== undefined && stat.highTicketRate > 0 && (
+                        <div className="text-xs text-muted-foreground mt-1">
+                            (生效点数: {stat.highTicketRate}%)
+                        </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-green-600 font-medium">¥ {(stat.commission + stat.highTicketCommission).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
                   <TableCell>
                     <Sheet>
                         <SheetTrigger asChild>
@@ -754,10 +926,18 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
                                 </Card>
                                 <Card>
                                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                        <CardTitle className="text-sm font-medium">预计提成</CardTitle>
+                                        <CardTitle className="text-sm font-medium">高客单提成</CardTitle>
                                     </CardHeader>
                                     <CardContent>
-                                        <div className="text-2xl font-bold text-green-600">¥ {stat.commission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                                        <div className="text-2xl font-bold text-green-600">¥ {stat.highTicketCommission.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                        <CardTitle className="text-sm font-medium">预计总提成</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold text-green-600">¥ {(stat.commission + stat.highTicketCommission).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                                     </CardContent>
                                 </Card>
                             </div>
@@ -772,7 +952,7 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
               ))}
               {promoterStats.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                     暂无数据
                   </TableCell>
                 </TableRow>

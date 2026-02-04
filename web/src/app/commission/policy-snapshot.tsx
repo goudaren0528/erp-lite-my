@@ -20,7 +20,7 @@ interface Rule {
 }
 
 interface PolicySnapshotProps {
-  accountGroups: { name: string; rules: Rule[] }[];
+  accountGroups: { name: string; rules: Rule[]; highTicketRate?: number }[];
   channelConfigs: { name: string; rules: Rule[] }[];
 }
 
@@ -38,6 +38,9 @@ export function PolicySnapshot({ accountGroups, channelConfigs }: PolicySnapshot
       text = "【账号组提成政策】\n\n";
       accountGroups.forEach(group => {
         text += `=== ${group.name} ===\n`;
+        if (group.highTicketRate && group.highTicketRate > 0) {
+            text += `高客单提成: ${group.highTicketRate}%\n`;
+        }
         group.rules.forEach(rule => {
           text += `${formatRule(rule)}: ${rule.percentage}%\n`;
         });
@@ -61,6 +64,10 @@ export function PolicySnapshot({ accountGroups, channelConfigs }: PolicySnapshot
   const copySingleToClipboard = (name: string, rules: Rule[], titlePrefix: string) => {
     let text = `${titlePrefix}\n\n`;
     text += `=== ${name} ===\n`;
+    // Note: Single copy doesn't easily access highTicketRate if not passed, 
+    // but for now we keep it simple or we can add it if we change the signature.
+    // However, the caller passes specific args. Let's leave single copy as is for now 
+    // or update signature if needed. The main "Copy All" is more important.
     rules.forEach(rule => {
       text += `${formatRule(rule)}: ${rule.percentage}%\n`;
     });
@@ -106,6 +113,11 @@ export function PolicySnapshot({ accountGroups, channelConfigs }: PolicySnapshot
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
+                  {group.highTicketRate && group.highTicketRate > 0 ? (
+                    <div className="mb-2 text-sm font-medium text-blue-600">
+                        高客单提成: {group.highTicketRate}%
+                    </div>
+                  ) : null}
                   <Table>
                     <TableHeader>
                       <TableRow>

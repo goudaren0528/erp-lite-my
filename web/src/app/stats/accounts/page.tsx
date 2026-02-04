@@ -117,7 +117,8 @@ export default async function StatsPage(props: PageProps) {
             o."sourceContact" as "promoterName",
             SUM(CASE WHEN o.status != 'CLOSED' THEN 1 ELSE 0 END) as "orderCount",
             SUM(CASE WHEN o.status != 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as "totalRevenue",
-            SUM(CASE WHEN o.status = 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as "refundedAmount"
+            SUM(CASE WHEN o.status = 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as "refundedAmount",
+            SUM(CASE WHEN o.status != 'CLOSED' AND o."rentPrice" > o."standardPrice" THEN (o."rentPrice" - o."standardPrice") ELSE 0 END) as "highTicketBase"
         FROM "Order" o
         LEFT JOIN ExtensionSums es ON o.id = es."orderId"
         LEFT JOIN "User" u ON o."creatorId" = u.id
@@ -167,15 +168,18 @@ export default async function StatsPage(props: PageProps) {
       totalOrderCount: number,
       totalRevenue: number,
       refundedAmount: number,
+      highTicketBase: number,
       channels: Map<string, {
         channelId: string,
         channelName: string,
         orderCount: number,
         revenue: number,
+        highTicketBase: number,
         promoters: Map<string, {
             name: string,
             count: number,
-            revenue: number
+            revenue: number,
+            highTicketBase: number
         }>
       }>,
       orders: any[]
@@ -191,6 +195,7 @@ export default async function StatsPage(props: PageProps) {
       const orderCount = Number(stat.orderCount || 0);
       const revenue = Number(stat.totalRevenue || 0);
       const refund = Number(stat.refundedAmount || 0);
+      const highTicketBase = Number(stat.highTicketBase || 0);
 
       const user = userMap.get(creatorId);
       
@@ -208,6 +213,7 @@ export default async function StatsPage(props: PageProps) {
                 totalOrderCount: 0,
                 totalRevenue: 0,
               refundedAmount: 0,
+              highTicketBase: 0,
               channels: new Map(),
               orders: [] // Empty by default (Server Side Pagination)
           });
@@ -221,6 +227,7 @@ export default async function StatsPage(props: PageProps) {
       if (orderCount > 0) {
           userStats.totalOrderCount += orderCount;
           userStats.totalRevenue += revenue;
+          userStats.highTicketBase += highTicketBase;
 
           let channelId = stat.channelId;
           const pId = stat.promoterId;
@@ -254,12 +261,14 @@ export default async function StatsPage(props: PageProps) {
                   channelName: safeChannelName,
                   orderCount: 0,
                   revenue: 0,
+                  highTicketBase: 0,
                   promoters: new Map()
               });
           }
           const channelStats = userStats.channels.get(safeChannelId)!;
           channelStats.orderCount += orderCount;
           channelStats.revenue += revenue;
+          channelStats.highTicketBase += highTicketBase;
 
           // Use ID-based name if available to ensure consistency even if sourceContact was old name
           const displayPromoterName = (pId && promoterIdMap.has(pId)) 
@@ -267,11 +276,12 @@ export default async function StatsPage(props: PageProps) {
               : promoterName;
 
           if (!channelStats.promoters.has(displayPromoterName)) {
-              channelStats.promoters.set(displayPromoterName, { name: displayPromoterName, count: 0, revenue: 0 });
+              channelStats.promoters.set(displayPromoterName, { name: displayPromoterName, count: 0, revenue: 0, highTicketBase: 0 });
           }
           const promoterStats = channelStats.promoters.get(displayPromoterName)!;
           promoterStats.count += orderCount;
           promoterStats.revenue += revenue;
+          promoterStats.highTicketBase += highTicketBase;
       }
   });
 
@@ -285,7 +295,9 @@ export default async function StatsPage(props: PageProps) {
       
       // Get rules from one of the users in the group (assuming consistent rules per group)
       // Actually we should look up the group definition from DB, but we have it via users include
-      const groupRules = users.find(u => u.accountGroupId === group.id)?.accountGroup?.rules || [];
+      const groupData = users.find(u => u.accountGroupId === group.id)?.accountGroup;
+      const groupRules = groupData?.rules || [];
+      const highTicketRate = groupData?.highTicketRate || 0;
       
       const defaultUserRules = groupRules.filter((r: any) => r.target === 'USER' && !r.channelConfigId);
       const channelUserRulesMap = new Map<string, any[]>();
@@ -310,6 +322,7 @@ export default async function StatsPage(props: PageProps) {
           let totalChannelCommission = 0;
           let totalPeerCommission = 0;
           let totalAgentCommission = 0;
+          let totalHighTicketCommission = 0;
 
           const effectiveBaseRate = getPercentage(uStats.totalOrderCount, defaultUserRules);
 
@@ -325,6 +338,7 @@ export default async function StatsPage(props: PageProps) {
               let channelPromoterCommission = 0;
               let channelVolumeGradientCommission = 0;
               let channelSubordinateCommission = 0;
+              let channelHighTicketCommission = 0;
 
               const promotersDetails = Array.from(cStats.promoters.values()).map(pStats => {
                   const promoterRules = cStats.channelId !== 'default' && channelPromoterRulesMap.has(cStats.channelId)
@@ -341,9 +355,17 @@ export default async function StatsPage(props: PageProps) {
                   const employeeRateForOrder = isPromoter ? channelEffectiveRate : effectiveBaseRate;
                   const pEmployeeCommission = pStats.revenue * (employeeRateForOrder / 100);
                   
+                  // High Ticket Commission Calculation
+                  // Only for Retail (default channel) orders
+                  let pHighTicketCommission = 0;
+                  if (cStats.channelId === 'default' && !isPromoter) {
+                      pHighTicketCommission = pStats.highTicketBase * (highTicketRate / 100);
+                  }
+                  channelHighTicketCommission += pHighTicketCommission;
+
                   // Volume Gradient applies to Direct/Non-Promoter orders
                   // Channel Commission applies to Promoter orders
-                  // Total Employee Commission = Volume Gradient + Channel Commission
+                  // Total Employee Commission = Volume Gradient + Channel Commission + High Ticket Commission
                   
                   if (isPromoter) {
                       channelSubordinateCommission += pEmployeeCommission;
@@ -357,17 +379,19 @@ export default async function StatsPage(props: PageProps) {
                       commission: pCommission,
                       isPromoter,
                       accountRate: employeeRateForOrder,
-                      accountCommission: pEmployeeCommission
+                      accountCommission: pEmployeeCommission,
+                      highTicketCommission: pHighTicketCommission
                   };
             });
             
             // Recalculate employeeCommission based on the sum of its parts to ensure strict equality
             // and avoid any floating point discrepancies or logic mismatch
-            const calculatedEmployeeCommission = channelVolumeGradientCommission + channelSubordinateCommission;
+            const calculatedEmployeeCommission = channelVolumeGradientCommission + channelSubordinateCommission + channelHighTicketCommission;
 
             totalPromoterCommission += channelPromoterCommission;
             totalVolumeGradientCommission += channelVolumeGradientCommission;
             totalChannelCommission += channelSubordinateCommission;
+            totalHighTicketCommission += channelHighTicketCommission;
             
             // Split Channel Commission into Peer and Agent
             if (channelSubordinateCommission > 0) {
@@ -386,6 +410,7 @@ export default async function StatsPage(props: PageProps) {
                 employeeCommission: calculatedEmployeeCommission,
                 volumeGradientCommission: channelVolumeGradientCommission,
                 subordinateCommission: channelSubordinateCommission,
+                highTicketCommission: channelHighTicketCommission,
                 promoters: promotersDetails
             };
         });
@@ -393,6 +418,7 @@ export default async function StatsPage(props: PageProps) {
           allStats.push({
               accountGroupId: group.id,
               accountGroupName: group.name,
+              highTicketRate,
               userId: uStats.user.id,
               userName: uStats.user.name || uStats.user.username,
               totalOrderCount: uStats.totalOrderCount,
@@ -403,6 +429,7 @@ export default async function StatsPage(props: PageProps) {
               channelCommission: totalChannelCommission,
               peerCommission: totalPeerCommission,
               agentCommission: totalAgentCommission,
+              highTicketCommission: totalHighTicketCommission,
               estimatedPromoterCommission: totalPromoterCommission,
               effectiveBaseRate,
               defaultUserRules,
