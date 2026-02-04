@@ -289,6 +289,7 @@ export default async function PromoterStatsPage(props: PageProps) {
       accountGroupOrderCount: number;
       commission: number;
       highTicketCommission: number;
+      highTicketRates: Set<number>;
       details: {
         userId: string;
         userName: string;
