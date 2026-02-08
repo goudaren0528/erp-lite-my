@@ -48,7 +48,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.erp-lite-web.rule=Host(`${DOMAIN_NAME}`)"
-      - "traefik.http.routers.erp-lite-web.entrypoints=websecure"
+      - "traefik.http.routers.erp-lite-web.entrypoints=web,websecure"
       - "traefik.http.routers.erp-lite-web.tls.certresolver=letsencrypt"
       - "traefik.http.services.erp-lite-web.loadbalancer.server.port=3000"
 
