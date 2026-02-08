@@ -43,8 +43,18 @@ services:
       - ./data:/app/data
     networks:
       - erp-lite-network
+      - dokploy-network
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.erp-lite-web.rule=Host(`${DOMAIN_NAME}`)"
+      - "traefik.http.routers.erp-lite-web.entrypoints=websecure"
+      - "traefik.http.routers.erp-lite-web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.erp-lite-web.loadbalancer.server.port=3000"
 
 networks:
+  dokploy-network:
+    external: true
   erp-lite-network:
     name: erp-lite-network
     driver: bridge
