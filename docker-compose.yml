@@ -38,15 +38,13 @@ services:
       - ./uploads:/app/public/uploads
       # Persist SQLite database
       - ./data:/app/data
-    networks:
-      - erp-network
 
 networks:
-  erp-network:
+  default:
     driver: bridge
     ipam:
       driver: default
       config:
-        - subnet: 10.90.0.0/16
-          gateway: 10.90.0.1
+        - subnet: 10.99.99.0/24
+          gateway: 10.99.99.1
 
