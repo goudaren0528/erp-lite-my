@@ -35,18 +35,16 @@ services:
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME}
       - R2_PUBLIC_URL=${R2_PUBLIC_URL}
-      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY}
+      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY:-}
     
     # Mount uploads directory for persistence
     volumes:
       - ./public/uploads:/app/public/uploads
       - ./data:/app/data
-    networks:
-      - erp_network
 
 networks:
-  erp_network:
+  default:
     driver: bridge
     ipam:
       config:
-        - subnet: 10.95.0.0/16
+        - subnet: ${DOCKER_SUBNET:-10.96.0.0/24}
