@@ -38,13 +38,13 @@ services:
       - ./uploads:/app/public/uploads
       # Persist SQLite database
       - ./data:/app/data
-
-networks:
-  default:
-    driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 10.99.99.0/24
-          gateway: 10.99.99.1
+network_mode: bridge
+    # networks:
+    #   default:
+    #     driver: bridge
+    #     ipam:
+    #       driver: default
+    #       config:
+    #         - subnet: 10.99.99.0/24
+    #           gateway: 10.99.99.1
 
