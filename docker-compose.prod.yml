@@ -27,8 +27,8 @@ services:
       - "3006:3000"
     
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - PORT=3000
+      - DATABASE_URL=${DATABASE_URL:-file:/app/data/erp-lite.db}
+      - PORT=${PORT:-3000}
       - SEED_DB=${SEED_DB:-false}
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
