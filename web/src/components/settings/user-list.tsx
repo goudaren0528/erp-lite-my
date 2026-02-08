@@ -48,7 +48,9 @@ interface UserListProps {
 }
 
 const PERMISSIONS_MAP: Record<string, string> = {
-    'orders': '订单列表',
+    'orders': '订单列表(旧)',
+    'offline_orders': '线下订单管理',
+    'online_orders': '线上订单管理',
     'view_all_orders': '查看所有订单(管理员)',
     'promoters': '推广人员',
     'view_all_promoters': '查看所有推广人员(管理员)',

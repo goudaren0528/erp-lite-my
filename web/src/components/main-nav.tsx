@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, List, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Percent, ChevronDown, ChevronUp, Megaphone } from "lucide-react"
+import { LayoutDashboard, List, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database, PanelLeftClose, PanelLeftOpen, Percent, ChevronDown, ChevronUp, Megaphone, Cloud } from "lucide-react"
 import { User } from "@/types"
 import { logout } from "@/lib/auth"
 import { useState } from "react"
@@ -17,7 +17,7 @@ interface MainNavProps {
 export function MainNav({ user }: MainNavProps) {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
-  const [openGroups, setOpenGroups] = useState<string[]>(["promotion"])
+  const [openGroups, setOpenGroups] = useState<string[]>(["order", "promotion"])
 
   if (!user) return null
 
@@ -36,11 +36,26 @@ export function MainNav({ user }: MainNavProps) {
       permission: null,
     },
     {
-      href: "/orders",
-      label: "订单列表",
+      label: "订单管理",
       icon: List,
-      active: pathname === "/orders",
-      permission: "orders",
+      id: "order",
+      permission: "order_group",
+      children: [
+        {
+          href: "/orders",
+          label: "线下订单管理",
+          icon: List,
+          active: pathname === "/orders",
+          permission: "offline_orders",
+        },
+        {
+          href: "/online-orders",
+          label: "线上订单管理",
+          icon: Cloud,
+          active: pathname === "/online-orders",
+          permission: "online_orders",
+        },
+      ]
     },
     {
       label: "推广管理",
@@ -129,6 +144,12 @@ export function MainNav({ user }: MainNavProps) {
     }
     if (permission === "settlement_group") {
         return hasPermission("stats_accounts") || hasPermission("stats_promoters")
+    }
+    if (permission === "order_group") {
+        return hasPermission("offline_orders") || hasPermission("online_orders") || hasPermission("orders")
+    }
+    if (permission === "offline_orders") {
+        return user.permissions && (user.permissions.includes("offline_orders") || user.permissions.includes("orders"))
     }
     return user.permissions && user.permissions.includes(permission)
   }

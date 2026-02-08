@@ -1,9 +1,11 @@
 import { OrderTable } from "@/components/orders/order-table";
 import { CreateOrderDialog } from "@/components/orders/create-order-dialog";
+import { OrderExportDialog } from "@/components/orders/order-export-dialog";
 import { getCurrentUser } from "@/lib/auth";
 import { Order, OrderSource } from "@/types";
 import { prisma } from "@/lib/db";
 import { fetchOrders } from "@/app/actions";
+import { redirect } from "next/navigation";
 
 type PromoterRaw = {
   id: string;
@@ -25,8 +27,13 @@ type ProductRaw = {
 export default async function OrdersPage() {
   const currentUser = await getCurrentUser();
   const isAdmin = currentUser?.role === 'ADMIN';
+  const canAccessOfflineOrders = isAdmin || currentUser?.permissions?.includes('offline_orders') || currentUser?.permissions?.includes('orders');
   const canViewAllOrders = isAdmin || currentUser?.permissions?.includes('view_all_orders');
   const canViewAllPromoters = isAdmin || currentUser?.permissions?.includes('view_all_promoters') || canViewAllOrders;
+
+  if (!canAccessOfflineOrders) {
+    redirect('/')
+  }
 
   // Filter promoters for dropdowns
   const promotersRaw = await prisma.promoter.findMany({
@@ -61,10 +68,13 @@ export default async function OrdersPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">订单列表</h2>
-          <p className="text-muted-foreground">查看和管理所有租赁订单。</p>
+          <h2 className="text-3xl font-bold tracking-tight">线下订单管理</h2>
+          <p className="text-muted-foreground">查看和管理线下租赁订单。</p>
         </div>
-        <CreateOrderDialog products={products} promoters={promoters} />
+        <div className="flex items-center gap-2">
+            <OrderExportDialog />
+            <CreateOrderDialog products={products} promoters={promoters} />
+        </div>
       </div>
       <OrderTable 
         orders={initialData.orders as unknown as Order[]} 

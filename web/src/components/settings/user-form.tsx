@@ -27,7 +27,8 @@ const PERMISSION_GROUPS = [
     {
         label: '订单管理',
         permissions: [
-            { key: 'orders', label: '订单列表' },
+            { key: 'offline_orders', label: '线下订单管理' },
+            { key: 'online_orders', label: '线上订单管理' },
             { key: 'view_all_orders', label: '查看所有订单(管理员)' },
         ]
     },
@@ -61,13 +62,21 @@ const PERMISSION_GROUPS = [
     }
 ]
 
+const normalizePermissions = (permissions: string[] = []) => {
+    const normalized = new Set(permissions.filter(p => p !== 'orders'))
+    if (permissions.includes('orders')) {
+        normalized.add('offline_orders')
+    }
+    return Array.from(normalized)
+}
+
 export function UserForm({ initialData, onSuccess }: UserFormProps) {
     const router = useRouter()
     const [formData, setFormData] = useState<Partial<User>>({
         name: initialData?.name || '',
         username: initialData?.username || '',
         password: initialData?.password || '',
-        permissions: initialData?.permissions || [],
+        permissions: normalizePermissions(initialData?.permissions || []),
     })
 
     const handleSubmit = async (e: React.FormEvent) => {

@@ -12,11 +12,18 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=file:../data/erp-lite.db
+      - DATABASE_URL=file:/app/data/erp-lite.db
       # Encryption key for Next.js Server Actions (Ensure this is strong and consistent)
-      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=change-this-to-a-secure-random-string
+      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY}
       # Set to "true" to run seed scripts on startup (admin user creation, etc.)
       - SEED_DB=true
+      
+      # R2 Storage Configuration (Required for images)
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - R2_PUBLIC_URL=${R2_PUBLIC_URL}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
       interval: 10s
@@ -37,3 +44,7 @@ services:
 networks:
   erp-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+

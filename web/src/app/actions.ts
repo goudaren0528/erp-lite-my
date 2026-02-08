@@ -10,6 +10,62 @@ import { getCurrentUser } from "@/lib/auth";
 const isPostgres = process.env.DATABASE_URL?.startsWith('postgres');
 const dbMode = isPostgres ? 'insensitive' : undefined;
 
+export async function fetchOrdersForExport({
+    startDate,
+    endDate,
+    status
+}: {
+    startDate?: string;
+    endDate?: string;
+    status?: string;
+}) {
+    const currentUser = await getCurrentUser();
+    const isAdmin = currentUser?.role === 'ADMIN';
+    const canViewAllOrders = isAdmin || currentUser?.permissions?.includes('view_all_orders');
+    
+    const where: any = {};
+    
+    // Permission filter
+    if (!canViewAllOrders) {
+        where.creatorId = currentUser?.id;
+    }
+    
+    // Date filter
+    if (startDate || endDate) {
+        where.createdAt = {};
+        if (startDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            where.createdAt.gte = start;
+        }
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setDate(end.getDate() + 1);
+            end.setHours(0, 0, 0, 0);
+            where.createdAt.lt = end;
+        }
+    }
+    
+    // Status filter
+    if (status && status !== 'ALL') {
+        where.status = status;
+    }
+    
+    const orders = await prisma.order.findMany({
+        where,
+        include: {
+            extensions: true,
+            logs: {
+                orderBy: { createdAt: 'desc' },
+                take: 1
+            }
+        },
+        orderBy: { createdAt: 'desc' }
+    });
+    
+    return orders;
+}
+
 export async function createOrder(formData: FormData) {
   try {
       const currentUser = await getCurrentUser();
@@ -1043,5 +1099,41 @@ export async function deleteProduct(productId: string) {
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { success: false, message: message || "删除商品失败" };
+    }
+}
+
+export async function getAppConfigValue(key: string) {
+    const appConfig = (prisma as unknown as { appConfig?: typeof prisma.appConfig }).appConfig
+    if (!appConfig) {
+        return null;
+    }
+    const config = await appConfig.findUnique({
+        where: { key }
+    });
+    return config?.value ?? null;
+}
+
+export async function setAppConfigValue(key: string, value: string) {
+    try {
+        const currentUser = await getCurrentUser();
+        const isAdmin = currentUser?.role === 'ADMIN';
+        const canManage = isAdmin || currentUser?.permissions?.includes('online_orders');
+        if (!canManage) {
+            return { success: false, message: "无权限操作" };
+        }
+        const appConfig = (prisma as unknown as { appConfig?: typeof prisma.appConfig }).appConfig
+        if (!appConfig) {
+            return { success: false, message: "配置模块未就绪" };
+        }
+        await appConfig.upsert({
+            where: { key },
+            update: { value },
+            create: { key, value }
+        });
+        revalidatePath('/online-orders');
+        return { success: true, message: "配置更新成功" };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "配置更新失败" };
     }
 }
