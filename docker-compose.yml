@@ -39,12 +39,13 @@ services:
       # Persist SQLite database
       - ./data:/app/data
     networks:
-      - erp_network
+      - default
 
 networks:
-  erp_network:
+  default:
+    name: erp-lite-network
     driver: bridge
     ipam:
       config:
-        - subnet: 10.95.0.0/16
+        - subnet: ${DOCKER_SUBNET:-10.96.0.0/24}
 
