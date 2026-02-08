@@ -24,7 +24,7 @@ services:
     # Ports and Environment are usually managed by Dokploy, 
     # but we map the internal port 3000 just in case.
     ports:
-      - "3000:3000"
+      - "3006:3000"
     
     environment:
       - DATABASE_URL=file:/app/data/erp-lite.db
