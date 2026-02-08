@@ -41,11 +41,13 @@ services:
     volumes:
       - ./public/uploads:/app/public/uploads
       - ./data:/app/data
+    networks:
+      - erp-lite-network
 
 networks:
-  default:
+  erp-lite-network:
     name: erp-lite-network
     driver: bridge
     ipam:
       config:
-        - subnet: ${DOCKER_SUBNET:-10.96.0.0/24}
+        - subnet: ${DOCKER_SUBNET:-10.99.0.0/24}
