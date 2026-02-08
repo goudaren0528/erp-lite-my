@@ -12,6 +12,10 @@ if echo "$DATABASE_URL" | grep -q "^postgresql://"; then
   npx prisma db push
 else
   # Default to standard migrations for SQLite (or matching provider)
+  echo "Ensuring data directory exists and has correct permissions..."
+  mkdir -p /app/data
+  chmod 777 /app/data
+  
   echo "Running database migrations..."
   npx prisma migrate deploy
 fi
