@@ -1286,7 +1286,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
             </div>
         </div>
 
-        {order.logisticsCompany && (
+        {(order.logisticsCompany === '线下自提' || order.trackingNumber) && (
             <div className="space-y-1 pt-2 border-t border-dashed border-gray-200">
                 <div className="text-[10px] font-semibold text-gray-500">发货物流</div>
                 <div className="text-[10px]">
@@ -1297,19 +1297,10 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                         </div>
                     ) : (
                         <div className="space-y-1">
-                            <div className="flex items-center text-blue-600 font-medium">
-                                <Truck className="w-3 h-3 mr-1" />
-                                {order.logisticsCompany}
-                            </div>
                             {order.trackingNumber && (
                                  <div className="font-mono text-gray-600 select-all" title="物流单号">
                                     {order.trackingNumber}
                                  </div>
-                            )}
-                            {order.latestLogisticsInfo && (
-                                <div className="text-gray-500 scale-90 origin-left truncate max-w-[150px]" title={order.latestLogisticsInfo}>
-                                    {order.latestLogisticsInfo}
-                                </div>
                             )}
                         </div>
                     )}
@@ -1317,7 +1308,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
             </div>
         )}
 
-        {order.returnLogisticsCompany && (
+        {(order.returnLogisticsCompany === '线下自提' || order.returnTrackingNumber) && (
             <div className="space-y-1 pt-2 border-t border-dashed border-gray-200">
                 <div className="text-[10px] font-semibold text-gray-500">归还物流</div>
                 <div className="text-[10px]">
@@ -1328,19 +1319,10 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                         </div>
                     ) : (
                         <div className="space-y-1">
-                            <div className="flex items-center text-purple-600 font-medium">
-                                <RotateCcw className="w-3 h-3 mr-1" />
-                                {order.returnLogisticsCompany}
-                            </div>
                             {order.returnTrackingNumber && (
                                  <div className="font-mono text-gray-600 select-all" title="归还物流单号">
                                     {order.returnTrackingNumber}
                                  </div>
-                            )}
-                            {order.returnLatestLogisticsInfo && (
-                                <div className="text-gray-500 scale-90 origin-left truncate max-w-[150px]" title={order.returnLatestLogisticsInfo}>
-                                    {order.returnLatestLogisticsInfo}
-                                </div>
                             )}
                         </div>
                     )}
@@ -1397,15 +1379,15 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
       </TableCell>
       <TableCell className="align-top">
         <Select defaultValue={order.status} onValueChange={handleStatusChange}>
-          <SelectTrigger className={`w-[100px] h-8 text-xs text-white ${statusMap[order.status]?.color || 'bg-gray-400'}`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(statusMap).map(([key, conf]) => (
-              <SelectItem key={key} value={key}>{conf.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <SelectTrigger className={cn("w-[100px] h-8 text-xs text-white border-0", statusMap[order.status]?.color || 'bg-gray-400')}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(statusMap).map(([key, conf]) => (
+                    <SelectItem key={key} value={key}>{conf.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
       </TableCell>
       <TableCell 
         className={`align-top transition-colors min-w-[120px] ${isDragOver ? 'bg-blue-50 ring-2 ring-blue-500 ring-inset' : ''}`}

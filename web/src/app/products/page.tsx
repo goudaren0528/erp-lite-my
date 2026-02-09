@@ -5,6 +5,7 @@ type ProductRaw = {
   id: string;
   name: string;
   variants: string;
+  matchKeywords: string | null;
 };
 
 export default async function ProductsPage() {

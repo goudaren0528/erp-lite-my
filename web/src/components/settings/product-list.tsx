@@ -25,8 +25,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Plus, Trash2, Edit2, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { ProductForm } from "./product-form"
-import { deleteProduct } from "@/app/actions"
+import { deleteProduct, migrateDeviceMappings } from "@/app/actions"
 import { toast } from "sonner"
 
 interface ProductListProps {
@@ -36,6 +42,7 @@ interface ProductListProps {
 export function ProductList({ products }: ProductListProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const [isMigrating, setIsMigrating] = useState(false)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
@@ -57,6 +64,26 @@ export function ProductList({ products }: ProductListProps) {
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setSearchQuery(e.target.value)
       setCurrentPage(1)
+  }
+
+  const handleMigrate = async () => {
+      try {
+          setIsMigrating(true)
+          const res = await migrateDeviceMappings()
+          if (res.success) {
+              toast.success(res.message)
+              startTransition(() => {
+                  router.refresh()
+              })
+          } else {
+              toast.error(res.message)
+          }
+      } catch (error) {
+          console.error(error)
+          toast.error("迁移失败")
+      } finally {
+          setIsMigrating(false)
+      }
   }
 
   const confirmDelete = (product: Product) => {
@@ -88,19 +115,25 @@ export function ProductList({ products }: ProductListProps) {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold">商品列表</h2>
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-            <DialogTrigger asChild>
-                <Button>
-                    <Plus className="mr-2 h-4 w-4" /> 添加商品
-                </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle>添加新商品</DialogTitle>
-                </DialogHeader>
-                <ProductForm onSuccess={() => setIsCreateOpen(false)} />
-            </DialogContent>
-        </Dialog>
+        <div className="flex gap-2">
+            <Button variant="outline" onClick={handleMigrate} disabled={isMigrating}>
+                {isMigrating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                同步旧配置
+            </Button>
+            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                <DialogTrigger asChild>
+                    <Button>
+                        <Plus className="mr-2 h-4 w-4" /> 添加商品
+                    </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>添加新商品</DialogTitle>
+                    </DialogHeader>
+                    <ProductForm onSuccess={() => setIsCreateOpen(false)} />
+                </DialogContent>
+            </Dialog>
+        </div>
       </div>
 
       <div className="bg-muted/30 p-4 rounded-lg flex flex-wrap gap-1 items-center">
@@ -124,7 +157,9 @@ export function ProductList({ products }: ProductListProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[200px]">型号名称</TableHead>
+              <TableHead className="w-[160px]">商品ID</TableHead>
+              <TableHead className="w-[240px]">型号名称</TableHead>
+              <TableHead className="w-[200px]">映射关键词</TableHead>
               <TableHead>包含版本 (SKU)</TableHead>
               <TableHead className="text-right w-[100px]">操作</TableHead>
             </TableRow>
@@ -134,6 +169,33 @@ export function ProductList({ products }: ProductListProps) {
               <TableRow key={product.id}>
                 <TableCell className="font-mono text-xs">{product.id}</TableCell>
                 <TableCell className="font-medium">{product.name}</TableCell>
+                <TableCell className="max-w-[200px]">
+                  {(() => {
+                    let keywords: string[] = []
+                    try {
+                      if (product.matchKeywords) {
+                        keywords = JSON.parse(product.matchKeywords)
+                      }
+                    } catch {}
+                    
+                    if (keywords.length === 0) return <span className="text-muted-foreground text-xs">-</span>
+                    
+                    const display = keywords.join(", ")
+                    
+                    return (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="truncate text-xs cursor-help">{display}</div>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[300px] break-words">
+                            <p>{display}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )
+                  })()}
+                </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
                     {product.variants.map(v => (

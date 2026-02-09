@@ -1,6 +1,7 @@
 'use server'
 
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import { OrderStatus, User, Promoter, ProductVariant } from "@/types";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
@@ -8,7 +9,7 @@ import { getCurrentUser } from "@/lib/auth";
 // Helper to determine query mode based on database type
 // SQLite does not support 'insensitive' mode, but Postgres does.
 const isPostgres = process.env.DATABASE_URL?.startsWith('postgres');
-const dbMode = isPostgres ? 'insensitive' : undefined;
+const dbMode: Prisma.QueryMode | undefined = isPostgres ? 'insensitive' : undefined;
 
 export async function fetchOrdersForExport({
     startDate,
@@ -23,7 +24,7 @@ export async function fetchOrdersForExport({
     const isAdmin = currentUser?.role === 'ADMIN';
     const canViewAllOrders = isAdmin || currentUser?.permissions?.includes('view_all_orders');
     
-    const where: any = {};
+    const where: Prisma.OrderWhereInput = {};
     
     // Permission filter
     if (!canViewAllOrders) {
@@ -167,6 +168,7 @@ export async function fetchOrders(params: {
     pageSize: number;
     sortBy: 'status' | 'createdAt';
     sortDirection: 'asc' | 'desc';
+    includeSystem?: boolean;
     filterOrderNo?: string;
     filterXianyuOrderNo?: string;
     filterCustomer?: string;
@@ -192,6 +194,7 @@ export async function fetchOrders(params: {
         pageSize,
         sortBy,
         sortDirection,
+        includeSystem,
         filterOrderNo: rawFilterOrderNo,
         filterXianyuOrderNo: rawFilterXianyuOrderNo,
         filterCustomer: rawFilterCustomer,
@@ -220,25 +223,29 @@ export async function fetchOrders(params: {
     const isAdmin = currentUser.role === 'ADMIN';
     const canViewAllOrders = isAdmin || currentUser.permissions?.includes('view_all_orders');
 
-    const baseWhere: any = canViewAllOrders ? {} : { creatorId: currentUser.id };
+    let baseWhere: Prisma.OrderWhereInput = canViewAllOrders ? {} : { creatorId: currentUser.id };
+
+    if (includeSystem) {
+        baseWhere = { creatorId: 'system' };
+    }
 
     if (filterOrderNo) {
         baseWhere.OR = [
-            { orderNo: { contains: filterOrderNo, mode: dbMode as any } },
-            { miniProgramOrderNo: { contains: filterOrderNo, mode: dbMode as any } }
+            { orderNo: { contains: filterOrderNo, mode: dbMode } },
+            { miniProgramOrderNo: { contains: filterOrderNo, mode: dbMode } }
         ];
     }
 
     if (filterXianyuOrderNo) {
-        baseWhere.xianyuOrderNo = { contains: filterXianyuOrderNo, mode: dbMode as any };
+        baseWhere.xianyuOrderNo = { contains: filterXianyuOrderNo, mode: dbMode };
     }
 
     if (filterCustomer) {
-        baseWhere.customerXianyuId = { contains: filterCustomer, mode: dbMode as any };
+        baseWhere.customerXianyuId = { contains: filterCustomer, mode: dbMode };
     }
 
     if (filterProduct) {
-        baseWhere.productName = { contains: filterProduct, mode: dbMode as any };
+        baseWhere.productName = { contains: filterProduct, mode: dbMode };
     }
 
     if (filterDuration) {
@@ -249,7 +256,7 @@ export async function fetchOrders(params: {
     }
 
     if (filterRecipientName) {
-        baseWhere.recipientName = { contains: filterRecipientName, mode: dbMode as any };
+        baseWhere.recipientName = { contains: filterRecipientName, mode: dbMode };
     }
 
     if (filterRecipientPhone) {
@@ -283,7 +290,7 @@ export async function fetchOrders(params: {
     if (filterCreator) {
         const creatorUsers = await prisma.user.findMany({
             where: {
-                name: { contains: filterCreator, mode: dbMode } as any
+                name: { contains: filterCreator, mode: dbMode }
             },
             select: { id: true }
         });
@@ -299,7 +306,7 @@ export async function fetchOrders(params: {
         const matchedPromoters = await prisma.promoter.findMany({
             where: {
                 OR: [
-                    { name: { contains: filterPromoter, mode: dbMode } as any },
+                    { name: { contains: filterPromoter, mode: dbMode } },
                     { phone: { contains: filterPromoter } }
                 ]
             },
@@ -309,7 +316,7 @@ export async function fetchOrders(params: {
         const promoterNames = matchedPromoters.map(p => p.name);
         baseWhere.OR = [
             ...(baseWhere.OR || []),
-            { sourceContact: { contains: filterPromoter, mode: dbMode } as any },
+            { sourceContact: { contains: filterPromoter, mode: dbMode } },
             ...(promoterIds.length > 0 ? [{ promoterId: { in: promoterIds } }] : []),
             ...(promoterNames.length > 0 ? [{ sourceContact: { in: promoterNames } }] : [])
         ];
@@ -352,7 +359,7 @@ export async function fetchOrders(params: {
         statusCounts.RENTING = Math.max(0, statusCounts.RENTING - overdueCount);
     }
 
-    const where: any = { ...baseWhere };
+    const where: Prisma.OrderWhereInput = { ...baseWhere };
     if (filterStatus && filterStatus !== 'ALL') {
         if (filterStatus === 'OVERDUE') {
             where.status = overdueWhere.status;
@@ -379,6 +386,7 @@ export async function fetchOrders(params: {
         prisma.order.findMany({
             where: {
                 ...baseWhere,
+                creatorId: { not: 'system' }, // Exclude online orders
                 createdAt: { gte: todayStart, lt: todayEnd }
             },
             select: {
@@ -1062,7 +1070,7 @@ export async function addOverdueFee(orderId: string, fee: number) {
     }
 }
 
-export async function saveProduct(product: { id?: string, name: string, variants: unknown[] }) {
+export async function saveProduct(product: { id?: string, name: string, variants: unknown[], matchKeywords?: string }) {
     try {
         const variantsStr = JSON.stringify(product.variants || []);
         
@@ -1071,7 +1079,8 @@ export async function saveProduct(product: { id?: string, name: string, variants
                 where: { id: product.id },
                 data: {
                     name: product.name,
-                    variants: variantsStr
+                    variants: variantsStr,
+                    matchKeywords: product.matchKeywords
                 }
             });
             revalidatePath('/products');
@@ -1080,7 +1089,8 @@ export async function saveProduct(product: { id?: string, name: string, variants
             await prisma.product.create({
                 data: {
                     name: product.name,
-                    variants: variantsStr
+                    variants: variantsStr,
+                    matchKeywords: product.matchKeywords
                 }
             });
             revalidatePath('/products');
@@ -1089,6 +1099,60 @@ export async function saveProduct(product: { id?: string, name: string, variants
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { success: false, message: message || "保存商品失败" };
+    }
+}
+
+export async function migrateDeviceMappings() {
+    try {
+        const rawConfig = await getAppConfigValue("online_orders_sync_config")
+        if (!rawConfig) return { success: false, message: "未找到配置" }
+        
+        const config = JSON.parse(rawConfig)
+        const mappings = config.deviceMappings as { keyword: string; deviceName: string }[] | undefined
+        
+        if (!mappings || !Array.isArray(mappings)) {
+            return { success: false, message: "未找到映射配置" }
+        }
+
+        const products = await prisma.product.findMany()
+        let updatedCount = 0
+
+        for (const product of products) {
+            // Find all keywords mapping to this product name
+            const productKeywords = mappings
+                .filter(m => m.deviceName === product.name)
+                .map(m => m.keyword)
+                .filter(Boolean)
+            
+            if (productKeywords.length > 0) {
+                // Merge with existing keywords if any
+                let existingKeywords: string[] = []
+                try {
+                    if (product.matchKeywords) {
+                        existingKeywords = JSON.parse(product.matchKeywords)
+                    }
+                } catch {
+                    // ignore parse error
+                }
+
+                const newKeywords = Array.from(new Set([...existingKeywords, ...productKeywords]))
+                
+                await prisma.product.update({
+                    where: { id: product.id },
+                    data: {
+                        matchKeywords: JSON.stringify(newKeywords)
+                    }
+                })
+                updatedCount++
+            }
+        }
+
+        revalidatePath('/products')
+        return { success: true, message: `迁移成功，更新了 ${updatedCount} 个商品` }
+    } catch (error) {
+        console.error(error)
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: "迁移失败: " + message }
     }
 }
 

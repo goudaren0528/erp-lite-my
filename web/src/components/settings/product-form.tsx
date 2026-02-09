@@ -29,6 +29,19 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const router = useRouter()
   const [name, setName] = useState(initialData?.name || "")
   
+  // Initialize keywords
+  const [matchKeywords, setMatchKeywords] = useState(() => {
+    try {
+        if (initialData?.matchKeywords) {
+            const parsed = JSON.parse(initialData.matchKeywords)
+            return Array.isArray(parsed) ? parsed.join('\n') : ''
+        }
+        return ''
+    } catch {
+        return ''
+    }
+  })
+
   // Initialize variants with array-based priceRules for editing
   const [variants, setVariants] = useState<VariantDraft[]>(
     initialData?.variants?.map(v => ({
@@ -120,10 +133,19 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         }
     })
 
-    const product: { id?: string; name: string; variants: ProductVariant[] } = {
+    const product: { id?: string; name: string; variants: ProductVariant[]; matchKeywords?: string } = {
         name,
         variants: finalVariants
     }
+
+    // Process keywords
+    if (matchKeywords.trim()) {
+        const keywords = matchKeywords.split(/[\n,]/).map(k => k.trim()).filter(Boolean)
+        if (keywords.length > 0) {
+            product.matchKeywords = JSON.stringify(keywords)
+        }
+    }
+
     if (initialData?.id) {
         product.id = initialData.id
     }
@@ -154,6 +176,17 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             placeholder="例如: 大疆Pocket3" 
             required 
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label>自动映射关键词 (可选)</Label>
+        <Textarea 
+            value={matchKeywords} 
+            onChange={e => setMatchKeywords(e.target.value)} 
+            placeholder="输入商品名称关键词，用于自动关联线上订单。支持换行分隔。例如：&#10;iPhone 13&#10;苹果13" 
+            className="h-24 font-mono text-sm"
+        />
+        <p className="text-xs text-muted-foreground">当线上订单商品名称包含这些关键词时，将自动关联到此商品。</p>
       </div>
 
       <div className="space-y-4">

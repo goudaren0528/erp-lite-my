@@ -21,6 +21,7 @@ export interface Product {
   id: string;
   name: string; // 型号
   variants: ProductVariant[];
+  matchKeywords?: string | null; // JSON string array of keywords for auto mapping
 }
 
 export type OrderSource = 'AGENT' | 'PEER' | 'RETAIL' | 'PART_TIME' | 'PART_TIME_AGENT';
@@ -64,6 +65,9 @@ export interface Order {
   productId?: string;
   variantName: string;
   sn?: string; // SN码
+  itemTitle?: string;
+  itemSku?: string;
+  merchantName?: string;
   
   // 租赁详情
   duration: number; // 天数
@@ -85,10 +89,10 @@ export interface Order {
   returnLogisticsCompany?: string; // 归还物流公司
   returnLatestLogisticsInfo?: string; // 归还最新物流信息 (预留)
   
-  rentStartDate: string; // 租期开始日期 (YYYY-MM-DD)
-  deliveryTime: string; // 发货时间 (YYYY-MM-DD)
+  rentStartDate?: string | null; // 租期开始日期 (YYYY-MM-DD)
+  deliveryTime?: string | null; // 发货时间 (YYYY-MM-DD)
   actualDeliveryTime?: string; // 实际送达时间
-  returnDeadline: string; // 须寄回时间 (YYYY-MM-DD)
+  returnDeadline?: string | null; // 须寄回时间 (YYYY-MM-DD)
   
   remark: string;
   
