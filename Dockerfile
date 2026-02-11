@@ -74,13 +74,13 @@ RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH && chown nextjs:nodejs $PLAYWRIGHT_BROWSE
 # running as root (like in web/Dockerfile) is often the most robust solution for simple deployments.
 # If strict security is needed, one should ensure host directory ./logs is owned by 1001:1001.
 # Here we switch to root to avoid "EACCES: permission denied" on volume mounts.
-# USER nextjs 
+# # USER nextjs 
 # Commented out USER nextjs to run as root. 
 # This matches web/Dockerfile behavior and fixes volume permission issues.
 
 RUN chmod +x ./docker-entrypoint.sh
 
-USER nextjs
+# USER nextjs
 
 # Install Chromium browser binary
 RUN npx playwright install chromium
