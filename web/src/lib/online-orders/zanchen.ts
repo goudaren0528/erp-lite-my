@@ -196,13 +196,17 @@ async function ensureContext(headlessConfig: boolean = false): Promise<BrowserCo
   const userDataDir = path.join(process.cwd(), ".playwright", "zanchen")
   
   // In production (when not on Windows dev machine), prefer headless
-  // But respect config if provided
-  const finalHeadless = headlessConfig
+    // But respect config if provided, unless we are on Linux without display
+    let finalHeadless = headlessConfig
+    if (process.platform === 'linux' && !process.env.DISPLAY) {
+        addLog(`[System] Linux environment without DISPLAY detected, forcing headless mode.`)
+        finalHeadless = true
+    }
   
-  addLog(`[System] Launching browser context. Headless: ${finalHeadless}`)
-
-  runtime.context = await chromium.launchPersistentContext(userDataDir, {
-    headless: finalHeadless,
+    addLog(`[System] Launching browser context. Headless: ${finalHeadless}`)
+  
+    runtime.context = await chromium.launchPersistentContext(userDataDir, {
+      headless: finalHeadless,
     viewport: { width: 1280, height: 720 },
     args: [
         '--no-sandbox',
@@ -410,6 +414,15 @@ async function ensureNoRisk(page: Page, site: SiteConfig, timeoutMs = 5 * 60_000
 async function waitUntilLoggedIn(page: Page, site: SiteConfig, timeoutMs = 10_000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
+    if (await isOnLoginPage(page, site)) {
+      await page.waitForTimeout(800)
+      continue
+    }
+    if (await detectRiskHint(page)) {
+      await page.waitForTimeout(800)
+      continue
+    }
+
     const url = page.url()
     if (site.loginUrl && url && !url.startsWith(site.loginUrl)) return true
     // If login url unknown, infer by presence of order targets becoming available
@@ -439,7 +452,7 @@ async function waitRandom(scope: PageOrFrame, minMs: number, maxMs: number) {
 async function resolveOrderFrame(page: Page, selectors: SelectorMap) {
   const container = getContainerSelector(selectors)
   if (!container) return page
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < 10; i += 1) {
     try {
       const direct = await page.$(container)
       if (direct) return page
@@ -498,7 +511,7 @@ async function buildTemplateSelectors(page: PageOrFrame, selectors: SelectorMap)
   if (!end && container) {
     try {
       // Retry getting children count a few times
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 10; i++) {
         end = await page.$$eval(`${container} > *`, elements => elements.length)
         if (end > 0) break
         await page.waitForTimeout(1000)
@@ -2180,10 +2193,12 @@ async function runZanchenSync(siteId: string) {
 
       setStatus({ status: "running", message: "等待登录状态确认" })
       const loggedIn = await waitUntilLoggedIn(page, site, 8_000)
-      if (!loggedIn && (await isOnLoginPage(page, site))) {
+      const riskHint = await detectRiskHint(page)
+
+      if (!loggedIn && ((await isOnLoginPage(page, site)) || riskHint)) {
         setStatus({
           status: "awaiting_user",
-          message: "登录需要人工验证或短信验证码",
+          message: riskHint ? `登录需验证: ${riskHint.reason}` : "登录需要人工验证或短信验证码",
           needsAttention: true
         })
         void loadConfig().then(cfg => sendWebhook(cfg, "登录验证等待人工介入"))
@@ -2540,7 +2555,9 @@ export function getRunningPage() {
 }
 
 async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
-    if (!config?.webhookUrls || config.webhookUrls.length === 0) return
+    if (!config?.webhookUrls || config.webhookUrls.length === 0) {
+        return
+    }
     const remoteLink = process.env.NEXT_PUBLIC_APP_URL 
         ? `${process.env.NEXT_PUBLIC_APP_URL}/online-orders/remote-auth`
         : "(未配置APP_URL)"
@@ -2552,15 +2569,34 @@ async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
         }
     }
     
+    addLog(`[System] 正在发送 Webhook 通知 (共 ${config.webhookUrls.length} 个端点)...`)
+
     for (const url of config.webhookUrls) {
         try {
-            await fetch(url, {
+            // Feishu (Lark) adaptation
+            let finalPayload = payload
+            if (url.includes("feishu") || url.includes("larksuite")) {
+                finalPayload = {
+                    msg_type: "text",
+                    content: {
+                        text: payload.text.content
+                    }
+                } as any
+            }
+
+            const res = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(finalPayload)
             })
-        } catch {
-            // ignore
+            if (res.ok) {
+                addLog(`[System] Webhook 发送成功`)
+            } else {
+                const text = await res.text().catch(() => "")
+                addLog(`[System] Webhook 发送失败: ${res.status} ${text.slice(0, 100)}`)
+            }
+        } catch (e) {
+            addLog(`[System] Webhook 发送出错: ${e}`)
         }
     }
 }
