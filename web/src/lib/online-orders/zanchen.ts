@@ -25,6 +25,7 @@ export type SiteConfig = {
   autoSync?: {
     enabled: boolean
     interval: number
+    concurrencyLimit?: number
   }
 }
 
