@@ -1593,10 +1593,16 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
 
       // Fix: Skip pagination/footer rows that are mistakenly picked up by the selector
       if ((rawText.includes("共") && rawText.includes("条记录")) || (rawText.includes("下一页") && rawText.includes("尾页"))) {
+        addLog(`[System] Skipped pagination row with text: ${rawText.substring(0, 30)}...`)
         continue
       }
 
       const text = rawText.replace(/\s+/g, " ").trim()
+      // Log for debugging empty parsing
+      if (i < 3) {
+        addLog(`[Debug] Row ${i} raw text: ${rawText.substring(0, 100)}...`)
+      }
+
       const textBase = parseOrderFromText(rawText)
       let base = textBase
       if (headerTexts && headerTexts.length > 0) {
