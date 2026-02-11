@@ -2103,10 +2103,10 @@ async function runZanchenSync(siteId: string) {
   }
 
   if (needsLogin) {
+      // First attempt
       if (isBlank || (await isOnLoginPage(page, site))) {
         await ensureOnLogin(page, site)
       } else {
-        // Not on login page, but also not logged in. Force login page.
         await ensureOnLogin(page, site)
       }
       
@@ -2114,7 +2114,25 @@ async function runZanchenSync(siteId: string) {
       await tryLogin(page, site)
 
       setStatus({ status: "running", message: "等待登录状态确认" })
-      const loggedIn = await waitUntilLoggedIn(page, site, 8_000)
+      let loggedIn = await waitUntilLoggedIn(page, site, 8_000)
+      
+      // Retry logic: if failed, reload and try once more
+      if (!loggedIn && ((await isOnLoginPage(page, site)) || (await detectRiskHint(page)))) {
+          addLog("[System] First login attempt failed. Reloading page to retry...")
+          setStatus({ status: "running", message: "登录失败，正在刷新重试..." })
+          
+          if (site.loginUrl) {
+              await page.goto(site.loginUrl, { waitUntil: "domcontentloaded" }).catch(() => page.reload())
+          } else {
+              await page.reload({ waitUntil: "domcontentloaded" }).catch(() => void 0)
+          }
+          await waitRandom(page, 1500, 3000)
+          
+          await tryLogin(page, site)
+          setStatus({ status: "running", message: "等待登录状态确认 (重试)" })
+          loggedIn = await waitUntilLoggedIn(page, site, 8_000)
+      }
+
       const riskHint = await detectRiskHint(page)
 
       if (!loggedIn && ((await isOnLoginPage(page, site)) || riskHint)) {

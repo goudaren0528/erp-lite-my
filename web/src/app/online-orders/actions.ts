@@ -79,7 +79,7 @@ export async function fetchOnlineOrders(params: {
 
     const formattedOrders = orders.map(o => {
         // Try to match product dynamically
-        const matched = matchDeviceMapping(o.itemTitle, o.itemSku, products);
+        const matched = matchDeviceMapping(o.itemTitle || undefined, o.itemSku || undefined, products);
 
         return {
             ...o,
