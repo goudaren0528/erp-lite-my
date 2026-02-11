@@ -1590,6 +1590,12 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
         await waitRandom(scope, 200, 700)
       }
       const rawText = await row.innerText()
+
+      // Fix: Skip pagination/footer rows that are mistakenly picked up by the selector
+      if ((rawText.includes("共") && rawText.includes("条记录")) || (rawText.includes("下一页") && rawText.includes("尾页"))) {
+        continue
+      }
+
       const text = rawText.replace(/\s+/g, " ").trim()
       const textBase = parseOrderFromText(rawText)
       let base = textBase
