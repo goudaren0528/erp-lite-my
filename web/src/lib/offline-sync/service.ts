@@ -225,7 +225,7 @@ async function runSync(siteId: string) {
     
     const systemOrders = await prisma.onlineOrder.findMany({
       where: {
-        platform: { contains: siteId } // Safer flexible matching
+        platform: { contains: platformKeyword } // Safer flexible matching
       },
       select: {
         orderNo: true,
