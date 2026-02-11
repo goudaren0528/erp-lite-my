@@ -2316,6 +2316,14 @@ async function runZanchenSync(siteId: string) {
       : (site.autoSync?.concurrencyLimit ?? 3)
     const pageOrders = await extractParsedOrders(page, scope, site.selectors, { concurrencyLimit })
     
+    // Log parsed count to reassure user
+    addLog(`[System] Page ${pagesVisited + 1}: Parsed ${pageOrders.length} valid orders.`)
+    if (pageOrders.length > 0) {
+        addLog(`[System] Sample Order: ${pageOrders[0].orderNo} (${pageOrders[0].status})`)
+    } else {
+        addLog(`[Warning] No valid orders parsed from ${extractedCount} rows.`)
+    }
+
     // Incremental Sync Check
     if (stopThreshold > 0 && pageOrders.length > 0) {
       const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean) as string[]
