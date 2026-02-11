@@ -2556,11 +2556,24 @@ export function getRunningPage() {
 
 async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
     if (!config?.webhookUrls || config.webhookUrls.length === 0) {
+        addLog(`[System] 未配置 Webhook，跳过发送通知 (Message: ${message})`)
         return
     }
-    const remoteLink = process.env.NEXT_PUBLIC_APP_URL 
-        ? `${process.env.NEXT_PUBLIC_APP_URL}/online-orders/remote-auth`
-        : "(未配置APP_URL)"
+    
+    // Ensure NEXT_PUBLIC_APP_URL is available
+    if (!process.env.NEXT_PUBLIC_APP_URL) {
+        addLog(`[System] 警告: 未配置 NEXT_PUBLIC_APP_URL，Webhook 链接将不可用`)
+    }
+
+    let baseUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+    // Fix common configuration error: double protocol (e.g. https://https://...)
+    baseUrl = baseUrl.replace(/^https?:\/\/(https?:\/\/)/, '$1');
+    // Remove trailing slash
+    baseUrl = baseUrl.replace(/\/$/, "");
+
+    const remoteLink = baseUrl 
+        ? `${baseUrl}/online-orders/remote-auth`
+        : "(未配置APP_URL - 请在环境变量中设置 NEXT_PUBLIC_APP_URL)"
         
     const payload = {
         msgtype: "text",
@@ -2584,6 +2597,7 @@ async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
                 } as any
             }
 
+            console.log(`[Webhook] Sending to ${url}:`, JSON.stringify(finalPayload))
             const res = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -2593,9 +2607,11 @@ async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
                 addLog(`[System] Webhook 发送成功`)
             } else {
                 const text = await res.text().catch(() => "")
+                console.error(`[Webhook] Failed: ${res.status} ${text}`)
                 addLog(`[System] Webhook 发送失败: ${res.status} ${text.slice(0, 100)}`)
             }
         } catch (e) {
+            console.error(`[Webhook] Error:`, e)
             addLog(`[System] Webhook 发送出错: ${e}`)
         }
     }
