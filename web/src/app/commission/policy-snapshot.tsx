@@ -20,8 +20,8 @@ interface Rule {
 }
 
 interface PolicySnapshotProps {
-  accountGroups: { name: string; rules: Rule[]; highTicketRate?: number }[];
-  channelConfigs: { name: string; rules: Rule[] }[];
+  accountGroups: { name: string; rules: Rule[]; highTicketRate?: number | null }[];
+  channelConfigs: { name: string; rules?: Rule[] }[];
 }
 
 export function PolicySnapshot({ accountGroups, channelConfigs }: PolicySnapshotProps) {
@@ -50,7 +50,7 @@ export function PolicySnapshot({ accountGroups, channelConfigs }: PolicySnapshot
       text = "【渠道提成政策】\n\n";
       channelConfigs.forEach(channel => {
         text += `=== ${channel.name} ===\n`;
-        channel.rules.forEach(rule => {
+        (channel.rules || []).forEach(rule => {
           text += `${formatRule(rule)}: ${rule.percentage}%\n`;
         });
         text += "\n";
@@ -125,8 +125,8 @@ export function PolicySnapshot({ accountGroups, channelConfigs }: PolicySnapshot
                         <TableHead>提成点数</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody>
-                      {group.rules.map((rule, idx) => (
+                  <TableBody>
+                    {group.rules.map((rule, idx) => (
                         <TableRow key={idx}>
                           <TableCell>{formatRule(rule)}</TableCell>
                           <TableCell>{rule.percentage}%</TableCell>
@@ -159,7 +159,7 @@ export function PolicySnapshot({ accountGroups, channelConfigs }: PolicySnapshot
                       variant="ghost" 
                       size="icon" 
                       className="h-8 w-8" 
-                      onClick={() => copySingleToClipboard(channel.name, channel.rules, '【渠道提成政策】')}
+                      onClick={() => copySingleToClipboard(channel.name, channel.rules || [], '【渠道提成政策】')}
                       title="复制此政策"
                     >
                       <Copy className="h-4 w-4" />
@@ -172,14 +172,14 @@ export function PolicySnapshot({ accountGroups, channelConfigs }: PolicySnapshot
                         <TableHead>渠道成本点数</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody>
-                      {channel.rules.map((rule, idx) => (
+                  <TableBody>
+                    {(channel.rules || []).map((rule, idx) => (
                         <TableRow key={idx}>
                           <TableCell>{formatRule(rule)}</TableCell>
                           <TableCell>{rule.percentage}%</TableCell>
                         </TableRow>
                       ))}
-                       {channel.rules.length === 0 && (
+                    {(channel.rules || []).length === 0 && (
                         <TableRow>
                           <TableCell colSpan={2} className="text-center text-muted-foreground">暂无规则</TableCell>
                         </TableRow>

@@ -1,7 +1,34 @@
 
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+
+type RawStat = {
+    creatorId: string | null;
+    source: string | null;
+    promoterId: string | null;
+    channelId: string | null;
+    promoterName: string | null;
+    orderCount: number | string;
+    totalRevenue: number | string;
+    refundedAmount: number | string;
+    highTicketBase: number | string;
+};
+
+type Rule = {
+    target?: string | null;
+    channelConfigId?: string | null;
+    minCount?: number | null;
+    maxCount?: number | null;
+    percentage?: number | null;
+};
+
+type PromoterStat = {
+    name: string;
+    count: number;
+    revenue: number;
+    highTicketBase: number;
+};
 
 async function main() {
     console.log('Verifying commission for 吴慧云...');
@@ -47,11 +74,10 @@ async function main() {
     });
 
     const channelIdToName = new Map(channelConfigs.map(c => [c.id, c.name]));
-    const channelNameToId = new Map(channelConfigs.map(c => [c.name, c.id]));
     const promoterNames = new Set(promoters.map(p => p.name));
 
     // Raw SQL Query (Simplified for this user and cumulative period)
-    const rawStats: any[] = await prisma.$queryRaw`
+    const rawStats = await prisma.$queryRaw<RawStat[]>`
         WITH ExtensionSums AS (
             SELECT "orderId", SUM(price) as extTotal
             FROM "OrderExtension"
@@ -79,7 +105,7 @@ async function main() {
     let totalHighTicketBase = 0;
 
     // First pass to get totals
-    rawStats.forEach((stat: any) => {
+    rawStats.forEach((stat) => {
         const orderCount = Number(stat.orderCount || 0);
         const revenue = Number(stat.totalRevenue || 0);
         const highTicketBase = Number(stat.highTicketBase || 0);
@@ -93,16 +119,17 @@ async function main() {
 
     console.log(`Total Orders: ${totalOrderCount}`);
     console.log(`Total Revenue: ${totalRevenue}`);
+    console.log(`Total High Ticket Base: ${totalHighTicketBase}`);
 
     // Rules
     const groupRules = user.accountGroup?.rules || [];
     const highTicketRate = user.accountGroup?.highTicketRate || 0;
     
-    const defaultUserRules = groupRules.filter((r: any) => r.target === 'USER' && !r.channelConfigId);
-    const channelUserRulesMap = new Map<string, any[]>();
-    const channelPromoterRulesMap = new Map<string, any[]>();
+    const defaultUserRules = groupRules.filter((r: Rule) => r.target === 'USER' && !r.channelConfigId);
+    const channelUserRulesMap = new Map<string, Rule[]>();
+    const channelPromoterRulesMap = new Map<string, Rule[]>();
 
-    groupRules.forEach((r: any) => {
+    groupRules.forEach((r: Rule) => {
         if (r.channelConfigId) {
             if (r.target === 'PROMOTER') {
                 if (!channelPromoterRulesMap.has(r.channelConfigId)) channelPromoterRulesMap.set(r.channelConfigId, []);
@@ -114,10 +141,10 @@ async function main() {
         }
     });
 
-    const getPercentage = (count: number, rules: any[]) => {
+    const getPercentage = (count: number, rules: Rule[]) => {
         if (!rules || rules.length === 0) return 0;
-        const rule = rules.find(r => count >= r.minCount && (r.maxCount === null || count <= r.maxCount));
-        return rule ? rule.percentage : 0;
+        const rule = rules.find(r => count >= (r.minCount ?? 0) && (r.maxCount === null || r.maxCount === undefined || count <= r.maxCount));
+        return rule ? (rule.percentage ?? 0) : 0;
     };
 
     const effectiveBaseRate = getPercentage(totalOrderCount, defaultUserRules);
@@ -136,10 +163,10 @@ async function main() {
     const channelsMap = new Map<string, {
         channelId: string,
         channelName: string,
-        promoters: any[]
+        promoters: PromoterStat[]
     }>();
 
-    rawStats.forEach((stat: any) => {
+    rawStats.forEach((stat) => {
         const orderCount = Number(stat.orderCount || 0);
         const revenue = Number(stat.totalRevenue || 0);
         const highTicketBase = Number(stat.highTicketBase || 0);
@@ -154,10 +181,10 @@ async function main() {
             channelId = promoterIdMap.get(pId)!.channelId;
         }
         if (!channelId) {
-            channelId = promoterNameMap.get(promoterName);
+            channelId = promoterNameMap.get(promoterName) || null;
         }
 
-        let channelName = channelId ? channelIdToName.get(channelId) : undefined;
+        const channelName = channelId ? channelIdToName.get(channelId) : undefined;
         
         const safeChannelId = channelId || 'default'; 
         const safeChannelName = channelName || (promoterName === 'self' ? '自主开发' : promoterName);

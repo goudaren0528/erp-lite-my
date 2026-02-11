@@ -1,17 +1,7 @@
 import { prisma } from "@/lib/db"
 import { PromoterList } from "@/components/promoters/promoter-list"
 import { getCurrentUser } from "@/lib/auth"
-import { OrderSource, Role } from "@/types"
-
-type PromoterRaw = {
-  id: string;
-  name: string;
-  phone: string | null;
-  channel: string | null;
-  creatorId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
+import { OrderSource, Role, Promoter } from "@/types"
 
 type UserRaw = {
   id: string;
@@ -45,10 +35,10 @@ export default async function PromotersPage() {
         orderBy: { createdAt: 'desc' }
     });
 
-    const formattedPromoters = promoters.map((p: any) => ({
+    const formattedPromoters: Promoter[] = promoters.map((p) => ({
         ...p,
         phone: p.phone ?? undefined,
-        channel: (p.channel as any) ?? undefined, // Cast to any to avoid type mismatch if OrderSource is strict
+        channel: (p.channel as OrderSource) ?? undefined,
         creatorId: p.creatorId ?? undefined,
         channelConfigId: p.channelConfigId ?? undefined,
         createdAt: p.createdAt.toISOString(),

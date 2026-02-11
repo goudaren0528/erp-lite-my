@@ -22,6 +22,15 @@ type StatsOrder = {
   completedAt: Date | null;
 }
 
+type AccountRule = {
+  type?: string
+  target?: string
+  channelConfigId?: string | null
+  minCount: number
+  maxCount: number | null
+  percentage: number
+}
+
 interface PageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }
@@ -198,7 +207,7 @@ export default async function PromoterStatsPage(props: PageProps) {
       const displayPromoterName = promoterName === 'OFFLINE' ? '线下' : promoterName;
 
       // Determine Channel Config
-      let channelConfig: any = null;
+      let channelConfig: typeof channelConfigs[0] | undefined | null = null;
       if (order.channelId) {
           channelConfig = channelConfigIdMap.get(order.channelId);
       }
@@ -277,20 +286,7 @@ export default async function PromoterStatsPage(props: PageProps) {
   });
 
   // 4. Calculate Commission per User-Promoter Pair and Aggregate by Promoter
-  const promoterAggMap = new Map<string, {
-      name: string;
-      channelName: string;
-      orderCount: number;
-      totalRevenue: number;
-      refundedAmount: number;
-      accountEffectivePercentageSum: number;
-      accountEffectivePercentageCount: number;
-      accountGroupRules: any[];
-      accountGroupOrderCount: number;
-      commission: number;
-      highTicketCommission: number;
-      highTicketRates: Set<number>;
-      details: {
+      type AggDetail = {
         userId: string;
         userName: string;
         accountGroupName: string;
@@ -301,10 +297,10 @@ export default async function PromoterStatsPage(props: PageProps) {
         channelCostPercentage: number;
         commission: number;
         highTicketCommission: number;
-        accountGroupRules: any[];
-        channelRules: any[];
-      }[];
-      orders: {
+        accountGroupRules: AccountRule[];
+        channelRules: AccountRule[];
+      };
+      type AggOrder = {
         orderNo: string;
         productName: string;
         variantName: string;
@@ -321,33 +317,49 @@ export default async function PromoterStatsPage(props: PageProps) {
         userName: string;
         accountEffectivePercentage: number;
         channelCostPercentage: number;
-        accountGroupRules: any[];
-        channelRules: any[];
-      }[];
+        accountGroupRules: AccountRule[];
+        channelRules: AccountRule[];
+      };
+      const promoterAggMap = new Map<string, {
+      name: string;
+      channelName: string;
+      orderCount: number;
+      totalRevenue: number;
+      refundedAmount: number;
+      accountEffectivePercentageSum: number;
+      accountEffectivePercentageCount: number;
+        accountGroupRules: AccountRule[];
+      accountGroupOrderCount: number;
+      commission: number;
+      highTicketCommission: number;
+      highTicketRates: Set<number>;
+          details: AggDetail[];
+          orders: AggOrder[];
   }>();
 
   Object.values(userStatsMap).forEach(u => {
       const user = userMap.get(u.userId);
       const accountGroup = user?.accountGroup;
       
+      const accountRules = (accountGroup?.rules || []) as AccountRule[];
       const accountEffectivePercentage = accountGroup 
-          ? getPercentage(u.orderCount, (accountGroup.rules as any[]).filter(r => (r.type || "QUANTITY") === "QUANTITY" && (r.target || "USER") === "USER" && !r.channelConfigId)) 
+          ? getPercentage(u.orderCount, accountRules.filter(r => (r.type || "QUANTITY") === "QUANTITY" && (r.target || "USER") === "USER" && !r.channelConfigId)) 
           : 0;
 
       Object.values(u.promotersMap).forEach(p => {
           let promoterRate = 0;
           let channelConfig: typeof channelConfigs[0] | undefined | null = null;
-          let specificRules: any[] = [];
+          let specificRules: AccountRule[] = [];
 
           if (p.channelName) {
               channelConfig = channelConfigNameMap.get(p.channelName);
               if (channelConfig && accountGroup) {
-                  const currentChannelConfig = channelConfig;
+          const currentChannelConfig = channelConfig!;
                   // Find promoter rules defined in the Account Group for this Channel
-                  specificRules = accountGroup.rules.filter((r: any) => 
+          specificRules = accountGroup.rules.filter((r) => 
                       r.channelConfigId === currentChannelConfig.id && 
                       r.target === 'PROMOTER'
-                  );
+                  ) as AccountRule[];
                   promoterRate = getPercentage(p.count, specificRules);
               }
           }

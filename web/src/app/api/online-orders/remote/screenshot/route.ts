@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const buffer = await page.screenshot({ type: "jpeg", quality: 60 })
-    return new NextResponse(buffer, {
+    return new NextResponse(buffer as any, {
       headers: {
         "Content-Type": "image/jpeg",
         "Cache-Control": "no-store, no-cache, must-revalidate",

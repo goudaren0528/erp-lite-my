@@ -13,13 +13,39 @@ export default async function OnlineOrdersPage() {
   }
 
   const defaultConfig = {
+    autoSyncEnabled: false,
     interval: 420,
-    headless: false,
+    stopThreshold: 20,
+    headless: true,
     nightMode: true,
     nightPeriod: { start: 0, end: 9 },
     webhookUrls: [],
     deviceMappings: [],
     sites: [
+      {
+        id: "zanchen",
+        name: "赞晨",
+        enabled: true,
+        loginUrl: "https://szguokuai.zlj.xyzulin.top/web/index.php?c=user&a=login&&i=1",
+        username: "",
+        password: "",
+        maxPages: 0,
+        selectors: {
+          login_button: "#form1 > button",
+          order_menu_link: "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=order.list.status1",
+          password_input: "#form1 > div > div:nth-child(4) > input",
+          pending_count_element: "",
+          pending_tab_selector: "#myTab > li:nth-child(3) > a",
+          username_input: "#form1 > div > div:nth-child(3) > input",
+          order_list_container: "#table > div > div > div",
+          order_row_selectors: "",
+          order_row_selector_template: "#table > div > div > div > div:nth-child({i})",
+          order_row_index_start: "4",
+          order_row_index_step: "2",
+          order_row_index_end: "",
+          pagination_next_selector: ""
+        }
+      },
       {
         id: "chenlin",
         name: "诚赁",
@@ -139,30 +165,6 @@ export default async function OnlineOrdersPage() {
           order_row_index_end: "",
           pagination_next_selector: ""
         }
-      },
-      {
-        id: "zanchen",
-        name: "赞晨",
-        enabled: true,
-        loginUrl: "https://szguokuai.zlj.xyzulin.top/web/index.php?c=user&a=login&&i=1",
-        username: "",
-        password: "",
-        maxPages: 0,
-        selectors: {
-          login_button: "#form1 > button",
-          order_menu_link: "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=order.list.status1",
-          password_input: "#form1 > div > div:nth-child(4) > input",
-          pending_count_element: "",
-          pending_tab_selector: "#myTab > li:nth-child(3) > a",
-          username_input: "#form1 > div > div:nth-child(3) > input",
-          order_list_container: "#table > div > div > div",
-          order_row_selectors: "",
-          order_row_selector_template: "#table > div > div > div > div:nth-child({i})",
-          order_row_index_start: "4",
-          order_row_index_step: "2",
-          order_row_index_end: "",
-          pagination_next_selector: ""
-        }
       }
     ]
   }
@@ -173,20 +175,30 @@ export default async function OnlineOrdersPage() {
       const parsed = JSON.parse(rawConfig)
       if (parsed && Array.isArray(parsed.sites)) {
         const defaultSiteMap = new Map(defaultConfig.sites.map(site => [site.id, site]))
+        const parsedSiteIds = new Set(parsed.sites.map((s: any) => s.id))
+        const missingDefaultSites = defaultConfig.sites.filter(site => !parsedSiteIds.has(site.id))
+        
         initialConfig = {
           ...defaultConfig,
           ...parsed,
-          sites: parsed.sites.map((site: typeof defaultConfig.sites[number]) => {
-            const fallback = defaultSiteMap.get(site.id)
-            return {
-              ...fallback,
-              ...site,
-              maxPages: typeof site.maxPages === "number" ? site.maxPages : fallback?.maxPages ?? 0,
-              selectors: {
-                ...fallback?.selectors,
-                ...site.selectors
+          sites: [
+            ...parsed.sites.map((site: typeof defaultConfig.sites[number]) => {
+              const fallback = defaultSiteMap.get(site.id)
+              return {
+                ...fallback,
+                ...site,
+                maxPages: typeof site.maxPages === "number" ? site.maxPages : fallback?.maxPages ?? 0,
+                selectors: {
+                  ...fallback?.selectors,
+                  ...site.selectors
+                }
               }
-            }
+            }),
+            ...missingDefaultSites
+          ].sort((a, b) => {
+            if (a.id === "zanchen") return -1
+            if (b.id === "zanchen") return 1
+            return 0
           })
         }
       }

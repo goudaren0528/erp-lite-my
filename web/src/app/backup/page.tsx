@@ -14,7 +14,7 @@ import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 
 export default function BackupPage() {
-    const [selected, setSelected] = useState<string[]>(["orders", "products", "promoters", "users", "accountGroups", "channelConfigs", "commissionRules"])
+    const [selected, setSelected] = useState<string[]>(["orders", "products", "promoters", "users", "accountGroups", "channelConfigs", "commissionRules", "onlineOrdersConfig"])
     const [logs, setLogs] = useState<BackupLog[]>([])
     const [isLoadingLogs, setIsLoadingLogs] = useState(true)
     const [isImporting, setIsImporting] = useState(false)
@@ -28,6 +28,7 @@ export default function BackupPage() {
         { id: "accountGroups", label: "账号组配置 (account-groups.json)" },
         { id: "channelConfigs", label: "推广渠道配置 (channel-configs.json)" },
         { id: "commissionRules", label: "提成规则 (commission-rules.json)" },
+        { id: "onlineOrdersConfig", label: "线上订单同步配置 (online-orders-config.json)" },
     ]
 
     useEffect(() => {

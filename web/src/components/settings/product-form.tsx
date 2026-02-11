@@ -139,12 +139,8 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     }
 
     // Process keywords
-    if (matchKeywords.trim()) {
-        const keywords = matchKeywords.split(/[\n,]/).map(k => k.trim()).filter(Boolean)
-        if (keywords.length > 0) {
-            product.matchKeywords = JSON.stringify(keywords)
-        }
-    }
+    const keywords = matchKeywords.split(/[\n,]/).map(k => k.trim()).filter(Boolean)
+    product.matchKeywords = JSON.stringify(keywords)
 
     if (initialData?.id) {
         product.id = initialData.id

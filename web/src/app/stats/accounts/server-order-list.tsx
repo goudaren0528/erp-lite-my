@@ -12,9 +12,7 @@ import {
 import {
     Pagination,
     PaginationContent,
-    PaginationEllipsis,
     PaginationItem,
-    PaginationLink,
     PaginationNext,
     PaginationPrevious,
 } from "@/components/ui/pagination"
@@ -33,7 +31,21 @@ interface ServerOrderListProps {
 export function ServerOrderList({ userId, period, start, end }: ServerOrderListProps) {
     const [page, setPage] = useState(1)
     const [pageSize] = useState(10)
-    const [orders, setOrders] = useState<any[]>([])
+    const [orders, setOrders] = useState<Array<{
+        id: string;
+        orderNo: string;
+        createdAt: string | Date;
+        productName: string;
+        variantName: string;
+        status: string;
+        source: string;
+        sourceContact?: string | null;
+        rentPrice: number;
+        insurancePrice: number;
+        overdueFee?: number | null;
+        extensions?: Array<{ price: number }>;
+        revenue: number;
+    }>>([])
     const [total, setTotal] = useState(0)
     const [isPending, startTransition] = useTransition()
     const [isLoading, setIsLoading] = useState(true)
@@ -128,7 +140,7 @@ export function ServerOrderList({ userId, period, start, end }: ServerOrderListP
                                 <TableCell>
                                     {order.status === 'CLOSED' ? (
                                         <span className="text-muted-foreground line-through">
-                                            ¥{((order.rentPrice + order.insurancePrice + (order.overdueFee || 0) + (order.extensions?.reduce((sum: number, ext: any) => sum + ext.price, 0) || 0))).toLocaleString()}
+                                            ¥{((order.rentPrice + order.insurancePrice + (order.overdueFee || 0) + (order.extensions?.reduce((sum, ext) => sum + ext.price, 0) || 0))).toLocaleString()}
                                         </span>
                                     ) : (
                                         <span className="font-medium">

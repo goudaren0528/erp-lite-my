@@ -25,7 +25,7 @@ export interface Product {
 }
 
 export type OrderSource = 'AGENT' | 'PEER' | 'RETAIL' | 'PART_TIME' | 'PART_TIME_AGENT';
-export type OrderPlatform = 'XIAOHONGSHU' | 'XIANYU' | 'DOUYIN' | 'OTHER' | 'OFFLINE';
+export type OrderPlatform = 'XIAOHONGSHU' | 'XIANYU' | 'DOUYIN' | 'ZANCHEN' | 'OTHER' | 'OFFLINE';
 export type OrderStatus = 
   | 'PENDING_REVIEW' 
   | 'PENDING_SHIPMENT' 

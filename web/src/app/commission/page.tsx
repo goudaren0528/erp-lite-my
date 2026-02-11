@@ -9,7 +9,6 @@ export const metadata: Metadata = {
 
 export default async function CommissionPage() {
   const accountGroups = await getAccountGroups();
-  const channelConfigs = await getChannelConfigs();
   const users = await prisma.user.findMany({
     select: { id: true, name: true, username: true }
   });

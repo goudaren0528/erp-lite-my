@@ -1,12 +1,10 @@
-FROM node:20-alpine AS base
+FROM node:20-bookworm AS base
 
 # Ensure consistent Server Action IDs across builds/instances
 ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY "erp-lite-persistent-key-2024"
 
 # Install dependencies only when needed
 FROM base AS deps
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Install dependencies based on the preferred package manager
@@ -31,11 +29,17 @@ FROM base AS runner
 WORKDIR /app
 
 ENV NODE_ENV production
+# Set Playwright path to a location writable by the user
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright
+
 # Uncomment the following line in case you want to disable telemetry during runtime.
 # ENV NEXT_TELEMETRY_DISABLED 1
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
+
+# Install Playwright system dependencies
+RUN npx playwright@1.55.0 install-deps chromium
 
 COPY --from=builder /app/public ./public
 
@@ -61,9 +65,15 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 COPY --from=builder --chown=nextjs:nodejs /app/docker-entrypoint.sh ./
 
+# Ensure Playwright browser path exists and is owned by nextjs
+RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH && chown nextjs:nodejs $PLAYWRIGHT_BROWSERS_PATH
+
 RUN chmod +x ./docker-entrypoint.sh
 
 USER nextjs
+
+# Install Chromium browser binary
+RUN npx playwright install chromium
 
 EXPOSE 3000
 

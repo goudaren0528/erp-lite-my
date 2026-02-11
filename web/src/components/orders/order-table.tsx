@@ -88,6 +88,7 @@ const platformMap: Record<string, string> = {
   XIAOHONGSHU: '小红书',
   XIANYU: '闲鱼',
   DOUYIN: '抖音',
+  ZANCHEN: '赞晨',
   OTHER: '其他',
   OFFLINE: '线下',
 }
@@ -169,8 +170,8 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
           return orderA - orderB
       }
 
-      const dateA = new Date(a.rentStartDate).getTime()
-      const dateB = new Date(b.rentStartDate).getTime()
+      const dateA = a.rentStartDate ? new Date(a.rentStartDate).getTime() : 0
+      const dateB = b.rentStartDate ? new Date(b.rentStartDate).getTime() : 0
       return sortDirection === 'asc' ? dateA - dateB : dateB - dateA
   })
 

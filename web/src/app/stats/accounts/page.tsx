@@ -1,20 +1,39 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { calculateOrderRevenue } from "@/lib/utils";
 import { StatsClient } from "./stats-client";
 
-type StatsOrder = {
-  creatorId: string | null;
-  creatorName: string | null;
-  sourceContact: string;
-  rentPrice: number;
-  insurancePrice: number;
-  overdueFee: number | null;
-  extensions: { price: number }[];
-  status: string;
-  createdAt: Date;
-  completedAt: Date | null;
+type Rule = {
+  minCount: number
+  maxCount: number | null
+  percentage: number
+  target?: string
+  channelConfigId?: string | null
+}
+
+type UserWithGroup = {
+  id: string
+  name: string | null
+  username: string | null
+  accountGroupId: string | null
+  accountGroup?: {
+    name: string
+    rules: Rule[]
+    highTicketRate?: number | null
+    settlementByCompleted?: boolean | null
+  } | null
+}
+
+type RawStat = {
+  creatorId: string | null
+  source?: string | null
+  promoterId?: string | null
+  channelId?: string | null
+  promoterName?: string | null
+  orderCount: number | string
+  totalRevenue: number | string
+  refundedAmount: number | string
+  highTicketBase: number | string
 }
 
 interface PageProps {
@@ -78,7 +97,7 @@ export default async function StatsPage(props: PageProps) {
   ]);
 
   // Execute Raw SQL for Aggregation
-  let rawStats: any[] = [];
+  let rawStats: RawStat[] = [];
   
   if (!invalidRange) {
       const startDate = dateRange ? dateRange.gte : new Date('2000-01-01'); // Default far past if cumulative
@@ -153,7 +172,7 @@ export default async function StatsPage(props: PageProps) {
   const promoterNames = new Set(promoters.map(p => p.name));
 
   // Helper: Get Commission Percentage
-  const getPercentage = (count: number, rules: any[]) => {
+  const getPercentage = (count: number, rules: Rule[]) => {
     if (!rules || rules.length === 0) return 0;
     const rule = rules.find(r => count >= r.minCount && (r.maxCount === null || count <= r.maxCount));
     return rule ? rule.percentage : 0;
@@ -164,7 +183,7 @@ export default async function StatsPage(props: PageProps) {
     id: string,
     name: string,
     users: Map<string, {
-      user: any,
+      user: UserWithGroup,
       totalOrderCount: number,
       totalRevenue: number,
       refundedAmount: number,
@@ -187,7 +206,7 @@ export default async function StatsPage(props: PageProps) {
   }>();
 
   // 3.1 Aggregate Raw Stats
-  rawStats.forEach((stat: any) => {
+  rawStats.forEach((stat) => {
       const creatorId = stat.creatorId || 'unknown';
       const promoterName = stat.promoterName || '未标记';
       // const source = stat.source; // Not used in existing logic, relying on promoterName
@@ -208,8 +227,15 @@ export default async function StatsPage(props: PageProps) {
       const group = accountGroupsMap.get(groupId)!;
 
       if (!group.users.has(creatorId)) {
+            const fallbackUser: UserWithGroup = {
+                id: creatorId,
+                name: 'Unknown',
+                username: 'Unknown',
+                accountGroupId: null,
+                accountGroup: null
+            };
             group.users.set(creatorId, {
-                user: user || { id: creatorId, name: 'Unknown', username: 'Unknown' } as any,
+                user: user || fallbackUser,
                 totalOrderCount: 0,
                 totalRevenue: 0,
               refundedAmount: 0,
@@ -242,7 +268,7 @@ export default async function StatsPage(props: PageProps) {
              channelId = promoterNameMap.get(promoterName);
           }
 
-          let channelName = channelId ? channelIdToName.get(channelId) : undefined;
+          const channelName = channelId ? channelIdToName.get(channelId) : undefined;
 
           if (!channelId) {
              // Fallback: check if promoterName itself is a channel name
@@ -287,7 +313,50 @@ export default async function StatsPage(props: PageProps) {
 
 
   // 4. Flatten Data for Client
-  const allStats: any[] = [];
+  const allStats: {
+    accountGroupId: string;
+    accountGroupName: string;
+    highTicketRate: number;
+    userId: string;
+    userName: string;
+    totalOrderCount: number;
+    totalRevenue: number;
+    refundedAmount: number;
+    estimatedEmployeeCommission: number;
+    volumeGradientCommission: number;
+    channelCommission: number;
+    peerCommission: number;
+    agentCommission: number;
+    highTicketCommission: number;
+    estimatedPromoterCommission: number;
+    effectiveBaseRate: number;
+    defaultUserRules: Rule[];
+    channels: Array<{
+      channelId: string;
+      channelName: string;
+      orderCount: number;
+      revenue: number;
+      highTicketBase: number;
+      employeeRate: number;
+      employeeCommission: number;
+      volumeGradientCommission: number;
+      subordinateCommission: number;
+      highTicketCommission: number;
+      promoters: Array<{
+        name: string;
+        count: number;
+        revenue: number;
+        highTicketBase: number;
+        rate: number;
+        commission: number;
+        isPromoter: boolean;
+        accountRate: number;
+        accountCommission: number;
+        highTicketCommission: number;
+      }>;
+    }>;
+    orders: any[];
+  }[] = [];
   const accountGroups: { id: string; name: string }[] = [];
 
   Array.from(accountGroupsMap.values()).forEach(group => {
@@ -299,11 +368,11 @@ export default async function StatsPage(props: PageProps) {
       const groupRules = groupData?.rules || [];
       const highTicketRate = groupData?.highTicketRate || 0;
       
-      const defaultUserRules = groupRules.filter((r: any) => r.target === 'USER' && !r.channelConfigId);
-      const channelUserRulesMap = new Map<string, any[]>();
-      const channelPromoterRulesMap = new Map<string, any[]>();
+      const defaultUserRules = groupRules.filter((r: Rule) => r.target === 'USER' && !r.channelConfigId);
+      const channelUserRulesMap = new Map<string, Rule[]>();
+      const channelPromoterRulesMap = new Map<string, Rule[]>();
 
-      groupRules.forEach((r: any) => {
+      groupRules.forEach((r: Rule) => {
           if (r.channelConfigId) {
               if (r.target === 'PROMOTER') {
                   if (!channelPromoterRulesMap.has(r.channelConfigId)) channelPromoterRulesMap.set(r.channelConfigId, []);
@@ -420,7 +489,7 @@ export default async function StatsPage(props: PageProps) {
               accountGroupName: group.name,
               highTicketRate,
               userId: uStats.user.id,
-              userName: uStats.user.name || uStats.user.username,
+              userName: uStats.user.name ?? uStats.user.username ?? "未知用户",
               totalOrderCount: uStats.totalOrderCount,
               totalRevenue: uStats.totalRevenue,
               refundedAmount: uStats.refundedAmount,

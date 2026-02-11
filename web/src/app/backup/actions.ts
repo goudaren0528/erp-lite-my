@@ -1,7 +1,7 @@
 'use server'
 
 import { prisma } from "@/lib/db";
-import type { PrismaClient } from "@prisma/client";
+import type { ChannelConfig, PrismaClient } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
@@ -35,6 +35,25 @@ export async function importData(formData: FormData) {
         await prisma.$transaction(async (tx: TransactionClient) => {
             const accountGroupIdMap = new Map<string, string>();
             const channelIdMap = new Map<string, string>();
+
+            if (data.onlineOrdersConfig) {
+                const appConfigClient = (tx as unknown as { appConfig?: typeof prisma.appConfig }).appConfig
+                if (appConfigClient) {
+                    const configValue = Array.isArray(data.onlineOrdersConfig)
+                        ? data.onlineOrdersConfig[0]
+                        : data.onlineOrdersConfig
+                    if (configValue && typeof configValue === "object") {
+                        const rawValue = (configValue as { value?: unknown }).value
+                        const value = typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue ?? {})
+                        await appConfigClient.upsert({
+                            where: { key: "online_orders_sync_config" },
+                            update: { value },
+                            create: { key: "online_orders_sync_config", value }
+                        })
+                        importedTypes.push("OnlineOrdersConfig(1)")
+                    }
+                }
+            }
 
             if (data.accountGroups && Array.isArray(data.accountGroups)) {
                 let count = 0;
@@ -215,7 +234,7 @@ export async function importData(formData: FormData) {
                     PART_TIME: "兼职",
                     RETAIL: "零售"
                 };
-                const channelConfigCache = new Map<string, any>();
+                const channelConfigCache = new Map<string, ChannelConfig>();
                 let count = 0;
                 for (const c of data.commissionConfigs) {
                     const channelName = roleMap[c.role] || c.role;
@@ -223,15 +242,17 @@ export async function importData(formData: FormData) {
 
                     let channelConfig = channelConfigCache.get(channelName);
                     if (!channelConfig) {
-                        const existing = await tx.channelConfig.findUnique({ where: { name: channelName } });
+                        const existing = await tx.channelConfig.findUnique({ where: { name: channelName }, select: { id: true, name: true, settlementByCompleted: true, isEnabled: true, createdAt: true, updatedAt: true } });
                         if (existing) {
                             channelConfig = await tx.channelConfig.update({
                                 where: { id: existing.id },
-                                data: { settlementByCompleted: true }
+                                data: { settlementByCompleted: true },
+                                select: { id: true, name: true, settlementByCompleted: true, isEnabled: true, createdAt: true, updatedAt: true }
                             });
                         } else {
                             channelConfig = await tx.channelConfig.create({
-                                data: { name: channelName, settlementByCompleted: true }
+                                data: { name: channelName, settlementByCompleted: true },
+                                select: { id: true, name: true, settlementByCompleted: true, isEnabled: true, createdAt: true, updatedAt: true }
                             });
                         }
                         channelConfigCache.set(channelName, channelConfig);
@@ -344,16 +365,23 @@ export async function importData(formData: FormData) {
             if (data.products && Array.isArray(data.products)) {
                 let count = 0;
                 for (const p of data.products) {
+                    const matchKeywordsValue = p.matchKeywords == null
+                        ? null
+                        : typeof p.matchKeywords === "string"
+                            ? p.matchKeywords
+                            : JSON.stringify(p.matchKeywords || [])
                     await tx.product.upsert({
                         where: { id: p.id },
                         update: {
                             name: p.name,
-                            variants: typeof p.variants === 'string' ? p.variants : JSON.stringify(p.variants || [])
+                            variants: typeof p.variants === 'string' ? p.variants : JSON.stringify(p.variants || []),
+                            matchKeywords: matchKeywordsValue
                         },
                         create: {
                             id: p.id,
                             name: p.name,
-                            variants: typeof p.variants === 'string' ? p.variants : JSON.stringify(p.variants || [])
+                            variants: typeof p.variants === 'string' ? p.variants : JSON.stringify(p.variants || []),
+                            matchKeywords: matchKeywordsValue
                         }
                     });
                     count++;

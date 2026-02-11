@@ -12,7 +12,7 @@ async function main() {
     // 1. Fetch all reference data
     const promoters = await prisma.promoter.findMany();
     const products = await prisma.product.findMany();
-    let channelConfigs = await prisma.channelConfig.findMany();
+    const channelConfigs = await prisma.channelConfig.findMany();
 
     // Ensure '零售' channel exists
     let retailChannel = channelConfigs.find(c => c.name === '零售');

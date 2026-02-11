@@ -1,7 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Initialize S3 Client for Cloudflare R2 (Same configuration as upload)
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
@@ -62,8 +61,9 @@ export async function GET(
           'Cache-Control': 'public, max-age=31536000, immutable',
         },
       });
-    } catch (error: any) {
-      if (error.name === 'NoSuchKey') {
+    } catch (error: unknown) {
+      const err = error as { name?: string }
+      if (err.name === 'NoSuchKey') {
         return new NextResponse('File not found', { status: 404 });
       }
       throw error;

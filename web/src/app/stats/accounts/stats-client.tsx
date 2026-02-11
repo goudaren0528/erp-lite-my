@@ -4,7 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { format, getYear, getMonth } from "date-fns"
 import * as XLSX from "xlsx"
-import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Check, Loader2, RefreshCcw } from "lucide-react"
+import { Calendar as CalendarIcon, Download, ChevronLeft, ChevronRight, Loader2, RefreshCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -56,8 +56,30 @@ import {
 
 import { fetchAccountOrders, syncAllOrdersStandardPrice } from "./actions";
 
+type RetailOrder = {
+  id: string
+  orderNo: string
+  productName: string
+  variantName: string
+  duration: number
+  standardPrice?: number
+  rentPrice?: number
+  status: string
+  createdAt: string | Date
+  channel?: { name?: string } | null
+  source?: string | null
+  
+  promoterName: string
+  revenue: number
+  extensionsTotal: number
+  totalAmount: number
+  insurancePrice: number
+  overdueFee?: number | null
+  refundAmount?: number
+}
+
 function RetailOrderList({ userId, period, start, end, highTicketRate }: { userId: string, period?: string, start?: string, end?: string, highTicketRate: number }) {
-    const [orders, setOrders] = React.useState<any[]>([]);
+    const [orders, setOrders] = React.useState<RetailOrder[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [page, setPage] = React.useState(1);
     const [total, setTotal] = React.useState(0);
@@ -76,8 +98,8 @@ function RetailOrderList({ userId, period, start, end, highTicketRate }: { userI
 
     const totalPages = Math.ceil(total / pageSize);
 
-    const getChannelName = (order: any) => {
-        const source = order.channel?.name || order.source;
+    const getChannelName = (order: RetailOrder) => {
+        const source = order.channel?.name || order.source || undefined;
         if (!source) return '-';
         
         // Map common sources to Chinese
@@ -157,7 +179,7 @@ function RetailOrderList({ userId, period, start, end, highTicketRate }: { userI
                                     </span>
                                 </TableCell>
                                 <TableCell className="text-xs text-muted-foreground">
-                                    {format(new Date(order.createdAt), 'yyyy-MM-dd HH:mm')}
+                                        {format(new Date(order.createdAt), 'yyyy-MM-dd HH:mm')}
                                 </TableCell>
                             </TableRow>
                         )})}
@@ -216,7 +238,7 @@ interface AccountStat {
     estimatedPromoterCommission: number;
     effectiveBaseRate?: number;
     defaultUserRules?: Rule[];
-    orders: any[];
+    orders: RetailOrder[];
     channels: {
         channelId: string;
         channelName: string;
@@ -377,7 +399,6 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
   // Calculate Totals based on Filtered Stats
   const totalOrdersCount = filteredStats.reduce((acc, s) => acc + s.totalOrderCount, 0);
   const totalRevenue = filteredStats.reduce((acc, s) => acc + s.totalRevenue, 0);
-  const totalRefunded = filteredStats.reduce((acc, s) => acc + s.refundedAmount, 0);
   const totalEmployeeCommission = filteredStats.reduce((acc, s) => acc + s.estimatedEmployeeCommission, 0);
   const totalPromoterCommission = filteredStats.reduce((acc, s) => acc + s.estimatedPromoterCommission, 0);
   const totalNetIncome = totalRevenue - totalEmployeeCommission - totalPromoterCommission;
@@ -428,7 +449,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
   
   const handleSync = () => {
       startTransition(async () => {
-          let params: any = { type: syncType };
+          const params: { type: 'all' | 'month' | 'custom'; month?: string; start?: string; end?: string } = { type: syncType };
           
           if (syncType === 'month') {
               params.month = format(syncMonth, 'yyyy-MM');
@@ -452,7 +473,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
 
   // Export Stats
   const handleExport = () => {
-    const rows: any[] = [];
+    const rows: Record<string, string | number>[] = [];
     filteredStats.forEach(stat => {
         stat.channels.forEach(c => {
             c.promoters.forEach(p => {
@@ -527,7 +548,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
           const stat = allStats.find(s => s.userId === userId);
           const highTicketRate = stat?.highTicketRate || 0;
 
-          const orders = res.orders;
+          const orders: RetailOrder[] = res.orders;
           const mapStatus = (status: string) => {
               const map: Record<string, string> = {
                 'COMPLETED': '已完成',
@@ -541,7 +562,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
               return map[status] || status;
           };
 
-          const formatOrderRow = (o: any) => {
+          const formatOrderRow = (o: RetailOrder) => {
               const standardPrice = o.standardPrice || 0;
               const highTicketBase = Math.max(0, (o.rentPrice || 0) - standardPrice);
               const highTicketCommission = highTicketBase * (highTicketRate / 100);
@@ -577,7 +598,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
              isRetail: true
           });
 
-          const highTicketRows = resRetail.orders.map(formatOrderRow);
+          const highTicketRows = (resRetail.orders as RetailOrder[]).map(formatOrderRow);
 
           const wb = XLSX.utils.book_new();
           
@@ -700,7 +721,7 @@ export function StatsClient({ allStats, accountGroups, period = 'cumulative', st
                         <div className="grid gap-4">
                             <div className="grid gap-2">
                                 <label className="text-sm font-medium">同步范围</label>
-                                <Tabs value={syncType} onValueChange={(v: any) => setSyncType(v)} className="w-full">
+                                    <Tabs value={syncType} onValueChange={(v) => setSyncType(v as 'all' | 'month' | 'custom')} className="w-full">
                                     <TabsList className="grid w-full grid-cols-3">
                                         <TabsTrigger value="month">按月份</TabsTrigger>
                                         <TabsTrigger value="custom">自定义</TabsTrigger>

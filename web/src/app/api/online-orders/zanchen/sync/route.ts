@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { startZanchenSync } from "@/lib/online-orders/zanchen"
+import { notifyManualRun } from "@/lib/online-orders/scheduler"
 
 export const dynamic = "force-dynamic"
 
@@ -15,6 +16,11 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   const siteId = typeof body?.siteId === "string" ? body.siteId : "zanchen"
   const status = await startZanchenSync(siteId)
+  
+  if (status.status !== "error") {
+      await notifyManualRun(siteId)
+  }
+
   const statusCode = status.status === "error" ? 500 : 200
   return NextResponse.json(status, { status: statusCode })
 }

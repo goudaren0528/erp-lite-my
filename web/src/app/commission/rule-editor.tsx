@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { CommissionRuleInput } from "./actions";
 
 interface RuleEditorProps {
@@ -23,23 +23,9 @@ export function RuleEditor({ rules, onChange, label = "提成点数", ruleType }
        newRules[0] = { ...newRules[0], minCount: 0 };
        onChange(newRules);
     }
-  }, [rules.length]);
+  }, [rules, onChange, ruleType]);
 
-  const addRule = () => {
-    const lastRule = rules[rules.length - 1];
-    if (lastRule && lastRule.maxCount === null) {
-        return; // Cannot add if last rule is infinite
-    }
-    
-    const newMin = lastRule ? (lastRule.maxCount || 0) + 1 : 0;
-    
-    onChange([
-      ...rules,
-      { minCount: newMin, maxCount: null, percentage: 0, ...(ruleType ? { type: ruleType } : {}) }
-    ]);
-  };
-
-  const updateRule = (index: number, field: keyof CommissionRuleInput, value: any) => {
+  const updateRule = (index: number, field: keyof CommissionRuleInput, value: number | null) => {
     const newRules = [...rules];
     newRules[index] = { ...newRules[index], [field]: value };
 

@@ -1,8 +1,9 @@
 import path from "path"
-import { chromium, type BrowserContext, type Frame, type Page } from "playwright"
+import fs from "fs"
+import { chromium, type BrowserContext, type Frame, type Page, type ElementHandle } from "playwright"
 import { prisma } from "@/lib/db"
 
-const CONFIG_KEY = "online_orders_sync_config"
+export const CONFIG_KEY = "online_orders_sync_config"
 
 type NightPeriod = {
   start: number
@@ -12,7 +13,7 @@ type NightPeriod = {
 type SelectorMap = Record<string, string>
 type PageOrFrame = Page | Frame
 
-type SiteConfig = {
+export type SiteConfig = {
   id: string
   name: string
   enabled: boolean
@@ -21,16 +22,23 @@ type SiteConfig = {
   password: string
   maxPages: number
   selectors: SelectorMap
+  autoSync?: {
+    enabled: boolean
+    interval: number
+  }
 }
 
-type OnlineOrdersConfig = {
-  interval: number
+export type OnlineOrdersConfig = {
+  autoSyncEnabled?: boolean
+  interval?: number
+  concurrencyLimit?: number
   headless: boolean
   nightMode: boolean
   nightPeriod: NightPeriod
   webhookUrls: string[]
   deviceMappings?: { keyword: string; deviceName: string }[]
   sites: SiteConfig[]
+  stopThreshold?: number
 }
 
 export type ZanchenStatus = {
@@ -81,10 +89,12 @@ export type ZanchenStatus = {
 type ZanchenRuntime = {
   status: ZanchenStatus
   running: boolean
+  shouldStop: boolean
   context?: BrowserContext
   page?: Page
   heartbeatTimer?: NodeJS.Timeout
   headless?: boolean
+  currentSite?: string
 }
 
 const globalForZanchen = globalThis as unknown as { zanchenRuntime?: ZanchenRuntime }
@@ -92,17 +102,42 @@ const globalForZanchen = globalThis as unknown as { zanchenRuntime?: ZanchenRunt
 const runtime: ZanchenRuntime =
   globalForZanchen.zanchenRuntime ?? {
     status: { status: "idle", logs: [] },
-    running: false
+    running: false,
+    shouldStop: false,
+    currentSite: undefined
   }
 
 globalForZanchen.zanchenRuntime = runtime
 
+function getLogFilePath() {
+  const date = new Date().toISOString().split('T')[0] // YYYY-MM-DD
+  const logDir = path.join(process.cwd(), "logs")
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true })
+  }
+  return path.join(logDir, `zanchen-${date}.log`)
+}
+
+function appendLogToFile(message: string) {
+  try {
+    const filePath = getLogFilePath()
+    fs.appendFileSync(filePath, message + "\n")
+  } catch (e) {
+    console.error("Failed to write log file", e)
+  }
+}
+
 function addLog(message: string) {
   const logs = runtime.status.logs || []
   const timestamp = new Date().toLocaleTimeString()
-  const newLogs = [...logs, `[${timestamp}] ${message}`]
-  // Limit to last 500 logs to prevent memory issues
-  runtime.status = { ...runtime.status, logs: newLogs.slice(-500) }
+  const prefix = runtime.currentSite ? `[${runtime.currentSite}] ` : ""
+  const fullMsg = `[${timestamp}] ${prefix}${message}`
+  const newLogs = [...logs, fullMsg]
+  
+  appendLogToFile(fullMsg)
+  
+  // Limit to last 2000 logs to prevent memory issues
+  runtime.status = { ...runtime.status, logs: newLogs.slice(-2000) }
 }
 
 function setStatus(next: ZanchenStatus) {
@@ -111,16 +146,18 @@ function setStatus(next: ZanchenStatus) {
   let newLogs = next.logs || existingLogs
   if (!next.logs && next.message && next.message !== runtime.status.message) {
      const timestamp = new Date().toLocaleTimeString()
-     newLogs = [...newLogs, `[${timestamp}] ${next.message}`]
+     const fullMsg = `[${timestamp}] ${next.message}`
+     newLogs = [...newLogs, fullMsg]
+     appendLogToFile(fullMsg)
   }
-  // Limit to last 500 logs
-  if (newLogs.length > 500) {
-    newLogs = newLogs.slice(-500)
+  // Limit to last 2000 logs
+  if (newLogs.length > 2000) {
+    newLogs = newLogs.slice(-2000)
   }
   runtime.status = { ...next, logs: newLogs }
 }
 
-async function loadConfig(): Promise<OnlineOrdersConfig | null> {
+export async function loadConfig(): Promise<OnlineOrdersConfig | null> {
   const appConfigClient = (prisma as unknown as { appConfig?: typeof prisma.appConfig }).appConfig
   if (!appConfigClient) return null
   const record = await appConfigClient.findUnique({ where: { key: CONFIG_KEY } })
@@ -169,7 +206,9 @@ async function ensureContext(headlessConfig: boolean = false): Promise<BrowserCo
     args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled'
+        '--disable-blink-features=AutomationControlled',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
     ],
     ignoreDefaultArgs: ['--enable-automation'] 
   })
@@ -656,8 +695,8 @@ function parseDateTokens(text: string) {
 function parseDateRangeDays(text: string) {
   const matches = parseDateTokens(text)
   if (matches.length < 2) return undefined
-  const start = new Date(matches[0])
-  const end = new Date(matches[1])
+  const start = new Date(matches[0]!)
+  const end = new Date(matches[1]!)
   const ms = end.getTime() - start.getTime()
   const days = Math.round(ms / (24 * 3600 * 1000)) + 1
   return days > 0 ? days : undefined
@@ -666,8 +705,8 @@ function parseDateRangeDays(text: string) {
 function parseDateRange(text: string) {
   const matches = parseDateTokens(text)
   if (matches.length < 2) return { start: undefined, end: undefined }
-  const start = new Date(matches[0])
-  const end = new Date(matches[1])
+  const start = new Date(matches[0]!)
+  const end = new Date(matches[1]!)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return { start: undefined, end: undefined }
   }
@@ -946,7 +985,7 @@ function parseRentDates(text: string) {
   if (range.start || range.end) return range
   const matches = parseDateTokens(text)
   if (matches.length >= 2) {
-    return { start: new Date(matches[0]), end: new Date(matches[1]) }
+    return { start: new Date(matches[0]!), end: new Date(matches[1]!) }
   }
   const start = (text.match(/起租[:：]?\s*(\d{4}-\d{2}-\d{2})/) || [])[1]
   const end = (text.match(/归还[:：]?\s*(\d{4}-\d{2}-\d{2})/) || [])[1]
@@ -1108,8 +1147,7 @@ function parseOrderFromText(text: string) {
     parseMoneyByLabels(text, ["押金", "押"])
   const insurancePrice =
     parseNumber((text.match(/增值服务[:：]\s*￥\s*([\d.]+)/) || [])[1]) ||
-    parseMoneyByLabels(text, ["保险", "保障", "保"]) ||
-    0
+    parseMoneyByLabels(text, ["保险", "保障", "保"])
   const duration = parseDateRangeDays(text) || parseDurationDays(text)
   const { start: rentStartDate, end: returnDeadline } = parseRentDates(text)
   const status =
@@ -1118,14 +1156,24 @@ function parseOrderFromText(text: string) {
     ) || [])[1] || undefined
 
   let promotionChannel = ""
-  const channelMatch = text.match(/下单渠道[:：]\s*支付宝小程序\s+(.+?)(\s+商品|\s+套餐|\s+公域来源|$)/)
+  // Debug: Log context around "下单渠道" to help diagnose extraction issues
+  const debugContext = text.match(/(下单渠道[\s\S]{0,100})/)
+  if (debugContext) {
+      addLog(`[Extraction Debug] Found context: ${debugContext[1].replace(/\n/g, "\\n")}`)
+  }
+
+  // Improved regex: use non-greedy dot matching (stops at newline) and explicit lookaheads
+  const channelMatch = text.match(/下单渠道[:：]?\s*(.*?)(?=\s+(?:公域来源|商品|套餐|订单)|\s*[\r\n]|$)/)
   if (channelMatch) {
     promotionChannel = channelMatch[1].trim()
   }
-  const publicSourceMatch = text.match(/公域来源[:：]\s*([^\s]+)/)
+  
+  const publicSourceMatch = text.match(/公域来源[:：]?\s*(.*?)(?=\s+(?:商品|套餐|订单)|\s*[\r\n]|$)/)
   if (publicSourceMatch) {
-    if (promotionChannel) promotionChannel += " " + publicSourceMatch[1]
-    else promotionChannel = publicSourceMatch[1]
+    const publicSource = publicSourceMatch[1].trim()
+    if (publicSource) {
+      promotionChannel = promotionChannel ? `${promotionChannel} - ${publicSource}` : publicSource
+    }
   }
 
   const platform = inferPlatform(text + " " + promotionChannel)
@@ -1135,7 +1183,7 @@ function parseOrderFromText(text: string) {
   return {
     orderNo,
     productName,
-    variantName: "-",
+    variantName: "-" as string | undefined,
     itemTitle,
     itemSku,
     merchantName,
@@ -1231,24 +1279,48 @@ async function parseLogisticsModal(page: Page, scope: PageOrFrame) {
     const summaryText = await target.$eval("#ajaxModal .logistics-summary", el => (el as HTMLElement).innerText)
         .catch(() => "")
     
-    // 2. Fallback to full body text if summary missing
+    // 2. Use full body text to ensure we don't miss anything
+    // Previous logic used summaryText (first div) which might cause issues if info is in subsequent divs
     const fullText = await target.$eval("#ajaxModal .modal-body", el => (el as HTMLElement).innerText)
         .catch(() => "")
     
-    const textToParse = summaryText || fullText
+    const textToParse = fullText
 
     if (textToParse) {
       const cleanText = textToParse.replace(/\s+/g, " ")
       // addLog(`[Logistics Debug] Parsing text: ${cleanText.substring(0, 100)}...`)
 
       // Regex to extract info
+      // 1. 优先匹配带括号的格式 (更精准)
+      // 使用 [^）)]+ 匹配括号内的所有内容，直到遇到右括号
+      const parenMatch = cleanText.match(/(?:物流单号|单号|发货物流)[:：]?\s*[（(]\s*([^）)]+)\s*[）)]/)
+      
+      // 2. 常规匹配 (后备)
       // Matches "物流单号: xxxx" or "单号 xxxx"
-      const trackMatch = cleanText.match(/(?:物流单号|单号)[:：]?\s*([A-Za-z0-9-]{6,})/)
+      const normalMatch = cleanText.match(/(?:物流单号|单号|发货物流)[:：]?\s*([A-Za-z0-9-\s]{6,})(?=\s*[）)]?)/)
       
+      const trackMatch = parenMatch || normalMatch
+
       // Matches "物流公司: xxxx" or "快递: xxxx"
-      const companyMatch = cleanText.match(/(?:物流公司|快递)[:：]?\s*([^\s\d]+)/)
+      const companyMatch = cleanText.match(/(?:物流公司|快递|快递公司)[:：]?\s*([^\s\d:：]+)/)
       
-      trackingNumber = trackMatch?.[1]
+      trackingNumber = trackMatch?.[1]?.replace(/\s+/g, "")
+      
+      // Fix: Handle spaced tracking numbers inside brackets that might have been missed or partially captured
+      // Example: "（ SF 1559 8611 2623 7 ）" -> "SF1559861126237"
+      // If we didn't get a tracking number or it looks suspicious, try a more aggressive extraction
+      if (!trackingNumber) {
+          const aggressiveMatch = cleanText.match(/[（(]\s*([A-Za-z0-9\s]+)\s*[）)]/)
+          if (aggressiveMatch) {
+             const candidate = aggressiveMatch[1].replace(/\s+/g, "")
+             // If it looks like a tracking number (long enough, mostly digits/letters)
+             if (candidate.length > 8 && /^[A-Za-z0-9]+$/.test(candidate)) {
+                 trackingNumber = candidate
+                 addLog(`[Logistics Debug] Extracted tracking number from brackets: ${trackingNumber}`)
+             }
+          }
+      }
+
       const candidateCompany = companyMatch?.[1]
       // Filter out invalid company names captured by loose regex
       if (candidateCompany && !/^(物流单号|单号|运单号)$/.test(candidateCompany)) {
@@ -1292,7 +1364,7 @@ async function parseLogisticsModal(page: Page, scope: PageOrFrame) {
     // If we haven't found any info yet, but the text contains the labels, treat it as empty success
     if (!hasAnyInfo && textToParse) {
         const cleanText = textToParse.replace(/\s+/g, " ")
-        const hasLabels = /(?:物流单号|单号)[:：]?/.test(cleanText) && /(?:物流公司|快递)[:：]?/.test(cleanText)
+        const hasLabels = /(?:物流单号|单号|发货物流)[:：]?/.test(cleanText) && /(?:物流公司|快递|快递公司)[:：]?/.test(cleanText)
         if (hasLabels) {
             hasAnyInfo = true
             company = company || ""
@@ -1354,6 +1426,7 @@ async function extractLogisticsFromDetailsPage(
   page: Page,
   row: ElementHandle<Element> | ElementHandle<Node>
 ) {
+  const detailTimeoutMs = 15000
   let newPage: Page | null = null
   try {
     const detailBtn = await row.$("div.ops.list-inner > a.order_detail_key")
@@ -1362,18 +1435,27 @@ async function extractLogisticsFromDetailsPage(
       return null
     }
 
-    addLog("[Detail Debug] Clicking detail button to open new tab...")
-
+    const href = await detailBtn.getAttribute("href").catch(() => null)
     const context = page.context()
-    const pagePromise = context.waitForEvent("page", { timeout: 10000 })
-    await detailBtn.click({ modifiers: ["Control"] }) // Ctrl+Click to open in new tab if possible, or just click and expect new tab
-    // Note: The user said "use new window open mode click". Usually clicking a link with target=_blank or JS open does this.
-    // If it's a normal link, we might need to just click it. But standard behavior for 'order_detail_key' often opens new tab.
-    // We wait for the new page event.
 
-    newPage = await pagePromise
-    await newPage.waitForLoadState("domcontentloaded")
-    addLog("[Detail Debug] Detail page opened and loaded")
+    if (href && href.trim() !== "" && !href.startsWith("javascript:") && !href.startsWith("#")) {
+        newPage = await context.newPage()
+        const targetUrl = new URL(href, page.url()).toString()
+        await newPage.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: detailTimeoutMs })
+        await newPage.waitForTimeout(1000) // Wait for stability
+        addLog("[Detail Debug] Detail page opened and loaded via URL")
+    } else {
+        addLog(`[Detail Debug] Clicking detail button (href: ${href || 'null'})...`)
+        const pagePromise = context.waitForEvent("page", { timeout: detailTimeoutMs })
+        await detailBtn.click({ modifiers: ["Control"] }) 
+        newPage = await pagePromise
+        await Promise.race([
+          newPage.waitForLoadState("domcontentloaded"),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("detail page load timeout")), detailTimeoutMs))
+        ])
+        await newPage.waitForTimeout(1000) // Wait for stability
+        addLog("[Detail Debug] Detail page opened and loaded via Click")
+    }
 
     // Selectors from user
     const shipSelector = "body > div.wb-container > div:nth-child(5) > div:nth-child(7) > div:nth-child(3)"
@@ -1381,14 +1463,15 @@ async function extractLogisticsFromDetailsPage(
     const statusSelector = "body > div.wb-container > div:nth-child(5) > div:nth-child(4) > div:nth-child(3) > div"
 
     // Helper to parse text from selector
-    const parseInfo = async (selector: string) => {
+    const parseInfo = async (selector: string, label: string) => {
       try {
+        // addLog(`[Detail Debug] Extracting ${label}...`)
         const text = await newPage!.$eval(selector, el => (el as HTMLElement).innerText).catch(() => "")
         if (!text) return null
         const clean = text.replace(/\s+/g, " ").trim()
         
         // Extract company
-        let company = (clean.match(/(?:物流公司|快递公司)[:：]?\s*([^\s]+)/) || [])[1]
+        let company: string | undefined = (clean.match(/(?:物流公司|快递公司)[:：]?\s*([^\s]+)/) || [])[1]
         if (company && /^(物流单号|单号|运单号|发货物流)$/.test(company)) {
             company = undefined
         }
@@ -1397,7 +1480,13 @@ async function extractLogisticsFromDetailsPage(
         // Extract tracking number
         // Allow Chinese characters for cases like "无单号"
         // Updated: Removed Chinese characters to avoid capturing status text, added '发货物流'
-        const trackingNumber = (clean.match(/(?:物流单号|运单号|发货物流)[:：]?\s*([A-Za-z0-9-]+)/) || [])[1]
+        // Updated: Handle spaces in tracking number and parentheses (e.g. "（ SF 123 456 ）")
+        let trackingNumber = (clean.match(/(?:物流单号|运单号|发货物流)[:：]?\s*(?:[（(]\s*)?([A-Za-z0-9\s-]+)(?:[）)\s])?/) || [])[1]
+        if (trackingNumber) {
+           trackingNumber = trackingNumber.replace(/\s+/g, "")
+           // If result is too short after stripping spaces, ignore it (likely noise)
+           if (trackingNumber.length < 5) trackingNumber = ""
+        }
         
         // Special handling for offline pickup
         if (clean.includes("线下取货") || clean.includes("线下自提")) {
@@ -1426,13 +1515,17 @@ async function extractLogisticsFromDetailsPage(
         }
     }
 
-    const shippingInfo = await parseInfo(shipSelector)
-    const returnInfo = await parseInfo(returnSelector)
+    const shippingInfo = await parseInfo(shipSelector, "shipping")
+    const returnInfo = await parseInfo(returnSelector, "return")
     const status = await parseStatus(statusSelector)
 
     return { shippingInfo, returnInfo, status }
 
   } catch (e) {
+    if (String(e).includes("timeout")) {
+      addLog("[Detail Debug] Detail page load timeout, skipping order")
+      return null
+    }
     addLog(`[Detail Debug] Error extracting details: ${e}`)
     return null
   } finally {
@@ -1442,11 +1535,12 @@ async function extractLogisticsFromDetailsPage(
   }
 }
 
-async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: SelectorMap) {
+async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: SelectorMap, options?: { concurrencyLimit?: number }) {
   await revealReceiverInfo(scope, selectors)
   const rowSelector = await resolveRowSelector(scope, selectors)
   if (!rowSelector) return []
   const rowHandles = await scope.$$(rowSelector)
+  type RowHandle = (typeof rowHandles)[number]
   let headerTexts: string[] | null = null
   if (rowHandles.length > 0) {
     headerTexts = await rowHandles[0].evaluate(row => {
@@ -1464,6 +1558,17 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
     })
   }
   const parsed: Awaited<ReturnType<typeof parseOrderFromText>>[] = []
+  const detailTasks: Array<{
+    row: RowHandle
+    base: Awaited<ReturnType<typeof parseOrderFromText>>
+    statusRef: { value: string }
+    updateStatus: "missing" | "always" | "never"
+    applyShipping: boolean
+    applyReturn: boolean
+    label: "status" | "groupA" | "fallback" | "final"
+  }> = []
+  const existingOrderLogisticsCache = new Map<string, boolean>()
+  const maxDetailTasks = 5
   for (let i = 0; i < rowHandles.length; i += 1) {
     try {
       const row = rowHandles[i]
@@ -1472,7 +1577,8 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
       }
       const rawText = await row.innerText()
       const text = rawText.replace(/\s+/g, " ").trim()
-      let base = parseOrderFromText(rawText)
+      const textBase = parseOrderFromText(rawText)
+      let base = textBase
       if (headerTexts && headerTexts.length > 0) {
         const structured = await row.evaluate((row, headers) => {
           const cells = Array.from(row.querySelectorAll("td"))
@@ -1487,9 +1593,13 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
           return Object.keys(data).length > 0 ? data : null
         }, headerTexts)
         if (structured) {
-          base = parseOrderFromCells(structured)
-          if (!base.orderNo) {
-            base = parseOrderFromText(text)
+          const cellBase = parseOrderFromCells(structured)
+          if (cellBase.orderNo) {
+            base = cellBase
+            // Fallback: If cell parsing missed promotionChannel, use the one from raw text
+            if (!base.promotionChannel && textBase.promotionChannel) {
+              base.promotionChannel = textBase.promotionChannel
+            }
           }
         }
       }
@@ -1507,13 +1617,22 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
         }
       }
       if (base.orderNo) {
-        const completed = await prisma.order.findFirst({
-          where: { orderNo: base.orderNo, status: "COMPLETED" },
-          select: { id: true }
+        const existingOrder = await prisma.order.findUnique({
+          where: { orderNo: base.orderNo },
+          select: {
+            status: true,
+            logisticsCompany: true,
+            trackingNumber: true,
+            returnLogisticsCompany: true,
+            returnTrackingNumber: true
+          }
         })
-        if (completed) {
+        if (existingOrder?.status === "COMPLETED") {
           addLog(`Skip completed order ${base.orderNo}`)
           continue
+        }
+        if (!existingOrderLogisticsCache.has(base.orderNo)) {
+          existingOrderLogisticsCache.set(base.orderNo, false)
         }
       }
       try {
@@ -1543,6 +1662,7 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
         }
 
         let status = statusFromOps || base.status || ""
+        const statusRef = { value: status }
         
         if (!status) {
             // Fallback: try to extract status from the whole row text using regex
@@ -1551,24 +1671,42 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
             ) || [])[1]
             if (fallbackStatus) {
                 status = fallbackStatus
+                statusRef.value = fallbackStatus
                 addLog(`[Status Debug] Recovered status '${fallbackStatus}' from row text for ${base.orderNo}`)
             } else {
                 addLog(`[Status Debug] Failed to parse status for ${base.orderNo}. Row text snippet: ${(text || "").substring(0, 50)}...`)
             }
         }
 
-        // Detail page result cache to avoid double extraction
-        let detailPageResult: Awaited<ReturnType<typeof extractLogisticsFromDetailsPage>> | null = null
+        const isFinalStatus =
+          status.includes("已完成") ||
+          status.includes("已关闭") ||
+          status.includes("已买断") ||
+          status.includes("已购买") ||
+          status.includes("已取消")
+        const listHasLogistics =
+          (!!base.logisticsCompany && !!base.trackingNumber) ||
+          (!!base.returnLogisticsCompany && !!base.returnTrackingNumber)
+        const skipDetail =
+          (isFinalStatus && listHasLogistics)
+        let detailScheduled = false
+        const scheduleDetail = (task: Omit<(typeof detailTasks)[number], "row" | "base" | "statusRef">) => {
+          if (detailScheduled) return
+          if (detailTasks.length >= maxDetailTasks) return
+          if (skipDetail) return
+          detailTasks.push({ row, base, statusRef, ...task })
+          detailScheduled = true
+        }
 
         // If status is still missing, try detail page
         if (!status || status === "未知") {
              addLog(`[Status Debug] Status missing for ${base.orderNo}, trying detail page extraction...`)
-             detailPageResult = await extractLogisticsFromDetailsPage(page, row)
-             if (detailPageResult?.status) {
-                 status = detailPageResult.status
-                 base.status = status
-                 addLog(`[Detail] Recovered status for ${base.orderNo} from detail page: ${status}`)
-             }
+             scheduleDetail({
+               updateStatus: "missing",
+               applyShipping: true,
+               applyReturn: true,
+               label: "status"
+             })
         }
 
         const needLogistics =
@@ -1579,7 +1717,7 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
           status.includes("归还中") ||
           status.includes("已完成")
 
-        if (needLogistics) {
+        if (needLogistics && !detailScheduled) {
           let extracted = false
           // Group A: Returning or Completed -> Prefer Detail Page for shipping history
           // Note: "设备归还中" is technically returning, user said "归还中"
@@ -1589,33 +1727,13 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
              // But let's prioritize the detail page flow as requested
              addLog(`[Logistics] Status ${status}, using Detail Page flow for ${base.orderNo}`)
              
-             if (!detailPageResult) {
-                detailPageResult = await extractLogisticsFromDetailsPage(page, row)
-             }
-             const details = detailPageResult
-
-             if (details) {
-                 // Update status if it was invalid or we found a better one in details
-                 if (details.status && (!status || status === "未知")) {
-                     base.status = details.status
-                     addLog(`[Detail] Updated status for ${base.orderNo} to ${details.status}`)
-                 }
-
-                 if (details.shippingInfo) {
-                     base.logisticsCompany = details.shippingInfo.company
-                     base.trackingNumber = details.shippingInfo.trackingNumber
-                     base.latestLogisticsInfo = details.shippingInfo.raw
-                     addLog(`[Detail] Extracted shipping for ${base.orderNo}: ${base.logisticsCompany} ${base.trackingNumber}`)
-                     extracted = true
-                 }
-                 if (details.returnInfo) {
-                     base.returnLogisticsCompany = details.returnInfo.company
-                     base.returnTrackingNumber = details.returnInfo.trackingNumber
-                     base.returnLatestLogisticsInfo = details.returnInfo.raw
-                     addLog(`[Detail] Extracted return for ${base.orderNo}: ${base.returnLogisticsCompany} ${base.returnTrackingNumber}`)
-                     extracted = true
-                 }
-             }
+             scheduleDetail({
+               updateStatus: "missing",
+               applyShipping: true,
+               applyReturn: true,
+               label: "groupA"
+             })
+             extracted = true
           }
           
           // Group B: To Receive/Return/Overdue -> Try Modal first, then Detail Page
@@ -1651,58 +1769,107 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
               // Fallback to Detail Page if Modal failed or incomplete (no tracking number, unless it's offline pickup)
                const isOffline = base.logisticsCompany && /线下|自提|无需/.test(base.logisticsCompany)
                if ((!base.trackingNumber && !isOffline) || !base.logisticsCompany) {
-                   if (!detailPageResult) {
-                       detailPageResult = await extractLogisticsFromDetailsPage(page, row)
-                   }
-                   const details = detailPageResult
-
-                   if (details) {
-                      // Always update status from detail page if available, as it's more reliable
-                      if (details.status) {
-                          base.status = details.status
-                          status = details.status
-                          addLog(`[Fallback] Updated status for ${base.orderNo} to ${details.status}`)
-                      }
-                      if (details.shippingInfo) {
-                        base.logisticsCompany = details.shippingInfo.company
-                        base.trackingNumber = details.shippingInfo.trackingNumber
-                        base.latestLogisticsInfo = details.shippingInfo.raw
-                        addLog(`[Fallback] Extracted shipping from detail for ${base.orderNo}`)
-                        extracted = true
-                      }
-                      if (!details.shippingInfo && !details.returnInfo) {
-                         addLog(`[Detail Debug] No logistics info found on detail page for ${base.orderNo}`)
-                      }
-                   }
-                   else {
-                      addLog(`[Detail Debug] Detail page could not be opened for ${base.orderNo}`)
-                   }
+                   scheduleDetail({
+                     updateStatus: "always",
+                     applyShipping: true,
+                     applyReturn: true,
+                     label: "fallback"
+                   })
                }
           }
           
           // Final fallback: if still no logistics and status suggests shipping may exist or offline pickup,
           // attempt detail page extraction once to catch cases like 线下自提
-          if (!extracted && (!base.logisticsCompany || (!base.trackingNumber && !/线下|自提|无需/.test(base.logisticsCompany || "")))) {
+          // Only try if we haven't already tried the detail page (detailPageResult is null)
+          if (!extracted && !detailScheduled && (!base.logisticsCompany || (!base.trackingNumber && !/线下|自提|无需/.test(base.logisticsCompany || "")))) {
               addLog(`[Final Fallback] Trying detail page for ${base.orderNo} due to missing logistics`)
-              const finalDetails = await extractLogisticsFromDetailsPage(page, row)
-              if (finalDetails?.shippingInfo) {
-                  base.logisticsCompany = finalDetails.shippingInfo.company
-                  base.trackingNumber = finalDetails.shippingInfo.trackingNumber
-                  base.latestLogisticsInfo = finalDetails.shippingInfo.raw
-                  addLog(`[Final Fallback] Extracted shipping for ${base.orderNo}: ${base.logisticsCompany || '未知公司'} ${base.trackingNumber || '无单号'}`)
-              } else {
-                  addLog(`[Final Fallback] Still no logistics for ${base.orderNo}`)
-              }
+              scheduleDetail({
+                updateStatus: "never",
+                applyShipping: true,
+                applyReturn: false,
+                label: "final"
+              })
           }
         }
         base.status = status || undefined
-      } catch {
-        void 0
+      } catch (e) {
+        addLog(`[Error] Non-critical error processing row logic: ${e}`)
       }
       parsed.push(base)
-    } catch {
-      void 0
+    } catch (e) {
+      addLog(`[Error] Critical error processing row: ${e}`)
+      if (String(e).includes("Target page, context or browser has been closed")) {
+          addLog("[System] Browser crash detected. Resetting context.")
+          try { if (runtime.context) await runtime.context.close() } catch {}
+          runtime.context = undefined
+          runtime.page = undefined
+      }
     }
+  }
+  if (detailTasks.length > 0) {
+    let nextIndex = 0
+    const concurrency = Math.min(options?.concurrencyLimit || 3, detailTasks.length, 5)
+    const worker = async () => {
+      while (true) {
+        const currentIndex = nextIndex
+        if (currentIndex >= detailTasks.length) break
+        nextIndex += 1
+        const task = detailTasks[currentIndex]
+        const details = await extractLogisticsFromDetailsPage(page, task.row)
+        if (!details) {
+          if (task.label === "fallback") {
+            addLog(`[Detail Debug] Detail page could not be opened for ${task.base.orderNo}`)
+          } else if (task.label === "final") {
+            addLog(`[Final Fallback] Still no logistics for ${task.base.orderNo}`)
+          }
+          continue
+        }
+        if (details.status) {
+          const currentStatus = task.statusRef.value
+          if (
+            task.updateStatus === "always" ||
+            (task.updateStatus === "missing" && (!currentStatus || currentStatus === "未知"))
+          ) {
+            task.statusRef.value = details.status
+            task.base.status = details.status
+            if (task.label === "fallback") {
+              addLog(`[Fallback] Updated status for ${task.base.orderNo} to ${details.status}`)
+            } else if (task.label === "status") {
+              addLog(`[Detail] Recovered status for ${task.base.orderNo} from detail page: ${details.status}`)
+            } else if (task.label === "groupA") {
+              addLog(`[Detail] Updated status for ${task.base.orderNo} to ${details.status}`)
+            }
+          }
+        }
+        if (task.applyShipping && details.shippingInfo) {
+          task.base.logisticsCompany = details.shippingInfo.company
+          task.base.trackingNumber = details.shippingInfo.trackingNumber
+          task.base.latestLogisticsInfo = details.shippingInfo.raw
+          if (task.label === "fallback") {
+            addLog(`[Fallback] Extracted shipping from detail for ${task.base.orderNo}`)
+          } else if (task.label === "final") {
+            addLog(`[Final Fallback] Extracted shipping for ${task.base.orderNo}: ${task.base.logisticsCompany || '未知公司'} ${task.base.trackingNumber || '无单号'}`)
+          } else {
+            addLog(`[Detail] Extracted shipping for ${task.base.orderNo}: ${task.base.logisticsCompany} ${task.base.trackingNumber}`)
+          }
+        }
+        if (task.applyReturn && details.returnInfo) {
+          task.base.returnLogisticsCompany = details.returnInfo.company
+          task.base.returnTrackingNumber = details.returnInfo.trackingNumber
+          task.base.returnLatestLogisticsInfo = details.returnInfo.raw
+          if (task.label === "fallback") {
+            addLog(`[Fallback] Extracted return info from detail for ${task.base.orderNo}`)
+          } else {
+            addLog(`[Detail] Extracted return for ${task.base.orderNo}: ${task.base.returnLogisticsCompany} ${task.base.returnTrackingNumber}`)
+          }
+        }
+        if (!details.shippingInfo && !details.returnInfo && task.label === "fallback") {
+          addLog(`[Detail Debug] No logistics info found on detail page for ${task.base.orderNo}`)
+        }
+      }
+    }
+    const workers = Array.from({ length: concurrency }, () => worker())
+    await Promise.all(workers)
   }
   return parsed
 }
@@ -1732,19 +1899,21 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
   for (const o of orders) {
     if (!o.orderNo) continue
     try {
-      const merchantName = o.merchantName || ""
-      const isAllowedMerchant = allowedMerchants.some(keyword => merchantName.includes(keyword))
-      if (!isAllowedMerchant) {
-        await prisma.order.deleteMany({ where: { orderNo: o.orderNo, creatorId: "system" } })
-        continue
-      }
+      // Removed merchant filter as we are scraping the Zanchen portal directly, 
+      // so all orders found here are valid Zanchen orders.
+      // const merchantName = o.merchantName || ""
+      // const isAllowedMerchant = allowedMerchants.some(keyword => merchantName.includes(keyword))
+      // if (!isAllowedMerchant) {
+      //   await prisma.order.deleteMany({ where: { orderNo: o.orderNo, creatorId: "system" } })
+      //   continue
+      // }
       let source = "RETAIL"
       const promo = o.promotionChannel || ""
       if (promo.includes("同行")) source = "PEER"
       else if (promo.includes("兼职") || promo.includes("代理")) source = "PART_TIME_AGENT"
 
-      let platform = o.platform || "OTHER"
-      if (promo.includes("闲鱼")) platform = "XIANYU"
+      // Enforce ZANCHEN platform identifier for all orders scraped from Zanchen
+      const platform = "ZANCHEN"
 
       const deviceMapping = matchDeviceMapping(
         o.itemTitle || o.productName,
@@ -1772,11 +1941,12 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
 
       const mappedStatus = mapStatus(o.status || "")
 
-      await prisma.order.upsert({
+      await prisma.onlineOrder.upsert({
         where: { orderNo: o.orderNo },
         update: {
           source,
           platform,
+          promotionChannel: promo || undefined,
           status: mappedStatus,
           customerXianyuId: o.customerName || "",
           sourceContact: o.customerName || "",
@@ -1790,11 +1960,9 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
           rentPrice: o.rentPrice || 0,
           deposit: o.deposit || 0,
           insurancePrice: o.insurancePrice || 0,
-          overdueFee: 0,
           totalAmount: o.totalAmount || 0,
-          standardPrice: 0,
           address: o.address || "-",
-          recipientName: o.customerName || undefined,
+          customerName: o.customerName || undefined,
           recipientPhone: o.recipientPhone || undefined,
           logisticsCompany: o.logisticsCompany || undefined,
           trackingNumber: o.trackingNumber || undefined,
@@ -1809,6 +1977,7 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
           orderNo: o.orderNo,
           source,
           platform,
+          promotionChannel: promo || undefined,
           status: mappedStatus,
           customerXianyuId: o.customerName || "",
           sourceContact: o.customerName || "",
@@ -1822,11 +1991,9 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
           rentPrice: o.rentPrice || 0,
           deposit: o.deposit || 0,
           insurancePrice: o.insurancePrice || 0,
-          overdueFee: 0,
           totalAmount: o.totalAmount || 0,
-          standardPrice: 0,
           address: o.address || "-",
-          recipientName: o.customerName || undefined,
+          customerName: o.customerName || undefined,
           recipientPhone: o.recipientPhone || undefined,
           logisticsCompany: o.logisticsCompany || undefined,
           trackingNumber: o.trackingNumber || undefined,
@@ -1835,27 +2002,75 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
           returnTrackingNumber: o.returnTrackingNumber || undefined,
           returnLatestLogisticsInfo: o.returnLatestLogisticsInfo || undefined,
           rentStartDate: rentStartDateValue || undefined,
-          returnDeadline: returnDeadlineValue || undefined,
-          creatorId: "system",
-          creatorName: "系统"
+          returnDeadline: returnDeadlineValue || undefined
         }
       })
+
+      // Sync to Offline Order if exists, but only update status if advanced
+      const existingOfflineOrder = await prisma.order.findUnique({
+        where: { orderNo: o.orderNo },
+        select: { status: true }
+      })
+
+      if (existingOfflineOrder) {
+        const statusPriority: Record<string, number> = {
+          "PENDING_PAYMENT": 0,
+          "PENDING_REVIEW": 1,
+          "PENDING_SHIPMENT": 2,
+          "RENTING": 3,
+          "RETURNING": 4,
+          "COMPLETED": 5,
+          "CLOSED": 6,
+          "CANCELED": 6
+        }
+        
+        const currentPriority = statusPriority[existingOfflineOrder.status] ?? -1
+        const newPriority = statusPriority[mappedStatus] ?? -1
+        
+        // Always update logistics, but only update status if new status is advanced (>=)
+        const updateData: any = {
+          logisticsCompany: o.logisticsCompany || undefined,
+          trackingNumber: o.trackingNumber || undefined,
+          latestLogisticsInfo: o.latestLogisticsInfo || undefined,
+          returnLogisticsCompany: o.returnLogisticsCompany || undefined,
+          returnTrackingNumber: o.returnTrackingNumber || undefined,
+          returnLatestLogisticsInfo: o.returnLatestLogisticsInfo || undefined,
+        }
+        
+        if (newPriority >= currentPriority && newPriority !== -1) {
+            updateData.status = mappedStatus
+        }
+        
+        // Filter out undefined values to avoid overwriting existing data with null
+        const cleanUpdateData = Object.fromEntries(
+            Object.entries(updateData).filter(([_, v]) => v !== undefined)
+        )
+
+        if (Object.keys(cleanUpdateData).length > 0) {
+            await prisma.order.update({
+                where: { orderNo: o.orderNo },
+                data: cleanUpdateData
+            })
+            addLog(`已同步更新本地订单: ${o.orderNo}`)
+        }
+      }
+
       savedCount++
-    } catch {
-      void 0
+    } catch (e) {
+      addLog(`[保存失败] 订单 ${o.orderNo}: ${e}`)
     }
   }
-  await prisma.order.deleteMany({
-    where: {
-      creatorId: "system",
-      NOT: {
-        OR: allowedMerchants.map(keyword => ({
-          merchantName: { contains: keyword }
-        }))
-      }
-    }
-  })
-  addLog(`Saved ${savedCount} orders to database`)
+  // await prisma.order.deleteMany({
+  //   where: {
+  //     creatorId: "system",
+  //     NOT: {
+  //       OR: allowedMerchants.map(keyword => ({
+  //         merchantName: { contains: keyword }
+  //       }))
+  //     }
+  //   }
+  // })
+  addLog(`保存完成，共处理 ${savedCount} 个订单`)
 }
 
 async function saveSnapshot(lastResult: NonNullable<ZanchenStatus["lastResult"]>) {
@@ -1904,10 +2119,22 @@ async function runZanchenSync(siteId: string) {
     setStatus({ status: "error", message: "未找到赞晨配置" })
     return
   }
-  if (!site.enabled) {
-    setStatus({ status: "error", message: "赞晨平台未启用" })
+
+  // Check if sync is enabled for this site
+  let isEnabled = false
+  if (siteId === "zanchen") {
+    isEnabled = config?.autoSyncEnabled ?? false
+  } else {
+    isEnabled = site.autoSync?.enabled ?? false
+  }
+
+  if (!isEnabled) {
+    setStatus({ status: "error", message: `站点 ${site.name} 的线上自动抓取未启用，无法同步` })
     return
   }
+
+  runtime.currentSite = site.name
+
   if (
     !site.selectors.order_list_container?.trim() &&
     !site.selectors.order_row_selectors?.trim() &&
@@ -2029,8 +2256,17 @@ async function runZanchenSync(siteId: string) {
   let firstPageRows: string[] = []
   let parsedOrders: NonNullable<NonNullable<ZanchenStatus["lastResult"]>["parsedOrders"]> = []
   const parsedOrderMap = new Map<string, NonNullable<NonNullable<ZanchenStatus["lastResult"]>["parsedOrders"]>[number]>()
+  let pendingSaveOrders: NonNullable<NonNullable<ZanchenStatus["lastResult"]>["parsedOrders"]> = []
   const maxPages = site.maxPages ?? 0
+  const stopThreshold = config?.stopThreshold ?? 20
+  let consecutiveFinalStateCount = 0
+  runtime.shouldStop = false
   while (true) {
+   try {
+    if (runtime.shouldStop) {
+      addLog("用户手动停止同步")
+      break
+    }
     const ok = await ensureNoRisk(page, site)
     if (!ok) {
       setStatus({ status: "error", message: "风控验证超时" })
@@ -2053,10 +2289,66 @@ async function runZanchenSync(siteId: string) {
     if (pagesVisited === 1) {
       firstPageRows = await extractOrderRows(scope, site.selectors)
     }
-    const pageOrders = await extractParsedOrders(page, scope, site.selectors)
+    const concurrencyLimit = siteId === "zanchen" 
+      ? (config?.concurrencyLimit ?? 3) 
+      : (site.autoSync?.concurrencyLimit ?? 3)
+    const pageOrders = await extractParsedOrders(page, scope, site.selectors, { concurrencyLimit })
+    
+    // Incremental Sync Check
+    if (stopThreshold > 0 && pageOrders.length > 0) {
+      const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean) as string[]
+      if (orderNos.length > 0) {
+        // Include both Chinese and English statuses to ensure we match existing orders correctly
+        const finalStatuses = [
+            "已完成", "已取消", "已关闭", "审核拒绝", "已买断", "已购买", "已退租", "退租完成",
+            "COMPLETED", "CLOSED", "BOUGHT_OUT", "CANCELED"
+        ]
+        try {
+          const existingFinalOrders = await prisma.order.findMany({
+            where: {
+              orderNo: { in: orderNos },
+              status: { in: finalStatuses }
+            },
+            select: { orderNo: true, status: true }
+          })
+          const finalSet = new Set(existingFinalOrders.map(o => o.orderNo))
+          
+          let shouldStop = false
+          for (const order of pageOrders) {
+            if (!order.orderNo) continue
+            if (finalSet.has(order.orderNo)) {
+              consecutiveFinalStateCount++
+              // addLog(`[Debug] Order ${order.orderNo} is final in DB. Consecutive count: ${consecutiveFinalStateCount}`)
+              if (consecutiveFinalStateCount >= stopThreshold) {
+                addLog(`已连续发现 ${consecutiveFinalStateCount} 个历史终态订单，触发增量同步停止阈值。`)
+                shouldStop = true
+                break
+              }
+            } else {
+              if (consecutiveFinalStateCount > 0) {
+                 // addLog(`[Debug] Order ${order.orderNo} is NOT final in DB. Resetting count from ${consecutiveFinalStateCount} to 0`)
+              }
+              consecutiveFinalStateCount = 0
+            }
+          }
+          if (shouldStop) break
+        } catch (e) {
+          console.error("Error checking incremental sync status:", e)
+        }
+      }
+    }
+
     for (const order of pageOrders) {
       if (!order.orderNo) continue
       parsedOrderMap.set(order.orderNo, order)
+      pendingSaveOrders.push(order)
+    }
+
+    // Batch save every 200 orders
+    if (pendingSaveOrders.length >= 200) {
+        addLog(`[System] 触发批量保存，正在写入 ${pendingSaveOrders.length} 条订单...`)
+        await saveOrdersToDB(pendingSaveOrders)
+        pendingSaveOrders = []
     }
 
     if (maxPages > 0 && pagesVisited >= maxPages) break
@@ -2175,6 +2467,13 @@ async function runZanchenSync(siteId: string) {
       await scope.waitForSelector(container, { timeout: 10000 }).catch(() => void 0)
     }
     await waitRandom(page, 800, 1600)
+   } catch (e) {
+     addLog(`[System] Error in sync loop: ${e}`)
+     if (String(e).includes("Target page, context or browser has been closed")) {
+         addLog(`[System] Browser crashed. Stopping sync to save data.`)
+     }
+     break
+   }
   }
 
   const summary = await extractOrderSummary(scope, site.selectors)
@@ -2191,8 +2490,9 @@ async function runZanchenSync(siteId: string) {
 
   setStatus({ status: "running", message: "保存抓取结果到数据库" })
   const saved = await saveSnapshot(lastResult)
-  if (parsedOrders.length > 0) {
-    await saveOrdersToDB(parsedOrders)
+  if (pendingSaveOrders.length > 0) {
+    addLog(`[System] 保存剩余 ${pendingSaveOrders.length} 条订单...`)
+    await saveOrdersToDB(pendingSaveOrders)
   }
   startHeartbeat(page)
   setStatus({
@@ -2208,6 +2508,7 @@ async function runZanchenSync(siteId: string) {
 export async function startZanchenSync(siteId: string) {
   if (runtime.running) return runtime.status
   runtime.running = true
+  runtime.shouldStop = false
   setStatus({ status: "running", message: "正在启动同步", logs: [] })
   void runZanchenSync(siteId)
     .catch(error => {
@@ -2216,7 +2517,16 @@ export async function startZanchenSync(siteId: string) {
     })
     .finally(() => {
       runtime.running = false
+      runtime.shouldStop = false
+      runtime.currentSite = undefined
     })
+  return runtime.status
+}
+
+export async function stopZanchenSync() {
+  if (!runtime.running) return runtime.status
+  runtime.shouldStop = true
+  addLog("正在停止同步...")
   return runtime.status
 }
 

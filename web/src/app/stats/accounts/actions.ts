@@ -21,8 +21,8 @@ export async function syncAllOrdersStandardPrice(params: { type: 'all' | 'month'
         // 1. Load products
         const products = await prisma.product.findMany();
         
-        const productMap = new Map<string, any>();
-        const productNameMap = new Map<string, any>();
+        const productMap = new Map<string, { id: string; name: string; parsedVariants: ProductVariant[] }>();
+        const productNameMap = new Map<string, { id: string; name: string; parsedVariants: ProductVariant[] }>();
 
         products.forEach(p => {
             try {
@@ -30,13 +30,13 @@ export async function syncAllOrdersStandardPrice(params: { type: 'all' | 'month'
                 const productData = { ...p, parsedVariants: variants };
                 productMap.set(p.id, productData);
                 productNameMap.set(p.name, productData);
-            } catch (e) {
+            } catch {
                 console.error(`Failed to parse variants for product ${p.name}`);
             }
         });
 
         // 2. Load orders
-        let whereOrder: any = {};
+        const whereOrder: Record<string, unknown> = {};
         
         if (params.type === 'month' && params.month) {
             try {
@@ -49,7 +49,7 @@ export async function syncAllOrdersStandardPrice(params: { type: 'all' | 'month'
                     gte: start,
                     lte: end
                 };
-            } catch (e) {
+            } catch {
                 console.error("Invalid month format:", params.month);
                 return { success: false, message: "无效的月份格式" };
             }
@@ -62,7 +62,7 @@ export async function syncAllOrdersStandardPrice(params: { type: 'all' | 'month'
                     gte: start,
                     lte: end
                 };
-            } catch (e) {
+            } catch {
                 console.error("Invalid date range:", params.start, params.end);
                 return { success: false, message: "无效的日期范围" };
             }
@@ -167,7 +167,7 @@ export async function fetchAccountOrders(params: {
 
     const settlementByCompleted = user?.accountGroup?.settlementByCompleted ?? true;
     
-    const where: any = {
+    const where: Record<string, unknown> = {
         creatorId: userId,
     };
 
@@ -245,7 +245,13 @@ export async function fetchAccountOrders(params: {
     }
 
     // Fetch Orders
-    const queryOptions: any = {
+    const queryOptions: {
+        where: typeof where;
+        include: { extensions: true; channel: { select: { name: true } } };
+        orderBy: { createdAt: 'desc' };
+        skip?: number;
+        take?: number;
+    } = {
         where,
         include: { 
             extensions: true,
@@ -271,7 +277,7 @@ export async function fetchAccountOrders(params: {
             ...o,
             revenue: revenue, // Standardize field name
             promoterName: o.sourceContact || '未标记',
-            extensionsTotal: (o as any).extensions?.reduce((acc: number, e: any) => acc + e.price, 0) || 0
+            extensionsTotal: (o.extensions || []).reduce((acc, e) => acc + (e.price || 0), 0)
         };
     });
 

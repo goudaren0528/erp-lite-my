@@ -18,6 +18,7 @@ const CHANNEL_CONFIGS_PATH = path.join(DATA_DIR, 'channel-configs.json');
 const COMMISSION_RULES_PATH = path.join(DATA_DIR, 'commission-rules.json');
 const LEGACY_CONFIGS_PATH = path.join(DATA_DIR, 'commission-configs.json');
 const BACKUP_LOGS_PATH = path.join(DATA_DIR, 'backup-logs.json');
+const ONLINE_ORDERS_CONFIG_PATH = path.join(DATA_DIR, 'online-orders-config.json');
 
 // Helper to safely read a JSON file
 async function readJson(filePath: string) {
@@ -150,6 +151,17 @@ async function main() {
         }
     }
 
+    const onlineOrdersConfigs = await readJson(ONLINE_ORDERS_CONFIG_PATH);
+    console.log(`Migrating ${onlineOrdersConfigs.length} online orders configs...`);
+    for (const c of onlineOrdersConfigs) {
+        const value = typeof c?.value === 'string' ? c.value : JSON.stringify(c?.value ?? {});
+        await prisma.appConfig.upsert({
+            where: { key: c?.key || 'online_orders_sync_config' },
+            update: { value },
+            create: { key: c?.key || 'online_orders_sync_config', value }
+        });
+    }
+
     const users = await readJson(USERS_PATH);
     console.log(`Migrating ${users.length} users...`);
     for (const u of users) {
@@ -208,13 +220,23 @@ async function main() {
     const products = await readJson(PRODUCTS_PATH);
     console.log(`Migrating ${products.length} products...`);
     for (const p of products) {
+        const matchKeywordsValue = p.matchKeywords == null
+            ? null
+            : typeof p.matchKeywords === "string"
+                ? p.matchKeywords
+                : JSON.stringify(p.matchKeywords || [])
         await prisma.product.upsert({
             where: { id: p.id },
-            update: {},
+            update: {
+                name: p.name,
+                variants: JSON.stringify(p.variants || []),
+                matchKeywords: matchKeywordsValue
+            },
             create: {
                 id: p.id,
                 name: p.name,
-                variants: JSON.stringify(p.variants || [])
+                variants: JSON.stringify(p.variants || []),
+                matchKeywords: matchKeywordsValue
             }
         });
     }

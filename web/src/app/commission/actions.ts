@@ -10,7 +10,7 @@ export type CommissionRuleInput = {
   maxCount: number | null;
   percentage: number;
   target?: string; // USER | PROMOTER
-  channelConfigId?: string;
+  channelConfigId?: string | null;
 }
 
 // --- Account Groups ---
@@ -43,7 +43,27 @@ export async function upsertAccountGroup(data: {
 
     if (id) {
       // Update
-      const updateData: any = {
+      const updateData: {
+        name: string;
+        description?: string | null;
+        settlementByCompleted?: boolean;
+        highTicketRate?: number;
+        rules?: {
+          deleteMany: Record<string, never>;
+          create: Array<{
+            type: string;
+            minCount: number;
+            maxCount: number | null;
+            percentage: number;
+            target: string;
+            channelConfigId?: string | null;
+          }>;
+        };
+        users?: {
+          disconnect: Array<{ id: string }>;
+          connect: Array<{ id: string }>;
+        };
+      } = {
         name,
         description,
         settlementByCompleted,
@@ -105,9 +125,10 @@ export async function upsertAccountGroup(data: {
 
     revalidatePath('/commission');
     return { success: true };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     console.error("Error saving account group:", error);
-    return { success: false, error: error.message };
+    return { success: false, error: message };
   }
 }
 
@@ -116,8 +137,9 @@ export async function deleteAccountGroup(id: string) {
     await prisma.accountGroup.delete({ where: { id } });
     revalidatePath('/commission');
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: message };
   }
 }
 
@@ -170,7 +192,20 @@ export async function upsertChannelConfig(data: {
     const { id, name, isEnabled, settlementByCompleted, rules } = data;
 
     if (id) {
-      const updateData: any = { name, settlementByCompleted };
+      const updateData: {
+        name: string;
+        isEnabled?: boolean;
+        settlementByCompleted?: boolean;
+        rules?: {
+          deleteMany: Record<string, never>;
+          create: Array<{
+            type: string;
+            minCount: number;
+            maxCount: number | null;
+            percentage: number;
+          }>;
+        };
+      } = { name, settlementByCompleted };
       if (isEnabled !== undefined) updateData.isEnabled = isEnabled;
       
       if (rules) {
@@ -209,9 +244,10 @@ export async function upsertChannelConfig(data: {
 
     revalidatePath('/commission');
     return { success: true };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     console.error("Error saving channel config:", error);
-    return { success: false, error: error.message };
+    return { success: false, error: message };
   }
 }
 
@@ -220,7 +256,8 @@ export async function deleteChannelConfig(id: string) {
     await prisma.channelConfig.delete({ where: { id } });
     revalidatePath('/commission');
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: message };
   }
 }

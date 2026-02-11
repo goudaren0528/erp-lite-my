@@ -7,13 +7,13 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
@@ -41,11 +41,16 @@ import {
 } from "@/components/ui/select"
 import { setAppConfigValue } from "@/app/actions"
 import { fetchOrders } from "@/app/actions"
-import { ArrowUpDown, Plus, Settings2, Trash2, Truck } from "lucide-react"
+import { fetchOnlineOrders, getOnlineOrderCounts } from "./actions"
+import { ArrowUpDown, Plus, Settings2, Trash2, Truck, Play, Square, FileText, RefreshCw, Search } from "lucide-react"
 import { toast } from "sonner"
 import { Order } from "@/types"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { OfflineSyncCard, OfflineSyncConfig } from "@/components/settings/offline-sync-card"
+import { ZanchenSyncCard } from "@/components/settings/zanchen-sync-card"
+import { GenericOnlineSyncCard } from "@/components/settings/generic-online-sync-card"
+import { SyncLogsDialog } from "@/components/orders/sync-logs-dialog"
 
 const CONFIG_KEY = "online_orders_sync_config"
 
@@ -65,10 +70,16 @@ type SiteConfig = {
   password: string
   maxPages: number
   selectors: SelectorMap
+  autoSync?: {
+    enabled: boolean
+    interval: number
+  }
 }
 
 type OnlineOrdersConfig = {
+  autoSyncEnabled?: boolean
   interval: number
+  stopThreshold?: number
   headless: boolean
   nightMode: boolean
   nightPeriod: NightPeriod
@@ -138,15 +149,29 @@ const statusMap: Record<string, { label: string; color: string; hex: string }> =
   已关闭: { label: "已关闭", color: "bg-gray-500", hex: "#6b7280" },
 }
 
+const platformMap: Record<string, string> = {
+  XIAOHONGSHU: "小红书",
+  XIANYU: "闲鱼",
+  DOUYIN: "抖音",
+  ZANCHEN: "赞晨",
+  OTHER: "其他",
+  OFFLINE: "线下"
+}
+
 export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrdersConfig }) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [config, setConfig] = useState<OnlineOrdersConfig>(initialConfig)
   const [draft, setDraft] = useState<OnlineOrdersConfig>(initialConfig)
-  const [activeSiteId, setActiveSiteId] = useState(initialConfig.sites[0]?.id || "")
+  
+  // Prioritize Zanchen for initial selection
+  const zanchenSite = initialConfig.sites.find(s => s.id === "zanchen")
+  const defaultSiteId = zanchenSite ? zanchenSite.id : (initialConfig.sites[0]?.id || "")
+  
+  const [activeSiteId, setActiveSiteId] = useState(defaultSiteId)
   const [selectorMode, setSelectorMode] = useState<"form" | "json">("form")
   const [selectorsJson, setSelectorsJson] = useState("")
-  const [activeTab, setActiveTab] = useState(initialConfig.sites[0]?.id || "")
+  const [activeTab, setActiveTab] = useState(defaultSiteId)
   const [settingsTab, setSettingsTab] = useState("global")
   const [zanchenStatus, setZanchenStatus] = useState<ZanchenStatus | null>(null)
   const [zanchenLoading, setZanchenLoading] = useState(false)
@@ -156,7 +181,38 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   const [dbTotal, setDbTotal] = useState(0)
   const [dbLoading, setDbLoading] = useState(false)
   const [dbRefreshKey, setDbRefreshKey] = useState(0)
+  const [hoverSync, setHoverSync] = useState(false)
+  const [logsOpen, setLogsOpen] = useState(false)
+
+  // Filters
+  const [filterStatus, setFilterStatus] = useState<string>('ALL')
+  const [filterOrderNo, setFilterOrderNo] = useState('')
+  const [filterRecipientName, setFilterRecipientName] = useState('')
+  const [filterProduct, setFilterProduct] = useState('')
   
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
+  const [statusTotal, setStatusTotal] = useState(0)
+  
+  const [offlineConfigs, setOfflineConfigs] = useState<Record<string, OfflineSyncConfig>>({})
+  
+  // Load offline config for active site when settings sheet is open
+  useEffect(() => {
+    if (open && activeSiteId && !offlineConfigs[activeSiteId]) {
+      fetch(`/api/offline-sync/config?siteId=${activeSiteId}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(config => {
+          if (config) {
+            setOfflineConfigs(prev => ({ ...prev, [activeSiteId]: config }))
+          }
+        })
+        .catch(console.error)
+    }
+  }, [open, activeSiteId, offlineConfigs])
+
+  const handleOfflineConfigChange = (siteId: string, config: OfflineSyncConfig) => {
+    setOfflineConfigs(prev => ({ ...prev, [siteId]: config }))
+  }
+
   const logContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -219,12 +275,15 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
     setDbLoading(true)
     ;(async () => {
       try {
-        const res = await fetchOrders({
+        const res = await fetchOnlineOrders({
           page: onlineOrderPage,
           pageSize: onlineOrderPageSize,
           sortBy: "createdAt",
           sortDirection: "desc",
-          includeSystem: true,
+          status: filterStatus,
+          searchOrderNo: filterOrderNo,
+          searchRecipient: filterRecipientName,
+          searchProduct: filterProduct,
         })
         setDbOrders(res.orders as unknown as Order[])
         setDbTotal(res.total)
@@ -235,13 +294,27 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
         setDbLoading(false)
       }
     })()
-  }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt])
+  }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct])
+
+  useEffect(() => {
+    if (activeTab !== "zanchen") return
+    getOnlineOrderCounts({
+      searchOrderNo: filterOrderNo,
+      searchRecipient: filterRecipientName,
+      searchProduct: filterProduct,
+    }).then(res => {
+      setStatusCounts(res.counts)
+      setStatusTotal(res.total)
+    }).catch(console.error)
+  }, [activeTab, dbRefreshKey, zanchenStatus?.lastRunAt, filterOrderNo, filterRecipientName, filterProduct])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
     if (nextOpen) {
       setDraft(config)
-      setActiveSiteId(config.sites[0]?.id || "")
+      setOfflineConfigs({}) // Reset offline drafts
+      const zanchen = config.sites.find(s => s.id === "zanchen")
+      setActiveSiteId(zanchen ? zanchen.id : (config.sites[0]?.id || ""))
       setSelectorMode("form")
       setSettingsTab("global")
     }
@@ -278,7 +351,19 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
 
     setSaving(true)
     try {
+      // Save global config
       const res = await setAppConfigValue(CONFIG_KEY, JSON.stringify(finalConfig))
+      
+      // Save offline sync configs
+      const offlineSavePromises = Object.entries(offlineConfigs).map(([siteId, cfg]) => 
+        fetch("/api/offline-sync/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...cfg, siteId })
+        })
+      )
+      await Promise.all(offlineSavePromises)
+
       if (res?.success) {
         setConfig(finalConfig)
         setOpen(false)
@@ -320,6 +405,15 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
     }
   }
 
+  const handleStopSync = async () => {
+    try {
+      await fetch("/api/online-orders/zanchen/stop", { method: "POST" })
+      toast.info("已发送停止指令")
+    } catch {
+      toast.error("停止失败")
+    }
+  }
+
   const handleAddSite = () => {
     const newId = `site_${Date.now()}`
     const newSite: SiteConfig = {
@@ -356,32 +450,41 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-          <DialogTrigger asChild>
-            <Button variant="outline">
-              <Settings2 className="h-4 w-4 mr-2" />
-              同步配置
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-4xl w-[calc(100vw-2rem)]">
-            <DialogHeader>
-              <DialogTitle>同步配置</DialogTitle>
-            </DialogHeader>
-            <Tabs value={settingsTab} onValueChange={setSettingsTab} className="w-full">
-              <TabsList className="flex flex-wrap">
-                <TabsTrigger value="global">全局配置</TabsTrigger>
-                <TabsTrigger value="sites">站点配置</TabsTrigger>
-                <TabsTrigger value="selectors">选择器配置</TabsTrigger>
-              </TabsList>
-              <TabsContent value="global" className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Sheet open={open} onOpenChange={handleOpenChange}>
+            <SheetTrigger asChild>
+              <Button variant="outline">
+                <Settings2 className="h-4 w-4 mr-2" />
+                同步配置
+              </Button>
+            </SheetTrigger>
+            <SheetContent
+              className="p-0"
+              style={{ width: 960, maxWidth: 960, minWidth: 960 }}
+            >
+            <Tabs value={settingsTab} onValueChange={setSettingsTab} className="flex h-full flex-col">
+              <div className="sticky top-0 z-10 bg-background border-b px-6 pt-6 pb-3">
+                <SheetHeader className="mb-4">
+                  <SheetTitle>同步配置</SheetTitle>
+                </SheetHeader>
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="global" className="w-full">全局配置</TabsTrigger>
+                  <TabsTrigger value="sites" className="w-full">站点配置</TabsTrigger>
+                  <TabsTrigger value="selectors" className="w-full">选择器配置</TabsTrigger>
+                </TabsList>
+              </div>
+              <div className="flex-1 overflow-y-auto px-6 pb-6 pt-4">
+                <TabsContent value="global" className="space-y-4 mt-0">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>同步间隔（秒）</Label>
+                    <Label>增量同步阈值（条）</Label>
                     <Input
                       type="number"
-                      value={draft.interval}
-                      onChange={e => updateDraft({ interval: Number(e.target.value) || 0 })}
+                      placeholder="默认20"
+                      value={draft.stopThreshold ?? 20}
+                      onChange={e => updateDraft({ stopThreshold: Number(e.target.value) || 0 })}
                     />
+                    <p className="text-[10px] text-muted-foreground mt-1">连续发现N个已完成历史订单时停止抓取</p>
                   </div>
                   <div className="space-y-2">
                     <Label>无头模式</Label>
@@ -440,8 +543,8 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                     placeholder="https://example.com/webhook"
                   />
                 </div>
-              </TabsContent>
-              <TabsContent value="sites" className="space-y-4">
+                </TabsContent>
+                <TabsContent value="sites" className="space-y-4 mt-0">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="w-[220px]">
                     <Select value={activeSite?.id || ""} onValueChange={setActiveSiteId}>
@@ -474,75 +577,102 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                   </div>
                 </div>
                 {activeSite ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>平台名称</Label>
-                      <Input
-                        value={activeSite.name}
-                        onChange={e =>
-                          updateSite(activeSite.id, site => ({ ...site, name: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>启用</Label>
-                      <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                        <span className="text-sm text-muted-foreground">控制是否参与同步</span>
-                        <Switch
-                          checked={activeSite.enabled}
-                          onCheckedChange={v =>
-                            updateSite(activeSite.id, site => ({ ...site, enabled: v }))
-                          }
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2 col-span-2">
-                      <Label>登录地址</Label>
-                      <Input
-                        value={activeSite.loginUrl}
-                        onChange={e =>
-                          updateSite(activeSite.id, site => ({ ...site, loginUrl: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>账号</Label>
-                      <Input
-                        value={activeSite.username}
-                        onChange={e =>
-                          updateSite(activeSite.id, site => ({ ...site, username: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>密码</Label>
-                      <Input
-                        type="password"
-                        value={activeSite.password}
-                        onChange={e =>
-                          updateSite(activeSite.id, site => ({ ...site, password: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>最大页数（0=全部）</Label>
-                      <Input
-                        type="number"
-                        value={activeSite.maxPages ?? 0}
-                        onChange={e =>
-                          updateSite(activeSite.id, site => ({
-                            ...site,
-                            maxPages: Number(e.target.value) || 0
-                          }))
-                        }
-                      />
-                    </div>
-                  </div>
+                    <Tabs defaultValue="basic" className="w-full">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="basic">基础配置</TabsTrigger>
+                        <TabsTrigger value="automation">自动化配置</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="basic" className="space-y-4 mt-4">
+                        <div className="space-y-2">
+                          <Label>平台名称</Label>
+                          <Input
+                            value={activeSite.name}
+                            onChange={e =>
+                              updateSite(activeSite.id, site => ({ ...site, name: e.target.value }))
+                            }
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>登录地址</Label>
+                          <Input
+                            value={activeSite.loginUrl}
+                            onChange={e =>
+                              updateSite(activeSite.id, site => ({ ...site, loginUrl: e.target.value }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>账号</Label>
+                          <Input
+                            value={activeSite.username}
+                            onChange={e =>
+                              updateSite(activeSite.id, site => ({ ...site, username: e.target.value }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>密码</Label>
+                          <Input
+                            type="password"
+                            value={activeSite.password}
+                            onChange={e =>
+                              updateSite(activeSite.id, site => ({ ...site, password: e.target.value }))
+                            }
+                          />
+                        </div>
+                      </TabsContent>
+                      <TabsContent value="automation" className="mt-4">
+                        <Tabs defaultValue="online" className="w-full">
+                          <TabsList className="grid w-full grid-cols-2">
+                            <TabsTrigger value="online">线上自动抓取</TabsTrigger>
+                            <TabsTrigger value="offline">线下自动同步</TabsTrigger>
+                          </TabsList>
+                          <TabsContent value="online" className="space-y-4 mt-4">
+                            <div className="space-y-2">
+                              <Label>最大抓取页数（0=全部）</Label>
+                              <Input
+                                type="number"
+                                value={activeSite.maxPages ?? 0}
+                                onChange={e =>
+                                  updateSite(activeSite.id, site => ({
+                                    ...site,
+                                    maxPages: Number(e.target.value) || 0
+                                  }))
+                                }
+                              />
+                            </div>
+                            {activeSite.id === "zanchen" ? (
+                              <ZanchenSyncCard 
+                                config={draft} 
+                                onConfigChange={updateDraft} 
+                                status={zanchenStatus}
+                              />
+                            ) : (
+                               <GenericOnlineSyncCard 
+                                 config={activeSite.autoSync}
+                                 onConfigChange={(newSync) => updateSite(activeSite.id, site => ({
+                                    ...site,
+                                    autoSync: newSync
+                                 }))}
+                               />
+                            )}
+                          </TabsContent>
+                          <TabsContent value="offline" className="space-y-4 mt-4">
+                            <OfflineSyncCard 
+                              siteId={activeSite.id} 
+                              config={offlineConfigs[activeSite.id] || { enabled: false, intervalMinutes: 60 }}
+                              onConfigChange={(c) => handleOfflineConfigChange(activeSite.id, c)}
+                            />
+                          </TabsContent>
+                        </Tabs>
+                      </TabsContent>
+                    </Tabs>
                 ) : (
                   <div className="rounded-md border p-6 text-sm text-muted-foreground">暂无平台配置</div>
                 )}
-              </TabsContent>
-              <TabsContent value="selectors" className="space-y-4">
+                </TabsContent>
+                <TabsContent value="selectors" className="space-y-4 mt-0">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="w-[220px]">
                     <Select value={activeSite?.id || ""} onValueChange={setActiveSiteId}>
@@ -559,9 +689,9 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                     </Select>
                   </div>
                   <Tabs value={selectorMode} onValueChange={v => setSelectorMode(v as "form" | "json")}>
-                    <TabsList className="flex flex-wrap">
-                      <TabsTrigger value="form">表单模式</TabsTrigger>
-                      <TabsTrigger value="json">JSON 模式</TabsTrigger>
+                    <TabsList className="grid w-[220px] grid-cols-2">
+                      <TabsTrigger value="form" className="w-full">表单模式</TabsTrigger>
+                      <TabsTrigger value="json" className="w-full">JSON 模式</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
@@ -744,18 +874,59 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                 ) : (
                   <div className="rounded-md border p-6 text-sm text-muted-foreground">暂无平台配置</div>
                 )}
-              </TabsContent>
+                </TabsContent>
+              </div>
+              <SheetFooter className="border-t p-4 sm:justify-end sm:flex-row gap-2">
+                <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>
+                  取消
+                </Button>
+                <Button onClick={handleSave} disabled={saving}>
+                  {saving ? "保存中..." : "保存"}
+                </Button>
+              </SheetFooter>
             </Tabs>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>
-                取消
-              </Button>
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? "保存中..." : "保存"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          </SheetContent>
+        </Sheet>
+        {activeTab === "zanchen" && (
+          <>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (zanchenStatus?.status !== "running") {
+                  handleZanchenSync("zanchen")
+                }
+              }}
+              disabled={zanchenStatus?.status === "running" || zanchenLoading}
+            >
+              <Play className="h-4 w-4 mr-1" />
+              {zanchenLoading ? "启动中..." : "开始同步"}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleStopSync}
+              disabled={zanchenStatus?.status !== "running"}
+            >
+              <Square className="h-4 w-4 mr-1" />
+              停止同步
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setLogsOpen(true)}
+            >
+              <FileText className="h-4 w-4 mr-1" />
+              查看日志
+            </Button>
+            
+            <SyncLogsDialog 
+              siteId="zanchen" 
+              open={logsOpen} 
+              onOpenChange={setLogsOpen} 
+            />
+          </>
+        )}
+        </div>
       </div>
 
       {config.sites.length > 0 ? (
@@ -777,84 +948,68 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                     </div>
                   ) : null}
                   <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      onClick={() => handleZanchenSync(site.id)}
-                      disabled={
-                        !site.enabled || zanchenLoading || !site.selectors.order_list_container?.trim()
-                      }
-                    >
-                      {zanchenLoading ? "启动中..." : "开始同步"}
-                    </Button>
                     <span className="text-xs text-muted-foreground">
-                      {site.enabled ? "将复用浏览器会话并保持心跳" : "该平台未启用"}
+                      {site.enabled ? (zanchenStatus?.lastRunAt ? `最近同步: ${new Date(zanchenStatus.lastRunAt).toLocaleString()}` : "将复用浏览器会话并保持心跳") : "该平台未启用"}
                     </span>
                   </div>
-                  <div className="rounded-md border p-4 text-sm text-muted-foreground space-y-2">
-                    <div>状态：{zanchenStatus?.status || "idle"}</div>
-                    {zanchenStatus?.message ? <div>说明：{zanchenStatus.message}</div> : null}
-                    {zanchenStatus?.status === "awaiting_user" ? (
-                      <div>请在弹出的浏览器完成验证码或短信验证后等待系统继续。</div>
-                    ) : null}
-                    {zanchenStatus?.lastRunAt ? <div>最近同步：{zanchenStatus.lastRunAt}</div> : null}
-                    {zanchenStatus?.lastResult?.pendingCount !== undefined ? (
-                      <div>待处理数量：{zanchenStatus.lastResult.pendingCount}</div>
-                    ) : null}
-                    {zanchenStatus?.lastResult?.extractedCount !== undefined ? (
-                      <div>已提取条数：{zanchenStatus.lastResult.extractedCount}</div>
-                    ) : null}
-                    {zanchenStatus?.lastResult?.pagesVisited !== undefined ? (
-                      <div>已翻页数：{zanchenStatus.lastResult.pagesVisited}</div>
-                    ) : null}
-                    {zanchenStatus?.lastResult?.pageUrl ? (
-                      <div>
-                        当前页面：
-                        <span
-                          className="inline-block max-w-[300px] md:max-w-[500px] truncate align-bottom cursor-help"
-                          title={zanchenStatus.lastResult.pageUrl}
-                        >
-                          {zanchenStatus.lastResult.pageUrl}
-                        </span>
+                  <div className="space-y-2">
+                    {zanchenStatus?.status === "awaiting_user" && (
+                      <div className="rounded-md border border-blue-200 bg-blue-50 p-4 text-blue-700">
+                        <p className="font-medium">需要人工介入</p>
+                        <p className="text-sm">请在弹出的浏览器完成验证码或短信验证后等待系统继续。</p>
                       </div>
-                    ) : null}
-                    {zanchenStatus?.logs && zanchenStatus.logs.length > 0 ? (
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                            <div>运行日志 ({zanchenStatus.logs.length}条)：</div>
-                            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => {
-                                // Clear logs locally and ideally tell server to clear too
-                                // But server clears on overflow. We can just clear local display until next fetch.
-                                // Actually better to have a clear button.
-                                setZanchenStatus(prev => prev ? { ...prev, logs: [] } : null)
-                            }}>清空显示</Button>
-                        </div>
-                        <div
-                          ref={logContainerRef}
-                          className="h-96 overflow-y-auto overflow-x-hidden rounded border bg-slate-50 p-2 text-xs font-mono"
-                          style={{ height: '400px' }}
-                        >
-                          {zanchenStatus.logs.map((log, i) => (
-                            <div key={i} className="whitespace-pre-wrap break-words">
-                              {log}
-                            </div>
-                          ))}
-                        </div>
+                    )}
+                    
+                    <div className="space-y-4">
+                      <Tabs value={filterStatus} onValueChange={(val) => { setFilterStatus(val); setOnlineOrderPage(1); }} className="w-full">
+                          <TabsList className="flex flex-wrap h-auto w-full justify-start">
+                              <TabsTrigger value="ALL">全部 ({statusTotal})</TabsTrigger>
+                              <TabsTrigger value="PENDING_REVIEW">待审核 ({statusCounts['PENDING_REVIEW'] || 0})</TabsTrigger>
+                              <TabsTrigger value="PENDING_SHIPMENT">待发货 ({statusCounts['PENDING_SHIPMENT'] || 0})</TabsTrigger>
+                              <TabsTrigger value="PENDING_RECEIPT">待收货 ({statusCounts['PENDING_RECEIPT'] || 0})</TabsTrigger>
+                              <TabsTrigger value="RENTING">待归还 ({statusCounts['RENTING'] || 0})</TabsTrigger>
+                              <TabsTrigger value="RETURNING">归还中 ({statusCounts['RETURNING'] || 0})</TabsTrigger>
+                              <TabsTrigger value="OVERDUE">已逾期 ({statusCounts['OVERDUE'] || 0})</TabsTrigger>
+                              <TabsTrigger value="COMPLETED">已完成 ({statusCounts['COMPLETED'] || 0})</TabsTrigger>
+                              <TabsTrigger value="CLOSED">已关闭 ({statusCounts['CLOSED'] || 0})</TabsTrigger>
+                          </TabsList>
+                      </Tabs>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                               <div className="flex items-center space-x-2">
+                                 <Search className="w-4 h-4 text-gray-500" />
+                                 <Input 
+                                    placeholder="订单号" 
+                                    value={filterOrderNo} 
+                                    onChange={e => { setFilterOrderNo(e.target.value); setOnlineOrderPage(1); }} 
+                                    className="h-8 w-[180px]" 
+                                 />
+                               </div>
+                               <Input 
+                                  placeholder="收货人姓名" 
+                                  value={filterRecipientName} 
+                                  onChange={e => { setFilterRecipientName(e.target.value); setOnlineOrderPage(1); }} 
+                                  className="h-8 w-[120px]" 
+                               />
+                               <Input 
+                                  placeholder="商品名称" 
+                                  value={filterProduct} 
+                                  onChange={e => { setFilterProduct(e.target.value); setOnlineOrderPage(1); }} 
+                                  className="h-8 w-[120px]" 
+                               />
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDbRefreshKey(key => key + 1)}
+                          >
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            刷新列表
+                          </Button>
                       </div>
-                    ) : null}
-                    {dbLoading ? (
-                      <div className="text-xs text-muted-foreground">正在加载数据库中的线上订单...</div>
-                    ) : null}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div>线上订单列表（数据库）：</div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setDbRefreshKey(key => key + 1)}
-                        >
-                          刷新
-                        </Button>
-                      </div>
-                      <div className="rounded-md border bg-white relative min-h-[200px]">
+                    </div>
+                    <div className="rounded-md border bg-white relative min-h-[200px]">
                         {dbLoading ? (
                           <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-10">
                             <span className="text-sm text-muted-foreground">加载中...</span>
@@ -863,7 +1018,9 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              <TableHead className="w-[100px]">推广方式</TableHead>
+                              <TableHead className="w-[80px]">订单平台</TableHead>
+                              <TableHead className="w-[100px]">商家名称</TableHead>
+                              <TableHead className="w-[100px]">推广渠道</TableHead>
                               <TableHead className="w-[180px]">
                                 <Button
                                   variant="ghost"
@@ -887,8 +1044,16 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                             {onlineOrderDisplay.map((order, i) => (
                               <TableRow key={`${order.orderNo}-${i}`}>
                                 <TableCell>
+                                  <div className="text-xs">{platformMap[order.platform || ""] || order.platform || "-"}</div>
+                                </TableCell>
+                                <TableCell>
                                   <div className="text-xs text-muted-foreground">
                                     {order.merchantName || "-"}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="text-xs text-muted-foreground">
+                                    {(order as any).promotionChannel || "-"}
                                   </div>
                                 </TableCell>
                                 <TableCell>
@@ -899,9 +1064,9 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                 </TableCell>
                                 <TableCell>
                                   <div className="text-xs text-muted-foreground">
-                                    {(order.recipientName || order.recipientPhone) && (
+                                    {((order as any).customerName || order.recipientName || order.recipientPhone) && (
                                       <div>
-                                        {order.recipientName || "-"} <span className="mx-1">|</span>{" "}
+                                        {(order as any).customerName || order.recipientName || "-"} <span className="mx-1">|</span>{" "}
                                         {order.recipientPhone || "-"}
                                       </div>
                                     )}
@@ -1041,7 +1206,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                             ))}
                             {onlineOrderDisplay.length === 0 ? (
                               <TableRow>
-                                <TableCell colSpan={9} className="text-center h-20">
+                                <TableCell colSpan={10} className="text-center h-20">
                                   暂无符合条件的订单
                                 </TableCell>
                               </TableRow>
@@ -1152,7 +1317,6 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                       </div>
                     </div>
                   </div>
-                </div>
               ) : (
                 <div className="rounded-md border p-6 text-sm text-muted-foreground">
                   {site.enabled ? "暂无线上订单数据" : "该平台未启用"}

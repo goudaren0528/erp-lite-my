@@ -90,6 +90,45 @@ model Promoter {
   orders    Order[]
 }
 
+model OnlineOrder {
+  id                    String   @id @default(uuid())
+  orderNo               String   @unique
+  platform              String
+  status                String
+  merchantName          String?
+  productName           String?
+  variantName           String?
+  totalAmount           Float?
+  rentStartDate         DateTime?
+  returnDeadline        DateTime?
+  logisticsCompany      String?
+  trackingNumber        String?
+  latestLogisticsInfo   String?
+  returnLogisticsCompany String?
+  returnTrackingNumber  String?
+  returnLatestLogisticsInfo String?
+  promotionChannel      String?
+  
+  customerName          String?
+  recipientPhone        String?
+  address               String?
+  
+  duration              Int?
+  rentPrice             Float?
+  deposit               Float?
+  insurancePrice        Float?
+
+  itemTitle             String?
+  itemSku               String?
+  productId             String?
+  customerXianyuId      String?
+  sourceContact         String?
+  source                String?
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
 
 model BackupLog {
   id        String   @id @default(uuid())
@@ -101,12 +140,13 @@ model BackupLog {
 }
 
 model Product {
-  id        String   @id @default(uuid())
-  name      String
-  variants  String   // Stored as JSON string
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  orders    Order[]
+  id            String   @id @default(uuid())
+  name          String
+  variants      String   // Stored as JSON string
+  matchKeywords String?  // Stored as JSON string array, used for auto-mapping from external orders
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  orders        Order[]
 }
 
 model Order {
@@ -114,6 +154,7 @@ model Order {
   orderNo     String   @unique
   source      String
   platform    String?
+  promotionChannel String?
   status      String
   
   customerXianyuId String
@@ -124,6 +165,10 @@ model Order {
   productName String
   variantName String
   sn          String?
+
+  itemTitle   String?
+  itemSku     String?
+  merchantName String?
   
   duration        Int
   rentPrice       Float

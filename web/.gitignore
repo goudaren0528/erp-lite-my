@@ -46,3 +46,12 @@ data/*.json
 
 # uploads
 public/uploads
+
+# logs
+logs/
+*.log
+
+# playwright
+.playwright/
+test-results/
+playwright-report/

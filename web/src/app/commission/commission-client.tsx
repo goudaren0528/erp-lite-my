@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,12 +11,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Plus, Edit, Trash2, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { 
-  upsertAccountGroup, 
-  deleteAccountGroup, 
-  upsertChannelConfig, 
+import {
+  upsertAccountGroup,
+  deleteAccountGroup,
+  upsertChannelConfig,
   deleteChannelConfig,
-  CommissionRuleInput 
+  CommissionRuleInput
 } from "./actions";
 import { RuleEditor } from "./rule-editor";
 import { PolicySnapshot } from "./policy-snapshot";
@@ -29,22 +29,50 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { format } from "date-fns";
 
+type UserSummary = {
+  id: string;
+  name: string | null;
+  username: string | null;
+};
+
+type CommissionRule = CommissionRuleInput & {
+  id?: string;
+  target?: string | null;
+  channelConfigId?: string | null;
+};
+
+type AccountGroup = {
+  id: string;
+  name: string;
+  description?: string | null;
+  settlementByCompleted?: boolean | null;
+  highTicketRate?: number | null;
+  rules: CommissionRule[];
+  users?: UserSummary[];
+};
+
+type ChannelConfig = {
+  id: string;
+  name: string;
+  isEnabled?: boolean | null;
+  settlementByCompleted?: boolean | null;
+  updatedAt?: string | Date | null;
+  rules?: CommissionRule[];
+  promoterCount?: number;
+  promoters?: Array<{ id: string; name: string }>;
+};
+
 interface CommissionClientProps {
-  initialAccountGroups: any[];
-  initialChannelConfigs: any[];
-  users: any[];
+  initialAccountGroups: AccountGroup[];
+  initialChannelConfigs: ChannelConfig[];
+  users: UserSummary[];
 }
 
 export default function CommissionClient({ initialAccountGroups, initialChannelConfigs, users }: CommissionClientProps) {
   const router = useRouter();
-  const [accountGroups, setAccountGroups] = useState(initialAccountGroups);
-  const [channelConfigs, setChannelConfigs] = useState(initialChannelConfigs);
+  const accountGroups = initialAccountGroups;
+  const channelConfigs = initialChannelConfigs;
   const [activeTab, setActiveTab] = useState("groups");
-
-  useEffect(() => {
-    setAccountGroups(initialAccountGroups);
-    setChannelConfigs(initialChannelConfigs);
-  }, [initialAccountGroups, initialChannelConfigs]);
 
   // --- Dialog States ---
   // Group Basic Info
@@ -58,8 +86,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
 
   // Policy Manager
   const [isPolicyManagerOpen, setIsPolicyManagerOpen] = useState(false);
-  const [policyManagerGroup, setPolicyManagerGroup] = useState<any>(null);
-  const [generalHighTicketRate, setGeneralHighTicketRate] = useState<string>("0");
+  const [policyManagerGroup, setPolicyManagerGroup] = useState<AccountGroup | null>(null);
 
   // Channel Basic Info
   const [isChannelBasicOpen, setIsChannelBasicOpen] = useState(false);
@@ -74,7 +101,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
   // --- Actions ---
 
   // 1. Group Basic
-  const handleEditGroupBasic = (group?: any) => {
+  const handleEditGroupBasic = (group?: AccountGroup) => {
     if (group) {
       setEditingGroup({ id: group.id, name: group.name, description: group.description || '', settlementByCompleted: group.settlementByCompleted ?? true });
     } else {
@@ -101,17 +128,19 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
   };
 
   // 2. User Selection
-  const handleEditGroupUsers = (group: any) => {
+  const handleEditGroupUsers = (group: AccountGroup) => {
     setUserSelectGroupId(group.id);
-    setSelectedUserIds(group.users?.map((u: any) => u.id) || []);
+    setSelectedUserIds(group.users?.map((u) => u.id) || []);
     setIsUserSelectOpen(true);
   };
 
   const handleSaveGroupUsers = async () => {
     if (!userSelectGroupId) return;
+    const selectedGroup = accountGroups.find(g => g.id === userSelectGroupId);
+    if (!selectedGroup) return;
     const res = await upsertAccountGroup({
       id: userSelectGroupId,
-      name: accountGroups.find(g => g.id === userSelectGroupId).name, // Name required by upsert
+      name: selectedGroup.name,
       userIds: selectedUserIds
     });
     if (res.success) {
@@ -124,9 +153,8 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
   };
 
   // 3. Policy Manager
-  const handleOpenPolicyManager = (group: any) => {
+  const handleOpenPolicyManager = (group: AccountGroup) => {
     setPolicyManagerGroup(group);
-    setGeneralHighTicketRate(group.highTicketRate?.toString() || "0");
     setIsPolicyManagerOpen(true);
   };
 
@@ -150,7 +178,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
   };
 
   // 4. Channel Basic
-  const handleEditChannelBasic = (channel?: any) => {
+  const handleEditChannelBasic = (channel?: ChannelConfig) => {
     if (channel) {
       setEditingChannel({ 
         id: channel.id, 
@@ -181,12 +209,12 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
     }
   };
 
-  const handleToggleChannelStatus = async (channel: any, checked: boolean) => {
+  const handleToggleChannelStatus = async (channel: ChannelConfig, checked: boolean) => {
      const res = await upsertChannelConfig({
        id: channel.id,
        name: channel.name,
        isEnabled: checked,
-       settlementByCompleted: channel.settlementByCompleted
+      settlementByCompleted: channel.settlementByCompleted ?? true
      });
      if (res.success) {
        toast.success(checked ? "渠道已启用" : "渠道已禁用");
@@ -247,7 +275,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
           </div>
           
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {accountGroups.map((group: any) => (
+            {accountGroups.map((group) => (
               <Card key={group.id} className="flex flex-col">
                 <CardHeader className="pb-2">
                   <div className="flex flex-row items-center justify-between">
@@ -282,7 +310,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
                        {group.users && group.users.length > 0 ? (
                          <>
                             <div className="flex -space-x-2 overflow-hidden">
-                              {group.users.slice(0, 5).map((u: any) => (
+                              {group.users.slice(0, 5).map((u) => (
                                 <TooltipProvider key={u.id}>
                                   <Tooltip>
                                     <TooltipTrigger>
@@ -346,7 +374,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {channelConfigs.map((channel: any) => (
+                    {channelConfigs.map((channel) => (
                         <TableRow key={channel.id}>
                             <TableCell className="font-mono text-xs" title={channel.id}>{channel.id.slice(0, 8)}</TableCell>
                             <TableCell className="font-medium">{channel.name}</TableCell>
@@ -493,6 +521,7 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
       {/* 4. Policy Manager Dialog */}
       {isPolicyManagerOpen && policyManagerGroup && (
         <GroupPolicyManager 
+            key={policyManagerGroup.id}
             group={policyManagerGroup}
             channels={channelConfigs}
             isOpen={isPolicyManagerOpen}
@@ -518,51 +547,41 @@ export default function CommissionClient({ initialAccountGroups, initialChannelC
   );
 }
 
-function GroupPolicyManager({ 
-    group, 
-    channels, 
-    isOpen, 
-    onOpenChange, 
-    onSave 
-}: { 
-    group: any, 
-    channels: any[], 
-    isOpen: boolean, 
-    onOpenChange: (open: boolean) => void, 
-    onSave: (rules: CommissionRuleInput[], settlementByCompleted: boolean, highTicketRate: number) => Promise<void> 
+function GroupPolicyManager({
+    group,
+    channels,
+    isOpen,
+    onOpenChange,
+    onSave
+}: {
+    group: AccountGroup,
+    channels: ChannelConfig[],
+    isOpen: boolean,
+    onOpenChange: (open: boolean) => void,
+    onSave: (rules: CommissionRuleInput[], settlementByCompleted: boolean, highTicketRate: number) => Promise<void>
 }) {
-    const [defaultRules, setDefaultRules] = useState<CommissionRuleInput[]>([]);
-    const [channelRates, setChannelRates] = useState<Record<string, { employee: string, promoter: string }>>({});
-    const [settlementByCompleted, setSettlementByCompleted] = useState(true);
-    const [highTicketRate, setHighTicketRate] = useState<string>("0");
-
-    useEffect(() => {
-        // Initialize rules
+    const [defaultRules, setDefaultRules] = useState<CommissionRuleInput[]>(() => {
         const rules = group.rules || [];
-        setSettlementByCompleted(group.settlementByCompleted ?? true);
-        setHighTicketRate(group.highTicketRate?.toString() || "0");
-        
-        // Default rules: channelConfigId is null (Keep as Ladder)
-        const def = rules.filter((r: any) => !r.channelConfigId);
-        setDefaultRules(def.length ? def : []);
-
-        // Channel rules (Convert to simple rates)
+        const def = rules.filter((r) => !r.channelConfigId);
+        return def.length ? def : [];
+    });
+    const [channelRates, setChannelRates] = useState<Record<string, { employee: string, promoter: string }>>(() => {
+        const rules = group.rules || [];
         const chMap: Record<string, { employee: string, promoter: string }> = {};
         channels.forEach(c => {
-            const cRules = rules.filter((r: any) => r.channelConfigId === c.id);
-            
-            // Find first rule for employee (target=USER)
-            const empRule = cRules.find((r: any) => (r.target || 'USER') === 'USER');
-            // Find first rule for promoter (target=PROMOTER)
-            const proRule = cRules.find((r: any) => r.target === 'PROMOTER');
+            const cRules = rules.filter((r) => r.channelConfigId === c.id);
+            const empRule = cRules.find((r) => (r.target || 'USER') === 'USER');
+            const proRule = cRules.find((r) => r.target === 'PROMOTER');
 
             chMap[c.id] = {
                 employee: empRule ? empRule.percentage.toString() : '0',
                 promoter: proRule ? proRule.percentage.toString() : '0'
             };
         });
-        setChannelRates(chMap);
-    }, [group, channels]);
+        return chMap;
+    });
+    const [settlementByCompleted, setSettlementByCompleted] = useState(group.settlementByCompleted ?? true);
+    const [highTicketRate, setHighTicketRate] = useState<string>(group.highTicketRate?.toString() || "0");
 
     const handleSave = async () => {
         // Flatten

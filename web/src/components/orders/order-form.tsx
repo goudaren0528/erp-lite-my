@@ -143,7 +143,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
     }
     
     // Check legacy channels array (backward compatibility)
-    const legacyChannels = (p as any).channels as string[] | undefined
+    const legacyChannels = (p as { channels?: string[] }).channels
     if (legacyChannels) {
         if (legacyChannels.some(c => allowedChannels.includes(c))) return true
         // Fuzzy matching for legacy channels
@@ -533,6 +533,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
               <SelectItem value="XIAOHONGSHU">小红书</SelectItem>
               <SelectItem value="XIANYU">闲鱼</SelectItem>
               <SelectItem value="DOUYIN">抖音</SelectItem>
+              <SelectItem value="ZANCHEN">赞晨</SelectItem>
               <SelectItem value="OTHER">其他</SelectItem>
               <SelectItem value="OFFLINE">线下</SelectItem>
             </SelectContent>

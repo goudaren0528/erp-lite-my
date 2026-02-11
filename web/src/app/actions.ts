@@ -9,7 +9,7 @@ import { getCurrentUser } from "@/lib/auth";
 // Helper to determine query mode based on database type
 // SQLite does not support 'insensitive' mode, but Postgres does.
 const isPostgres = process.env.DATABASE_URL?.startsWith('postgres');
-const dbMode: Prisma.QueryMode | undefined = isPostgres ? 'insensitive' : undefined;
+const dbMode: any = isPostgres ? 'insensitive' : undefined;
 
 export async function fetchOrdersForExport({
     startDate,
@@ -29,6 +29,8 @@ export async function fetchOrdersForExport({
     // Permission filter
     if (!canViewAllOrders) {
         where.creatorId = currentUser?.id;
+    } else {
+        where.creatorId = { not: 'system' };
     }
     
     // Date filter
@@ -227,25 +229,27 @@ export async function fetchOrders(params: {
 
     if (includeSystem) {
         baseWhere = { creatorId: 'system' };
+    } else if (canViewAllOrders) {
+        baseWhere = { creatorId: { not: 'system' } };
     }
 
     if (filterOrderNo) {
         baseWhere.OR = [
-            { orderNo: { contains: filterOrderNo, mode: dbMode } },
-            { miniProgramOrderNo: { contains: filterOrderNo, mode: dbMode } }
+            { orderNo: { contains: filterOrderNo, mode: dbMode } as any },
+            { miniProgramOrderNo: { contains: filterOrderNo, mode: dbMode } as any }
         ];
     }
 
     if (filterXianyuOrderNo) {
-        baseWhere.xianyuOrderNo = { contains: filterXianyuOrderNo, mode: dbMode };
+        baseWhere.xianyuOrderNo = { contains: filterXianyuOrderNo, mode: dbMode } as any;
     }
 
     if (filterCustomer) {
-        baseWhere.customerXianyuId = { contains: filterCustomer, mode: dbMode };
+        baseWhere.customerXianyuId = { contains: filterCustomer, mode: dbMode } as any;
     }
 
     if (filterProduct) {
-        baseWhere.productName = { contains: filterProduct, mode: dbMode };
+        baseWhere.productName = { contains: filterProduct, mode: dbMode } as any;
     }
 
     if (filterDuration) {
@@ -256,7 +260,7 @@ export async function fetchOrders(params: {
     }
 
     if (filterRecipientName) {
-        baseWhere.recipientName = { contains: filterRecipientName, mode: dbMode };
+        baseWhere.recipientName = { contains: filterRecipientName, mode: dbMode } as any;
     }
 
     if (filterRecipientPhone) {
@@ -290,7 +294,7 @@ export async function fetchOrders(params: {
     if (filterCreator) {
         const creatorUsers = await prisma.user.findMany({
             where: {
-                name: { contains: filterCreator, mode: dbMode }
+                name: { contains: filterCreator, mode: dbMode } as any
             },
             select: { id: true }
         });
@@ -306,7 +310,7 @@ export async function fetchOrders(params: {
         const matchedPromoters = await prisma.promoter.findMany({
             where: {
                 OR: [
-                    { name: { contains: filterPromoter, mode: dbMode } },
+                    { name: { contains: filterPromoter, mode: dbMode } as any },
                     { phone: { contains: filterPromoter } }
                 ]
             },
@@ -316,7 +320,7 @@ export async function fetchOrders(params: {
         const promoterNames = matchedPromoters.map(p => p.name);
         baseWhere.OR = [
             ...(baseWhere.OR || []),
-            { sourceContact: { contains: filterPromoter, mode: dbMode } },
+            { sourceContact: { contains: filterPromoter, mode: dbMode } as any },
             ...(promoterIds.length > 0 ? [{ promoterId: { in: promoterIds } }] : []),
             ...(promoterNames.length > 0 ? [{ sourceContact: { in: promoterNames } }] : [])
         ];

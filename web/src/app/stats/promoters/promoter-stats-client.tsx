@@ -485,7 +485,7 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
   
   const handleSync = () => {
       startTransition(async () => {
-          let params: any = { type: syncType };
+          const params: { type: 'all' | 'month' | 'custom'; month?: string; start?: string; end?: string } = { type: syncType };
           
           if (syncType === 'month') {
               params.month = format(syncMonth, 'yyyy-MM');
@@ -509,7 +509,7 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
 
   // Export Promoter Stats (Summary)
   const handleExportPromoters = () => {
-    const rows: any[] = [];
+    const rows: Record<string, string | number>[] = [];
     promoterStats.forEach(p => {
         rows.push({
             "推广员": p.name,
@@ -642,7 +642,7 @@ export function PromoterStatsClient({ promoterStats, period = 'cumulative', star
                             <div className="grid gap-4">
                                 <div className="grid gap-2">
                                     <label className="text-sm font-medium">同步范围</label>
-                                    <Tabs value={syncType} onValueChange={(v: any) => setSyncType(v)} className="w-full">
+                                    <Tabs value={syncType} onValueChange={(v) => setSyncType(v as 'all' | 'month' | 'custom')} className="w-full">
                                         <TabsList className="grid w-full grid-cols-3">
                                             <TabsTrigger value="month">按月份</TabsTrigger>
                                             <TabsTrigger value="custom">自定义</TabsTrigger>

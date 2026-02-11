@@ -32,10 +32,21 @@ export async function GET(req: NextRequest) {
 
     if (shouldExport('products')) {
         const products = await prisma.product.findMany();
-        exportData.products = products.map((p: Record<string, unknown> & { variants: string }) => ({
-            ...p,
-            variants: JSON.parse(p.variants)
-        }));
+        exportData.products = products.map((p: Record<string, unknown> & { variants: string; matchKeywords: string | null }) => {
+            let matchKeywords: unknown = null
+            if (p.matchKeywords) {
+                try {
+                    matchKeywords = JSON.parse(p.matchKeywords)
+                } catch {
+                    matchKeywords = p.matchKeywords
+                }
+            }
+            return {
+                ...p,
+                variants: JSON.parse(p.variants),
+                matchKeywords
+            }
+        });
     }
 
     if (shouldExport('orders')) {
@@ -71,6 +82,22 @@ export async function GET(req: NextRequest) {
 
     if (shouldExport('commissionRules')) {
         exportData.commissionRules = await prisma.commissionRule.findMany();
+    }
+
+    if (shouldExport('onlineOrdersConfig')) {
+        const appConfigClient = (prisma as unknown as { appConfig?: typeof prisma.appConfig }).appConfig
+        if (appConfigClient) {
+            const record = await appConfigClient.findUnique({ where: { key: "online_orders_sync_config" } })
+            if (record?.value) {
+                let value: unknown = record.value
+                try {
+                    value = JSON.parse(record.value)
+                } catch {
+                    value = record.value
+                }
+                exportData.onlineOrdersConfig = { key: record.key, value }
+            }
+        }
     }
 
     if (shouldExport('backupLogs')) {

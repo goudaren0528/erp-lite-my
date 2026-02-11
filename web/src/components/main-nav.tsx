@@ -177,12 +177,12 @@ export function MainNav({ user }: MainNavProps) {
       </div>
       
       <div className={cn("flex-1 py-4 space-y-2 overflow-y-auto", isCollapsed ? "px-2" : "px-4")}>
-        {allRoutes.map((route: any) => {
+        {allRoutes.map((route: { href?: string; label: string; icon: React.ComponentType<{ className?: string }>; active?: boolean; permission: string | null; id?: string; children?: { href: string; label: string; icon: React.ComponentType<{ className?: string }>; active: boolean; permission: string }[] }) => {
             if (!hasPermission(route.permission)) return null;
 
             if (route.children) {
-                const isOpen = openGroups.includes(route.id);
-                const isActive = route.children.some((child: any) => child.active);
+                const isOpen = route.id ? openGroups.includes(route.id) : false;
+                const isActive = route.children.some((child) => child.active);
                 
                 if (isCollapsed) {
                     // When collapsed, just show icon with popover (simplified: just link to first child or show nothing?)
@@ -190,7 +190,7 @@ export function MainNav({ user }: MainNavProps) {
                     // Better UX: Show group icon, hovering shows children. 
                     // MVP: Just flatten children or hide group header.
                     // Let's flatten for collapsed view or just show children directly
-                    return route.children.map((child: any) => {
+                    return route.children.map((child) => {
                         if (!hasPermission(child.permission)) return null;
                         return (
                             <div key={child.href} className="relative group">
@@ -215,7 +215,7 @@ export function MainNav({ user }: MainNavProps) {
                     <Collapsible
                         key={route.id}
                         open={isOpen}
-                        onOpenChange={() => toggleGroup(route.id)}
+                        onOpenChange={() => route.id && toggleGroup(route.id)}
                         className="space-y-1"
                     >
                         <CollapsibleTrigger asChild>
@@ -231,7 +231,7 @@ export function MainNav({ user }: MainNavProps) {
                             </Button>
                         </CollapsibleTrigger>
                         <CollapsibleContent className="space-y-1 pl-4">
-                            {route.children.map((child: any) => {
+                            {route.children.map((child) => {
                                 if (!hasPermission(child.permission)) return null;
                                 return (
                                     <Link key={child.href} href={child.href}>
@@ -252,6 +252,8 @@ export function MainNav({ user }: MainNavProps) {
                     </Collapsible>
                 )
             }
+
+            if (!route.href) return null;
 
             return (
               <div key={route.href} className="relative group">
