@@ -69,7 +69,14 @@ COPY --from=builder --chown=nextjs:nodejs /app/docker-entrypoint.sh ./
 RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH && chown nextjs:nodejs $PLAYWRIGHT_BROWSERS_PATH
 
 # Create logs directory and set permissions
-RUN mkdir -p logs && chown nextjs:nodejs logs
+# We need to ensure /app is writable so we can create logs directory if it doesn't exist
+# However, for volume mounts to work without permission issues on the host, 
+# running as root (like in web/Dockerfile) is often the most robust solution for simple deployments.
+# If strict security is needed, one should ensure host directory ./logs is owned by 1001:1001.
+# Here we switch to root to avoid "EACCES: permission denied" on volume mounts.
+# USER nextjs 
+# Commented out USER nextjs to run as root. 
+# This matches web/Dockerfile behavior and fixes volume permission issues.
 
 RUN chmod +x ./docker-entrypoint.sh
 

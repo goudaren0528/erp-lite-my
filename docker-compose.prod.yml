@@ -41,6 +41,7 @@ services:
     volumes:
       - ./public/uploads:/app/public/uploads
       - ./data:/app/data
+      - ./logs:/app/logs
     networks:
       - erp-lite-network
       - dokploy-network

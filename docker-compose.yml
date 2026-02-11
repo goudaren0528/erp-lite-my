@@ -38,6 +38,8 @@ services:
       - ./uploads:/app/public/uploads
       # Persist SQLite database
       - ./data:/app/data
+      # Persist logs
+      - ./logs:/app/logs
     networks:
       - default
 
