@@ -68,6 +68,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/docker-entrypoint.sh ./
 # Ensure Playwright browser path exists and is owned by nextjs
 RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH && chown nextjs:nodejs $PLAYWRIGHT_BROWSERS_PATH
 
+# Create logs directory and set permissions
+RUN mkdir -p logs && chown nextjs:nodejs logs
+
 RUN chmod +x ./docker-entrypoint.sh
 
 USER nextjs
