@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/db"
 import { Prisma } from "@prisma/client"
+import { matchDeviceMapping } from "@/lib/product-matching"
 
 export async function fetchOnlineOrders(params: {
     page: number;
@@ -56,13 +57,39 @@ export async function fetchOnlineOrders(params: {
 
     const total = await prisma.onlineOrder.count({ where });
 
-    const formattedOrders = orders.map(o => ({
-        ...o,
-        createdAt: o.createdAt.toISOString(),
-        updatedAt: o.updatedAt.toISOString(),
-        rentStartDate: o.rentStartDate?.toISOString() || null,
-        returnDeadline: o.returnDeadline?.toISOString() || null,
-    }));
+    // Fetch products for dynamic matching
+    const rawProducts = await prisma.product.findMany({
+        select: {
+            name: true,
+            matchKeywords: true
+        }
+    });
+
+    // Optimization: Parse keywords once
+    const products = rawProducts.map(p => {
+        let keywords: string[] = []
+        try {
+            if (p.matchKeywords) {
+                const parsed = JSON.parse(p.matchKeywords)
+                if (Array.isArray(parsed)) keywords = parsed
+            }
+        } catch {}
+        return { name: p.name, keywords }
+    });
+
+    const formattedOrders = orders.map(o => {
+        // Try to match product dynamically
+        const matched = matchDeviceMapping(o.itemTitle, o.itemSku, products);
+
+        return {
+            ...o,
+            productName: matched ? matched.deviceName : o.productName,
+            createdAt: o.createdAt.toISOString(),
+            updatedAt: o.updatedAt.toISOString(),
+            rentStartDate: o.rentStartDate?.toISOString() || null,
+            returnDeadline: o.returnDeadline?.toISOString() || null,
+        }
+    });
 
     return {
         orders: formattedOrders,
