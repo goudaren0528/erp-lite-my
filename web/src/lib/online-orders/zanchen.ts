@@ -1591,17 +1591,25 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
       }
       const rawText = await row.innerText()
 
-      // Fix: Skip pagination/footer rows that are mistakenly picked up by the selector
-      if ((rawText.includes("共") && rawText.includes("条记录")) || (rawText.includes("下一页") && rawText.includes("尾页"))) {
-        addLog(`[System] Skipped pagination row with text: ${rawText.substring(0, 30)}...`)
-        continue
-      }
-
-      const text = rawText.replace(/\s+/g, " ").trim()
-      // Log for debugging empty parsing
+      // Log for debugging empty parsing (moved up to capture text before potential skip)
       if (i < 3) {
         addLog(`[Debug] Row ${i} raw text: ${rawText.substring(0, 100)}...`)
       }
+
+      // Fix: Skip pagination/footer rows that are mistakenly picked up by the selector
+      // BUT ensure we don't skip actual order rows (which contain "订单编号" or "订单号")
+      const isPaginationLike = (rawText.includes("共") && rawText.includes("条记录")) || (rawText.includes("下一页") && rawText.includes("尾页"))
+      const isOrderLike = rawText.includes("订单编号") || rawText.includes("订单号") || /[A-Z]{2}\d{10,}/.test(rawText)
+
+      if (isPaginationLike && !isOrderLike) {
+        addLog(`[System] Skipped pagination row with text: ${rawText.substring(0, 30)}...`)
+        continue
+      } else if (isPaginationLike && isOrderLike) {
+        // Log that we saved a row from being skipped
+        if (i < 3) addLog(`[Debug] Row ${i} matched pagination keywords but kept because it looks like an order.`)
+      }
+
+      const text = rawText.replace(/\s+/g, " ").trim()
 
       const textBase = parseOrderFromText(rawText)
       let base = textBase
