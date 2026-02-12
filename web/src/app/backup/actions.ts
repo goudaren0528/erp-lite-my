@@ -375,13 +375,15 @@ export async function importData(formData: FormData) {
                         update: {
                             name: p.name,
                             variants: typeof p.variants === 'string' ? p.variants : JSON.stringify(p.variants || []),
-                            matchKeywords: matchKeywordsValue
+                            matchKeywords: matchKeywordsValue,
+                            totalStock: p.totalStock || 100
                         },
                         create: {
                             id: p.id,
                             name: p.name,
                             variants: typeof p.variants === 'string' ? p.variants : JSON.stringify(p.variants || []),
-                            matchKeywords: matchKeywordsValue
+                            matchKeywords: matchKeywordsValue,
+                            totalStock: p.totalStock || 100
                         }
                     });
                     count++;

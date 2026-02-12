@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
     if (shouldExport('products')) {
         const products = await prisma.product.findMany();
-        exportData.products = products.map((p: Record<string, unknown> & { variants: string; matchKeywords: string | null }) => {
+        exportData.products = products.map((p: Record<string, unknown> & { variants: string; matchKeywords: string | null; totalStock: number }) => {
             let matchKeywords: unknown = null
             if (p.matchKeywords) {
                 try {
@@ -44,7 +44,10 @@ export async function GET(req: NextRequest) {
             return {
                 ...p,
                 variants: JSON.parse(p.variants),
-                matchKeywords
+                matchKeywords,
+                // totalStock is deprecated, but we keep it in export for compatibility if needed, 
+                // or we can remove it. Let's keep it as is from DB.
+                totalStock: p.totalStock
             }
         });
     }

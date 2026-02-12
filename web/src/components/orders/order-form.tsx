@@ -64,6 +64,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
   const initialProduct = isEdit ? products.find(p => p.name === initialData.productName) : undefined
   const [selectedProductId, setSelectedProductId] = useState<string>(initialProduct?.id || "")
   const [selectedVariantName, setSelectedVariantName] = useState<string>(initialData?.variantName || "")
+  const [selectedSpecId, setSelectedSpecId] = useState<string>(initialData?.specId || "")
   const [duration, setDuration] = useState<number>(initialData?.duration || 3)
   
   // Date Logic
@@ -108,7 +109,9 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
   const [openProductSearch, setOpenProductSearch] = useState(false)
   
   const selectedProduct = products.find(p => p.id === selectedProductId)
-  const selectedVariant = selectedProduct?.variants.find(v => v.name === selectedVariantName)
+  const selectedVariant = selectedProduct?.variants.find(v => (
+      selectedSpecId ? v.specId === selectedSpecId : v.name === selectedVariantName
+  )) || selectedProduct?.variants.find(v => v.name === selectedVariantName)
 
   const [source, setSource] = useState<OrderSource>(initialData?.source || "PART_TIME_AGENT")
   const [platform, setPlatform] = useState<OrderPlatform>(initialData?.platform || "XIANYU")
@@ -653,6 +656,7 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
                           onSelect={() => {
                             setSelectedProductId(product.id === selectedProductId ? "" : product.id)
                             setSelectedVariantName("")
+                            setSelectedSpecId("")
                             setOpenProductSearch(false)
                           }}
                         >
@@ -672,23 +676,28 @@ export function OrderForm({ products, promoters = [], initialData, onSuccess }: 
             </Popover>
             <input type="hidden" name="productName" value={selectedProduct?.name || ''} />
             <input type="hidden" name="productId" value={selectedProductId} />
+            <input type="hidden" name="specId" value={selectedSpecId} />
+            <input type="hidden" name="variantName" value={selectedVariantName} />
           </div>
 
           <div className="space-y-2">
-            <Label>选择版本<span className="text-red-500 ml-1">*</span></Label>
+            <Label>选择规格<span className="text-red-500 ml-1">*</span></Label>
             <Select 
-              name="variantName" 
-              value={selectedVariantName}
-              onValueChange={setSelectedVariantName}
+              value={selectedSpecId || selectedVariantName}
+              onValueChange={(value) => {
+                const matched = selectedProduct?.variants.find(v => v.specId === value || v.name === value)
+                setSelectedSpecId(matched?.specId || "")
+                setSelectedVariantName(matched?.name || "")
+              }}
               disabled={!selectedProduct}
               required
             >
               <SelectTrigger>
-                <SelectValue placeholder="选择版本" />
+                <SelectValue placeholder="选择规格" />
               </SelectTrigger>
               <SelectContent>
                 {selectedProduct?.variants.map(v => (
-                  <SelectItem key={v.name} value={v.name}>{v.name}</SelectItem>
+                  <SelectItem key={v.specId || v.name} value={v.specId || v.name}>{v.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

@@ -30,6 +30,30 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const data = await req.json()
+    
+    // Sanitize incoming data URLs
+    const sanitizeUrl = (value: string) => {
+        let u = value.trim()
+        u = u.replace(/\s+/g, "")
+        u = u.replace(/^http\/\//, "http://")
+        u = u.replace(/^https\/\//, "https://")
+        u = u.replace(/^https?:\/\/(https?:\/\/)/, "$1")
+        u = u.replace(/^https?:\/\/(https?)\/\//, "$1://")
+        return u
+    }
+    if (data.sites) {
+        data.sites.forEach((site: any) => {
+             if (site.loginUrl) {
+                  site.loginUrl = sanitizeUrl(site.loginUrl)
+             }
+        });
+    }
+    if (data.webhookUrls) {
+        data.webhookUrls = data.webhookUrls.map((url: string) => {
+            return sanitizeUrl(url)
+        });
+    }
+
     // Validate or merge? For now just overwrite or merge top level
     const existing = await prisma.appConfig.findUnique({ where: { key: CONFIG_KEY } })
     let newConfig = data

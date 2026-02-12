@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, List, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database, PanelLeftClose, PanelLeftOpen, Percent, ChevronDown, ChevronUp, Megaphone, Cloud } from "lucide-react"
+import { LayoutDashboard, List, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database, PanelLeftClose, PanelLeftOpen, Percent, ChevronDown, ChevronUp, Megaphone, Cloud, Calendar } from "lucide-react"
 import { User } from "@/types"
 import { logout } from "@/lib/auth"
 import { useState } from "react"
@@ -102,11 +102,33 @@ export function MainNav({ user }: MainNavProps) {
       ]
     },
     {
-      href: "/products",
-      label: "商品库管理",
+      label: "商品管理",
       icon: Package,
-      active: pathname === "/products",
-      permission: "products",
+      id: "product",
+      permission: "product_group",
+      children: [
+        {
+          href: "/products",
+          label: "商品库管理",
+          icon: List,
+          active: pathname === "/products",
+          permission: "products",
+        },
+        {
+          href: "/inventory",
+          label: "库存管理",
+          icon: Database,
+          active: pathname === "/inventory",
+          permission: "inventory_manage",
+        },
+        {
+          href: "/inventory-calendar",
+          label: "库存日历",
+          icon: Calendar,
+          active: pathname === "/inventory-calendar",
+          permission: "inventory_calendar",
+        }
+      ]
     },
     {
       label: "系统管理",
@@ -138,6 +160,9 @@ export function MainNav({ user }: MainNavProps) {
     if (!permission) return true
     if (permission === "promotion_group") {
         return hasPermission("promoters") || hasPermission("commission")
+    }
+    if (permission === "product_group") {
+        return hasPermission("products") || hasPermission("inventory_calendar") || hasPermission("inventory_manage")
     }
     if (permission === "system_group") {
         return hasPermission("users") || hasPermission("backup")

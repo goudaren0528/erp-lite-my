@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Product } from "@/types"
+import { InventoryItemType, Product } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Trash2, Edit2, Loader2 } from "lucide-react"
+import { Plus, Trash2, Edit2, Loader2, Eye } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
 import {
   Tooltip,
@@ -31,21 +31,31 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet"
+import { Badge } from "@/components/ui/badge"
 import { ProductForm } from "./product-form"
-import { deleteProduct, migrateDeviceMappings } from "@/app/actions"
+import { deleteProduct, syncProductSpecsFromVariants } from "@/app/actions"
 import { toast } from "sonner"
 
 interface ProductListProps {
   products: Product[]
+  itemTypes: InventoryItemType[]
 }
 
-export function ProductList({ products }: ProductListProps) {
+export function ProductList({ products, itemTypes }: ProductListProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [isMigrating, setIsMigrating] = useState(false)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null)
   const [productToDelete, setProductToDelete] = useState<Product | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
@@ -69,7 +79,7 @@ export function ProductList({ products }: ProductListProps) {
   const handleMigrate = async () => {
       try {
           setIsMigrating(true)
-          const res = await migrateDeviceMappings()
+          const res = await syncProductSpecsFromVariants()
           if (res.success) {
               toast.success(res.message)
               startTransition(() => {
@@ -114,23 +124,23 @@ export function ProductList({ products }: ProductListProps) {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold">商品列表</h2>
+        <h2 className="text-xl font-bold">规格列表</h2>
         <div className="flex gap-2">
             <Button variant="outline" onClick={handleMigrate} disabled={isMigrating}>
                 {isMigrating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                同步旧配置
+                同步旧规格
             </Button>
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
                 <DialogTrigger asChild>
                     <Button>
-                        <Plus className="mr-2 h-4 w-4" /> 添加商品
+                        <Plus className="mr-2 h-4 w-4" /> 添加规格
                     </Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>添加新商品</DialogTitle>
+                        <DialogTitle>添加新规格</DialogTitle>
                     </DialogHeader>
-                    <ProductForm onSuccess={() => setIsCreateOpen(false)} />
+                    <ProductForm itemTypes={itemTypes} onSuccess={() => setIsCreateOpen(false)} />
                 </DialogContent>
             </Dialog>
         </div>
@@ -154,22 +164,22 @@ export function ProductList({ products }: ProductListProps) {
                 </div>
             </div>
         )}
-        <Table>
+        <Table className="text-sm">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[160px]">商品ID</TableHead>
-              <TableHead className="w-[240px]">型号名称</TableHead>
-              <TableHead className="w-[200px]">映射关键词</TableHead>
-              <TableHead>包含版本 (SKU)</TableHead>
-              <TableHead className="text-right w-[100px]">操作</TableHead>
+              <TableHead className="w-[160px] h-10 py-1">商品ID</TableHead>
+              <TableHead className="w-[220px] h-10 py-1">型号名称</TableHead>
+              <TableHead className="w-[180px] h-10 py-1">映射关键词</TableHead>
+              <TableHead className="h-10 py-1">规格概览</TableHead>
+              <TableHead className="text-right w-[140px] h-10 py-1">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {paginatedProducts.map((product) => (
               <TableRow key={product.id}>
-                <TableCell className="font-mono text-xs">{product.id}</TableCell>
-                <TableCell className="font-medium">{product.name}</TableCell>
-                <TableCell className="max-w-[200px]">
+                <TableCell className="font-mono text-xs py-2">{product.id}</TableCell>
+                <TableCell className="font-medium py-2">{product.name}</TableCell>
+                <TableCell className="max-w-[180px] py-2">
                   {(() => {
                     let keywords: string[] = []
                     try {
@@ -186,7 +196,7 @@ export function ProductList({ products }: ProductListProps) {
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <div className="truncate text-xs cursor-help">{display}</div>
+                            <div className="truncate text-xs cursor-help max-w-full">{display}</div>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-[300px] break-words">
                             <p>{display}</p>
@@ -196,20 +206,77 @@ export function ProductList({ products }: ProductListProps) {
                     )
                   })()}
                 </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-2">
-                    {product.variants.map(v => (
-                        <span key={v.name} className="bg-gray-100 text-xs px-2 py-1 rounded">
-                            {v.name}
-                        </span>
+                <TableCell className="py-2">
+                  <div className="flex flex-wrap gap-1 items-center">
+                    {product.variants.length === 0 && <span className="text-xs text-muted-foreground">未配置规格</span>}
+                    {product.variants.slice(0, 3).map((v, idx) => (
+                        <TooltipProvider key={idx}>
+                            <Tooltip delayDuration={0}>
+                                <TooltipTrigger asChild>
+                                    <Badge variant="secondary" className="text-xs px-2 py-0.5 font-normal bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-help">
+                                        {v.name}
+                                    </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" align="start" className="max-w-[300px] p-3">
+                                    <div className="space-y-2 text-xs">
+                                        <div className="font-medium border-b pb-1 mb-1">{v.name}</div>
+                                        {v.specId && (
+                                            <div className="text-muted-foreground">ID: {v.specId}</div>
+                                        )}
+                                        {v.bomItems && v.bomItems.length > 0 && (
+                                            <div>
+                                                <div className="text-muted-foreground mb-1">BOM 构成:</div>
+                                                <ul className="list-disc pl-4 space-y-0.5">
+                                                    {v.bomItems.map((bom, bIdx) => {
+                                                        const typeName = itemTypes.find(t => t.id === bom.itemTypeId)?.name || "未知物品";
+                                                        return (
+                                                            <li key={bIdx}>{typeName} x{bom.quantity}</li>
+                                                        )
+                                                    })}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        {(!v.bomItems || v.bomItems.length === 0) && (
+                                            <div className="text-muted-foreground italic">无详细配置信息</div>
+                                        )}
+                                    </div>
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     ))}
+                    {product.variants.length > 3 && (
+                        <Badge variant="outline" className="text-xs px-2 py-0.5 font-normal text-muted-foreground">
+                            +{product.variants.length - 3}
+                        </Badge>
+                    )}
                   </div>
                 </TableCell>
-                <TableCell className="text-right space-x-2">
-                  <Button variant="ghost" size="sm" onClick={() => setEditingProduct(product)}>
+                <TableCell className="text-right space-x-1 py-2">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                    onClick={() => setViewingProduct(product)}
+                    title="查看详情"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8"
+                    onClick={() => setEditingProduct(product)}
+                    title="编辑"
+                  >
                     <Edit2 className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => confirmDelete(product)} className="text-red-600 hover:text-red-700">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => confirmDelete(product)}
+                    title="删除"
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </TableCell>
@@ -217,7 +284,7 @@ export function ProductList({ products }: ProductListProps) {
             ))}
             {products.length === 0 && (
                 <TableRow>
-                    <TableCell colSpan={4} className="text-center h-24">暂无商品</TableCell>
+                    <TableCell colSpan={5} className="text-center h-24">暂无规格</TableCell>
                 </TableRow>
             )}
           </TableBody>
@@ -339,14 +406,89 @@ export function ProductList({ products }: ProductListProps) {
                 </div>
             </div>
 
-        {/* Edit Dialog */}
+            <Sheet open={!!viewingProduct} onOpenChange={(open) => !open && setViewingProduct(null)}>
+                <SheetContent className="overflow-y-auto" style={{ width: 960, maxWidth: 960, minWidth: 960 }}>
+                    <SheetHeader>
+                        <SheetTitle>商品详情: {viewingProduct?.name}</SheetTitle>
+                        <SheetDescription>
+                            商品ID: <span className="font-mono">{viewingProduct?.id}</span>
+                        </SheetDescription>
+                    </SheetHeader>
+                    
+                    <div className="mt-6 space-y-6">
+                        {viewingProduct?.variants.map((variant, index) => (
+                            <div key={index} className="border rounded-md p-4 space-y-3 bg-slate-50/50">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium text-sm">{variant.name}</span>
+                                        {variant.specId && (
+                                            <Badge variant="outline" className="text-xs font-mono text-muted-foreground bg-white">
+                                                {variant.specId}
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    <Badge variant={variant.bomItems && variant.bomItems.length > 0 ? "secondary" : "outline"} className="font-normal">
+                                         {variant.bomItems && variant.bomItems.length > 0 ? "BOM已配置" : "无BOM"}
+                                    </Badge>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <span className="text-xs text-muted-foreground block mb-1">保险费</span>
+                                        <span>¥{variant.insurancePrice}</span>
+                                    </div>
+                                </div>
+
+                                {/* BOM Items */}
+                                {variant.bomItems && variant.bomItems.length > 0 && (
+                                    <div className="space-y-1">
+                                         <span className="text-xs font-medium text-muted-foreground">BOM 构成</span>
+                                         <div className="bg-white rounded border p-2 space-y-1">
+                                            {variant.bomItems.map((bom, idx) => {
+                                                const itemType = itemTypes.find(t => t.id === bom.itemTypeId);
+                                                return (
+                                                    <div key={idx} className="flex justify-between text-xs">
+                                                        <span>{itemType?.name || "未知物品"}</span>
+                                                        <span className="font-mono">x{bom.quantity}</span>
+                                                    </div>
+                                                )
+                                            })}
+                                         </div>
+                                    </div>
+                                )}
+
+                                {/* Price Rules */}
+                                {variant.priceRules && Object.keys(variant.priceRules).length > 0 && (
+                                     <div className="space-y-1">
+                                         <span className="text-xs font-medium text-muted-foreground">价格规则</span>
+                                         <div className="flex flex-wrap gap-2">
+                                            {Object.entries(variant.priceRules).map(([days, price]) => (
+                                                <Badge key={days} variant="outline" className="text-xs font-normal bg-white">
+                                                    {days}天: ¥{price}
+                                                </Badge>
+                                            ))}
+                                         </div>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        {viewingProduct?.variants.length === 0 && (
+                            <div className="text-center text-muted-foreground py-8 text-sm">
+                                暂无规格信息
+                            </div>
+                        )}
+                    </div>
+                </SheetContent>
+            </Sheet>
+
         <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
             <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>编辑商品</DialogTitle>
+                    <DialogTitle>编辑规格</DialogTitle>
                 </DialogHeader>
                 {editingProduct && (
                     <ProductForm 
+                        itemTypes={itemTypes}
                         initialData={editingProduct} 
                         onSuccess={() => setEditingProduct(null)} 
                     />
@@ -354,15 +496,14 @@ export function ProductList({ products }: ProductListProps) {
             </DialogContent>
         </Dialog>
 
-        {/* Delete Dialog */}
         <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>确认删除商品?</DialogTitle>
+                    <DialogTitle>确认删除规格?</DialogTitle>
                 </DialogHeader>
                 <div className="py-4">
                     <p className="text-sm text-gray-500">
-                        确定要删除商品 &quot;{productToDelete?.name}&quot; 吗？
+                        确定要删除规格 &quot;{productToDelete?.name}&quot; 吗？
                     </p>
                     <p className="text-sm text-red-500 mt-2">
                         注意: 这将影响关联的历史订单显示。

@@ -165,7 +165,28 @@ export async function loadConfig(): Promise<OnlineOrdersConfig | null> {
   const record = await appConfigClient.findUnique({ where: { key: CONFIG_KEY } })
   if (!record?.value) return null
   try {
-    return JSON.parse(record.value) as OnlineOrdersConfig
+    const config = JSON.parse(record.value) as OnlineOrdersConfig
+    
+    // Sanitize URLs in config to prevent errors
+    if (config.sites) {
+        config.sites.forEach(site => {
+            if (site.loginUrl) {
+                 site.loginUrl = site.loginUrl.trim();
+                 if (site.loginUrl.includes("http:// http")) site.loginUrl = site.loginUrl.replace("http:// http", "http://");
+                 else if (site.loginUrl.match(/^http\/\//)) site.loginUrl = site.loginUrl.replace(/^http\/\//, "http://");
+            }
+        });
+    }
+    if (config.webhookUrls) {
+        config.webhookUrls = config.webhookUrls.map(url => {
+            let u = url.trim();
+            if (u.includes("http:// http")) u = u.replace("http:// http", "http://");
+            else if (u.match(/^http\/\//)) u = u.replace(/^http\/\//, "http://");
+            return u;
+        });
+    }
+
+    return config
   } catch {
     return null
   }
@@ -2513,11 +2534,20 @@ async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
         addLog(`[System] 警告: 未配置 NEXT_PUBLIC_APP_URL，Webhook 链接将不可用`)
     }
 
-    let baseUrl = process.env.NEXT_PUBLIC_APP_URL || "";
-    // Fix common configuration error: double protocol (e.g. https://https://...)
-    baseUrl = baseUrl.replace(/^https?:\/\/(https?:\/\/)/, '$1');
-    // Remove trailing slash
-    baseUrl = baseUrl.replace(/\/$/, "");
+    let baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim()
+    baseUrl = baseUrl.replace(/\s+/g, "")
+    if (baseUrl && !baseUrl.startsWith("http")) {
+        if (baseUrl.startsWith("//")) {
+             baseUrl = `http:${baseUrl}`
+        } else {
+             baseUrl = `http://${baseUrl}`
+        }
+    }
+    baseUrl = baseUrl.replace(/^http\/\//, "http://")
+    baseUrl = baseUrl.replace(/^https\/\//, "https://")
+    baseUrl = baseUrl.replace(/^https?:\/\/(https?:\/\/)/, "$1")
+    baseUrl = baseUrl.replace(/^https?:\/\/(https?)\/\//, "$1://")
+    baseUrl = baseUrl.replace(/\/$/, "")
 
     const remoteLink = baseUrl 
         ? `${baseUrl}/online-orders/remote-auth`

@@ -135,9 +135,9 @@ export default async function StatsPage(props: PageProps) {
             o."channelId",
             o."sourceContact" as "promoterName",
             SUM(CASE WHEN o.status != 'CLOSED' THEN 1 ELSE 0 END) as "orderCount",
-            SUM(CASE WHEN o.status != 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as "totalRevenue",
-            SUM(CASE WHEN o.status = 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0) + COALESCE(es.extTotal, 0)) ELSE 0 END) as "refundedAmount",
-            SUM(CASE WHEN o.status != 'CLOSED' AND o."rentPrice" > o."standardPrice" THEN (o."rentPrice" - o."standardPrice") ELSE 0 END) as "highTicketBase"
+            SUM(CASE WHEN o.status != 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0.0) + COALESCE(es.extTotal, 0.0)) ELSE 0.0 END) as "totalRevenue",
+            SUM(CASE WHEN o.status = 'CLOSED' THEN (o."rentPrice" + o."insurancePrice" + COALESCE(o."overdueFee", 0.0) + COALESCE(es.extTotal, 0.0)) ELSE 0.0 END) as "refundedAmount",
+            SUM(CASE WHEN o.status != 'CLOSED' AND o."rentPrice" > o."standardPrice" THEN (o."rentPrice" - o."standardPrice") ELSE 0.0 END) as "highTicketBase"
         FROM "Order" o
         LEFT JOIN ExtensionSums es ON o.id = es."orderId"
         LEFT JOIN "User" u ON o."creatorId" = u.id

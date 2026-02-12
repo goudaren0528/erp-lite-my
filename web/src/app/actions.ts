@@ -69,6 +69,188 @@ export async function fetchOrdersForExport({
     return orders;
 }
 
+async function resolveOrderSpec(order: { specId?: string | null; productId?: string | null; variantName?: string | null }) {
+    if (order.specId) {
+        return prisma.productSpec.findFirst({
+            where: { specId: order.specId },
+            include: { bomItems: true }
+        })
+    }
+    if (order.productId && order.variantName) {
+        return prisma.productSpec.findFirst({
+            where: { productId: order.productId, name: order.variantName },
+            include: { bomItems: true }
+        })
+    }
+    return null
+}
+
+async function getDefaultWarehouseId() {
+    const warehouse = await prisma.warehouse.findFirst({ where: { isDefault: true } })
+        ?? await prisma.warehouse.findFirst({ orderBy: { createdAt: "asc" } })
+    return warehouse?.id || null
+}
+
+async function ensureOrderReservations(orderId: string) {
+    const existing = await prisma.inventoryReservation.findFirst({ where: { orderId } })
+    if (existing) return
+
+    const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, specId: true, productId: true, variantName: true, rentStartDate: true, returnDeadline: true, duration: true }
+    })
+    if (!order) throw new Error("订单不存在")
+
+    const spec = await resolveOrderSpec(order)
+    if (!spec || spec.bomItems.length === 0) return
+
+    const warehouseId = await getDefaultWarehouseId()
+    if (!warehouseId) throw new Error("请先创建仓库")
+
+    const startDate = order.rentStartDate ? new Date(order.rentStartDate) : new Date()
+    let endDate: Date
+    if (order.returnDeadline) {
+        endDate = new Date(order.returnDeadline)
+    } else {
+        const days = order.duration && order.duration > 0 ? order.duration : 1
+        endDate = new Date(startDate)
+        endDate.setDate(endDate.getDate() + days)
+    }
+
+    await prisma.inventoryReservation.createMany({
+        data: spec.bomItems.map(item => ({
+            orderId: order.id,
+            specId: spec.id,
+            itemTypeId: item.itemTypeId,
+            warehouseId,
+            quantity: item.quantity,
+            startDate,
+            endDate
+        }))
+    })
+}
+
+async function allocateOrderInventory(orderId: string) {
+    const existingAllocation = await prisma.inventoryAllocation.findFirst({ where: { orderId, returnedAt: null } })
+    if (existingAllocation) return
+
+    await ensureOrderReservations(orderId)
+
+    const reservations = await prisma.inventoryReservation.findMany({
+        where: { orderId },
+        include: { itemType: true }
+    })
+    if (reservations.length === 0) return
+
+    await prisma.$transaction(async (tx) => {
+        for (const reservation of reservations) {
+            if (reservation.itemType.isSerialized) {
+                const availableItems = await tx.inventoryItem.findMany({
+                    where: {
+                        itemTypeId: reservation.itemTypeId,
+                        warehouseId: reservation.warehouseId,
+                        status: "AVAILABLE"
+                    },
+                    take: reservation.quantity,
+                    orderBy: { createdAt: "asc" }
+                })
+                if (availableItems.length < reservation.quantity) {
+                    throw new Error(`${reservation.itemType.name} 库存不足`)
+                }
+                for (const item of availableItems) {
+                    await tx.inventoryAllocation.create({
+                        data: {
+                            orderId,
+                            itemId: item.id,
+                            warehouseId: reservation.warehouseId
+                        }
+                    })
+                    await tx.inventoryItem.update({
+                        where: { id: item.id },
+                        data: { status: "RENTING" }
+                    })
+                }
+            } else {
+                const stock = await tx.inventoryStock.findUnique({
+                    where: {
+                        itemTypeId_warehouseId: {
+                            itemTypeId: reservation.itemTypeId,
+                            warehouseId: reservation.warehouseId
+                        }
+                    }
+                })
+                if (!stock || stock.quantity < reservation.quantity) {
+                    throw new Error(`${reservation.itemType.name} 库存不足`)
+                }
+                await tx.inventoryStock.update({
+                    where: {
+                        itemTypeId_warehouseId: {
+                            itemTypeId: reservation.itemTypeId,
+                            warehouseId: reservation.warehouseId
+                        }
+                    },
+                    data: { quantity: { decrement: reservation.quantity } }
+                })
+            }
+        }
+    })
+}
+
+async function releaseOrderInventory(orderId: string) {
+    const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        select: { actualDeliveryTime: true }
+    })
+    if (!order) return
+
+    const allocations = await prisma.inventoryAllocation.findMany({
+        where: { orderId, returnedAt: null },
+        select: { id: true, itemId: true }
+    })
+
+    const reservations = await prisma.inventoryReservation.findMany({
+        where: { orderId },
+        include: { itemType: true }
+    })
+
+    await prisma.$transaction(async (tx) => {
+        if (allocations.length > 0) {
+            const itemIds = allocations.map(a => a.itemId)
+            await tx.inventoryItem.updateMany({
+                where: { id: { in: itemIds } },
+                data: { status: "AVAILABLE" }
+            })
+            await tx.inventoryAllocation.updateMany({
+                where: { id: { in: allocations.map(a => a.id) } },
+                data: { returnedAt: new Date() }
+            })
+        }
+
+        if (!order.actualDeliveryTime) return
+
+        const increments = new Map<string, number>()
+        for (const reservation of reservations) {
+            if (reservation.itemType.isSerialized) continue
+            const key = `${reservation.itemTypeId}|${reservation.warehouseId}`
+            increments.set(key, (increments.get(key) || 0) + reservation.quantity)
+        }
+
+        for (const [key, quantity] of increments) {
+            const [itemTypeId, warehouseId] = key.split("|")
+            await tx.inventoryStock.upsert({
+                where: {
+                    itemTypeId_warehouseId: {
+                        itemTypeId,
+                        warehouseId
+                    }
+                },
+                update: { quantity: { increment: quantity } },
+                create: { itemTypeId, warehouseId, quantity }
+            })
+        }
+    })
+}
+
 export async function createOrder(formData: FormData) {
   try {
       const currentUser = await getCurrentUser();
@@ -100,10 +282,11 @@ export async function createOrder(formData: FormData) {
       let standardPrice = 0;
       const productId = rawData.productId as string;
       const variantName = rawData.variantName as string;
+      const specId = rawData.specId as string;
       const duration = Number(rawData.duration);
 
-      if (productId && variantName && duration > 0) {
-          standardPrice = await getStandardPrice(productId, variantName, duration);
+      if (duration > 0) {
+          standardPrice = await getStandardPriceSnapshot({ specId, productId, variantName, duration });
       }
 
       const order = await prisma.order.create({
@@ -123,6 +306,7 @@ export async function createOrder(formData: FormData) {
             productName: (rawData.productName as string) || '',
             productId: (rawData.productId as string) || null,
             variantName: (rawData.variantName as string) || '',
+            specId: (rawData.specId as string) || null,
             sn: (rawData.sn as string) || null,
             
             duration: Number(rawData.duration) || 0,
@@ -157,6 +341,8 @@ export async function createOrder(formData: FormData) {
         }
       });
       
+      await ensureOrderReservations(order.id)
+
       revalidatePath('/orders');
       return { success: true, message: "订单创建成功", orderId: order.id };
   } catch (error) {
@@ -537,22 +723,38 @@ export async function deletePromoter(promoterId: string) {
     }
 }
 
-async function getStandardPrice(productId: string, variantName: string, duration: number): Promise<number> {
+async function getStandardPriceBySpec(specId: string, duration: number): Promise<number> {
     try {
-        const product = await prisma.product.findUnique({
-            where: { id: productId }
+        const spec = await prisma.productSpec.findFirst({
+            where: { specId }
         });
-        if (!product || !product.variants) return 0;
-        
-        const variants = JSON.parse(product.variants) as ProductVariant[];
-        const variant = variants.find(v => v.name === variantName);
-        if (!variant || !variant.priceRules) return 0;
-        
-        const price = variant.priceRules[String(duration)];
+        if (!spec || !spec.priceRules) return 0;
+        const rules = JSON.parse(spec.priceRules) as Record<string, number>;
+        const price = rules[String(duration)];
         return price || 0;
     } catch (e) {
         console.error("Error calculating standard price:", e);
         return 0;
+    }
+}
+
+async function getStandardPriceSnapshot(params: { specId?: string; productId?: string; variantName?: string; duration: number }): Promise<number> {
+    const { specId, productId, variantName, duration } = params
+    if (specId) {
+        return getStandardPriceBySpec(specId, duration)
+    }
+    if (!productId || !variantName) return 0
+    try {
+        const spec = await prisma.productSpec.findFirst({
+            where: { productId, name: variantName }
+        })
+        if (!spec || !spec.priceRules) return 0
+        const rules = JSON.parse(spec.priceRules) as Record<string, number>
+        const price = rules[String(duration)]
+        return price || 0
+    } catch (e) {
+        console.error("Error calculating standard price:", e)
+        return 0
     }
 }
 
@@ -655,10 +857,11 @@ export async function updateOrder(orderId: string, formData: FormData) {
         let standardPrice = 0;
         const productId = rawData.productId as string;
         const variantName = rawData.variantName as string;
+        const specId = rawData.specId as string;
         const duration = Number(rawData.duration);
 
-        if (productId && variantName && duration > 0) {
-            standardPrice = await getStandardPrice(productId, variantName, duration);
+        if (duration > 0) {
+            standardPrice = await getStandardPriceSnapshot({ specId, productId, variantName, duration });
         }
 
         await prisma.order.update({
@@ -676,6 +879,7 @@ export async function updateOrder(orderId: string, formData: FormData) {
                 productName: (rawData.productName as string) || '',
                 productId: (rawData.productId as string) || null,
                 variantName: (rawData.variantName as string) || '',
+                specId: (rawData.specId as string) || null,
                 sn: (rawData.sn as string) || null,
                 
                 duration: Number(rawData.duration) || 0,
@@ -748,6 +952,9 @@ export async function updateOrderStatus(orderId: string, newStatus: OrderStatus)
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     
     if (!order) throw new Error("Order not found");
+    if (order.status === newStatus) {
+        return { success: true, message: "订单状态已是最新" }
+    }
 
     const oldStatus = order.status;
     const oldStatusLabel = STATUS_LABELS[oldStatus] || oldStatus;
@@ -772,6 +979,10 @@ export async function updateOrderStatus(orderId: string, newStatus: OrderStatus)
         where: { id: orderId },
         data
     });
+
+    if (newStatus === 'COMPLETED' || newStatus === 'CLOSED') {
+        await releaseOrderInventory(orderId)
+    }
 
     revalidatePath('/orders');
     return { success: true, message: "订单状态更新成功" };
@@ -896,6 +1107,7 @@ export async function deleteOrder(orderId: string) {
 export async function shipOrder(orderId: string, data: { trackingNumber?: string, logisticsCompany?: string, sn?: string }) {
     try {
         const currentUser = await getCurrentUser();
+        await allocateOrderInventory(orderId)
         await prisma.order.update({
             where: { id: orderId },
             data: {
@@ -974,6 +1186,7 @@ export async function returnOrder(orderId: string, data: { returnTrackingNumber?
 export async function approveOrder(orderId: string) {
     try {
         const currentUser = await getCurrentUser();
+        await ensureOrderReservations(orderId)
         await prisma.order.update({
             where: { id: orderId },
             data: {
@@ -998,6 +1211,7 @@ export async function approveOrder(orderId: string) {
 export async function rejectOrder(orderId: string) {
     try {
         const currentUser = await getCurrentUser();
+        await releaseOrderInventory(orderId)
         await prisma.order.update({
             where: { id: orderId },
             data: {
@@ -1022,6 +1236,7 @@ export async function rejectOrder(orderId: string) {
 export async function closeOrder(orderId: string, remark?: string) {
     try {
         const currentUser = await getCurrentUser();
+        await releaseOrderInventory(orderId)
         await prisma.order.update({
             where: { id: orderId },
             data: {
@@ -1074,35 +1289,422 @@ export async function addOverdueFee(orderId: string, fee: number) {
     }
 }
 
-export async function saveProduct(product: { id?: string, name: string, variants: unknown[], matchKeywords?: string }) {
+export async function saveProduct(product: { id?: string, name: string, variants: ProductVariant[], matchKeywords?: string, totalStock?: number }) {
     try {
         const variantsStr = JSON.stringify(product.variants || []);
+
+        const incomingSpecIds = new Set<string>();
+        for (const v of product.variants || []) {
+            if (!v.specId) {
+                // Generate specId if missing
+                v.specId = `SKU-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+            }
+            if (incomingSpecIds.has(v.specId)) {
+                return { success: false, message: "规格ID不能重复" };
+            }
+            incomingSpecIds.add(v.specId);
+            if (!v.bomItems || v.bomItems.length === 0) {
+                return { success: false, message: "每个规格必须配置BOM" };
+            }
+        }
         
         if (product.id) {
-            await prisma.product.update({
+            const updated = await prisma.product.update({
                 where: { id: product.id },
                 data: {
                     name: product.name,
                     variants: variantsStr,
-                    matchKeywords: product.matchKeywords
+                    matchKeywords: product.matchKeywords,
+                    totalStock: product.totalStock
                 }
             });
+
+            const existingSpecs = await prisma.productSpec.findMany({
+                where: { productId: product.id }
+            });
+            const existingBySpecId = new Map(existingSpecs.map(s => [s.specId, s]));
+            const nextSpecIds = new Set(product.variants.map(v => v.specId || "").filter(Boolean));
+
+            for (const spec of existingSpecs) {
+                if (!nextSpecIds.has(spec.specId)) {
+                    await prisma.productSpec.delete({ where: { id: spec.id } });
+                }
+            }
+
+            for (const variant of product.variants) {
+                const priceRulesStr = JSON.stringify(variant.priceRules || {});
+                const accessories = variant.accessories || "";
+                const insurancePrice = Number(variant.insurancePrice) || 0;
+                const specId = variant.specId || "";
+
+                const existing = existingBySpecId.get(specId);
+                if (existing) {
+                    await prisma.productSpec.update({
+                        where: { id: existing.id },
+                        data: {
+                            name: variant.name,
+                            accessories,
+                            insurancePrice,
+                            priceRules: priceRulesStr
+                        }
+                    });
+
+                    await prisma.specBom.deleteMany({ where: { specId: existing.id } });
+                    if (variant.bomItems && variant.bomItems.length > 0) {
+                        await prisma.specBom.createMany({
+                            data: variant.bomItems.map(b => ({
+                                specId: existing.id,
+                                itemTypeId: b.itemTypeId,
+                                quantity: Number(b.quantity) || 1
+                            }))
+                        });
+                    }
+                } else {
+                    const created = await prisma.productSpec.create({
+                        data: {
+                            specId,
+                            name: variant.name,
+                            accessories,
+                            insurancePrice,
+                            priceRules: priceRulesStr,
+                            productId: updated.id
+                        }
+                    });
+                    if (variant.bomItems && variant.bomItems.length > 0) {
+                        await prisma.specBom.createMany({
+                            data: variant.bomItems.map(b => ({
+                                specId: created.id,
+                                itemTypeId: b.itemTypeId,
+                                quantity: Number(b.quantity) || 1
+                            }))
+                        });
+                    }
+                }
+            }
+
             revalidatePath('/products');
             return { success: true, message: "商品更新成功" };
         } else {
-            await prisma.product.create({
+            const created = await prisma.product.create({
                 data: {
                     name: product.name,
                     variants: variantsStr,
-                    matchKeywords: product.matchKeywords
+                    matchKeywords: product.matchKeywords,
+                    totalStock: product.totalStock || 100
                 }
             });
+
+            for (const variant of product.variants) {
+                const createdSpec = await prisma.productSpec.create({
+                    data: {
+                        specId: variant.specId || "",
+                        name: variant.name,
+                        accessories: variant.accessories || "",
+                        insurancePrice: Number(variant.insurancePrice) || 0,
+                        priceRules: JSON.stringify(variant.priceRules || {}),
+                        productId: created.id
+                    }
+                });
+                if (variant.bomItems && variant.bomItems.length > 0) {
+                    await prisma.specBom.createMany({
+                        data: variant.bomItems.map(b => ({
+                            specId: createdSpec.id,
+                            itemTypeId: b.itemTypeId,
+                            quantity: Number(b.quantity) || 1
+                        }))
+                    });
+                }
+            }
             revalidatePath('/products');
             return { success: true, message: "商品创建成功" };
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { success: false, message: message || "保存商品失败" };
+    }
+}
+
+export async function syncProductSpecsFromVariants() {
+    try {
+        const products = await prisma.product.findMany()
+        let createdCount = 0
+        let updatedCount = 0
+
+        for (const product of products) {
+            let variants: ProductVariant[] = []
+            try {
+                variants = product.variants ? JSON.parse(product.variants) : []
+            } catch {
+                variants = []
+            }
+
+            const existingSpecs = await prisma.productSpec.findMany({ where: { productId: product.id } })
+            const existingBySpecId = new Map(existingSpecs.map(s => [s.specId, s]))
+
+            const updatedVariants = variants.map((v, index) => {
+                const specId = v.specId || `SKU-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+                return { ...v, specId }
+            })
+
+            for (const variant of updatedVariants) {
+                const specId = variant.specId || ""
+                const priceRulesStr = JSON.stringify(variant.priceRules || {})
+                const accessories = variant.accessories || ""
+                const insurancePrice = Number(variant.insurancePrice) || 0
+                const existing = existingBySpecId.get(specId)
+                if (existing) {
+                    await prisma.productSpec.update({
+                        where: { id: existing.id },
+                        data: {
+                            name: variant.name,
+                            accessories,
+                            insurancePrice,
+                            priceRules: priceRulesStr
+                        }
+                    })
+                    updatedCount++
+                } else {
+                    await prisma.productSpec.create({
+                        data: {
+                            specId,
+                            name: variant.name,
+                            accessories,
+                            insurancePrice,
+                            priceRules: priceRulesStr,
+                            productId: product.id
+                        }
+                    })
+                    createdCount++
+                }
+            }
+
+            await prisma.product.update({
+                where: { id: product.id },
+                data: {
+                    variants: JSON.stringify(updatedVariants)
+                }
+            })
+        }
+
+        revalidatePath('/products')
+        return { success: true, message: `同步完成，新增 ${createdCount} 条规格，更新 ${updatedCount} 条规格` }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "同步失败" }
+    }
+}
+
+export async function createInventoryItemType(data: { name: string; isSerialized: boolean; unit?: string; category?: string; purchasePrice?: number }) {
+    try {
+        if (!data.name.trim()) return { success: false, message: "物品名称不能为空" }
+        await prisma.inventoryItemType.create({
+            data: {
+                name: data.name.trim(),
+                isSerialized: data.isSerialized,
+                unit: data.unit || null,
+                category: data.category || null,
+                purchasePrice: data.purchasePrice || null
+            }
+        })
+        revalidatePath('/inventory')
+        return { success: true, message: "物品类型创建成功" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "物品类型创建失败" }
+    }
+}
+
+export async function updateInventoryItemType(id: string, data: { name: string; isSerialized: boolean; unit?: string; category?: string; purchasePrice?: number }) {
+    try {
+        if (!data.name.trim()) return { success: false, message: "物品名称不能为空" }
+        await prisma.inventoryItemType.update({
+            where: { id },
+            data: {
+                name: data.name.trim(),
+                isSerialized: data.isSerialized,
+                unit: data.unit || null,
+                category: data.category || null,
+                purchasePrice: data.purchasePrice || null
+            }
+        })
+        revalidatePath('/inventory')
+        return { success: true, message: "物品类型更新成功" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "物品类型更新失败" }
+    }
+}
+
+export async function updateWarehouse(id: string, name: string) {
+    try {
+        if (!name.trim()) return { success: false, message: "仓库名称不能为空" }
+        await prisma.warehouse.update({
+            where: { id },
+            data: { name: name.trim() }
+        })
+        revalidatePath('/inventory')
+        return { success: true, message: "仓库名称更新成功" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "仓库名称更新失败" }
+    }
+}
+
+export async function deleteInventoryItemType(id: string) {
+    try {
+        await prisma.inventoryItemType.delete({ where: { id } })
+        revalidatePath('/inventory')
+        return { success: true, message: "物品类型删除成功" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "物品类型删除失败" }
+    }
+}
+
+export async function createWarehouse(data: { name: string; isDefault?: boolean }) {
+    try {
+        if (!data.name.trim()) return { success: false, message: "仓库名称不能为空" }
+        if (data.isDefault) {
+            await prisma.warehouse.updateMany({ data: { isDefault: false } })
+        }
+        await prisma.warehouse.create({
+            data: {
+                name: data.name.trim(),
+                isDefault: !!data.isDefault
+            }
+        })
+        revalidatePath('/inventory')
+        return { success: true, message: "仓库创建成功" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "仓库创建失败" }
+    }
+}
+
+export async function setDefaultWarehouse(id: string) {
+    try {
+        await prisma.warehouse.updateMany({ data: { isDefault: false } })
+        await prisma.warehouse.update({ where: { id }, data: { isDefault: true } })
+        revalidatePath('/inventory')
+        return { success: true, message: "默认仓库已更新" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "默认仓库更新失败" }
+    }
+}
+
+export async function deleteWarehouse(id: string) {
+    try {
+        const warehouse = await prisma.warehouse.findUnique({ where: { id } })
+        if (!warehouse) return { success: false, message: "仓库不存在" }
+        if (warehouse.isDefault) return { success: false, message: "无法删除默认仓库，请先设置其他仓库为默认" }
+        
+        await prisma.warehouse.delete({ where: { id } })
+        revalidatePath('/inventory')
+        return { success: true, message: "仓库删除成功" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "仓库删除失败" }
+    }
+}
+
+export async function createInventoryItem(data: { itemTypeId: string; warehouseId: string; sn?: string }) {
+    try {
+        const itemType = await prisma.inventoryItemType.findUnique({ where: { id: data.itemTypeId } })
+        if (!itemType) return { success: false, message: "物品类型不存在" }
+        if (!itemType.isSerialized) return { success: false, message: "非序列化物品请走库存数量调整" }
+
+        await prisma.inventoryItem.create({
+            data: {
+                itemTypeId: data.itemTypeId,
+                warehouseId: data.warehouseId,
+                sn: data.sn || null,
+                status: "AVAILABLE"
+            }
+        })
+        revalidatePath('/inventory')
+        return { success: true, message: "入库成功" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "入库失败" }
+    }
+}
+
+export async function batchCreateInventoryItems(data: { itemTypeId: string; warehouseId: string; sns: string[] }) {
+    try {
+        const itemType = await prisma.inventoryItemType.findUnique({ where: { id: data.itemTypeId } })
+        if (!itemType) return { success: false, message: "物品类型不存在" }
+        if (!itemType.isSerialized) return { success: false, message: "非序列化物品请走库存数量调整" }
+        if (!data.sns || data.sns.length === 0) return { success: false, message: "请提供序列号" }
+
+        const validSns = data.sns.filter(sn => sn.trim().length > 0).map(sn => sn.trim())
+        if (validSns.length === 0) return { success: false, message: "没有有效的序列号" }
+
+        await prisma.$transaction(
+            validSns.map(sn => 
+                prisma.inventoryItem.create({
+                    data: {
+                        itemTypeId: data.itemTypeId,
+                        warehouseId: data.warehouseId,
+                        sn: sn,
+                        status: "AVAILABLE"
+                    }
+                })
+            )
+        )
+        
+        revalidatePath('/inventory')
+        return { success: true, message: `成功入库 ${validSns.length} 个物品` }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "批量入库失败" }
+    }
+}
+
+export async function deleteInventoryItem(id: string) {
+    try {
+        // Soft delete: Change status to DELETED
+        await prisma.inventoryItem.update({
+            where: { id },
+            data: { status: "DELETED" }
+        })
+        revalidatePath('/inventory')
+        return { success: true, message: "物品已删除" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "物品删除失败" }
+    }
+}
+
+export async function adjustInventoryStock(data: { itemTypeId: string; warehouseId: string; quantity: number }) {
+    try {
+        const itemType = await prisma.inventoryItemType.findUnique({ where: { id: data.itemTypeId } })
+        if (!itemType) return { success: false, message: "物品类型不存在" }
+        if (itemType.isSerialized) return { success: false, message: "序列化物品请录入SN" }
+        const quantity = Number(data.quantity)
+        if (!Number.isFinite(quantity) || quantity === 0) return { success: false, message: "数量必须不为0" }
+
+        await prisma.inventoryStock.upsert({
+            where: {
+                itemTypeId_warehouseId: {
+                    itemTypeId: data.itemTypeId,
+                    warehouseId: data.warehouseId
+                }
+            },
+            update: {
+                quantity: { increment: quantity }
+            },
+            create: {
+                itemTypeId: data.itemTypeId,
+                warehouseId: data.warehouseId,
+                quantity
+            }
+        })
+        revalidatePath('/inventory')
+        return { success: true, message: "库存数量已更新" }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "库存更新失败" }
     }
 }
 

@@ -58,6 +58,8 @@ const PERMISSIONS_MAP: Record<string, string> = {
     'stats_accounts': '账号结算',
     'stats_promoters': '推广员结算',
     'products': '商品库管理',
+    'inventory_calendar': '库存日历',
+    'inventory_manage': '库存管理',
     'users': '账号权限管理',
     'backup': '导出导入数据',
 }

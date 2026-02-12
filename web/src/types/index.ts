@@ -15,6 +15,8 @@ export interface ProductVariant {
   accessories: string; // 配件内容
   insurancePrice: number; // 激光险/安心保
   priceRules: Record<string, number>; // "1": 48, "2": 58...
+  specId?: string;
+  bomItems?: SpecBomItem[];
 }
 
 export interface Product {
@@ -22,6 +24,73 @@ export interface Product {
   name: string; // 型号
   variants: ProductVariant[];
   matchKeywords?: string | null; // JSON string array of keywords for auto mapping
+  totalStock?: number;
+  specs?: ProductSpec[];
+}
+
+export interface SpecBomItem {
+  itemTypeId: string;
+  quantity: number;
+}
+
+export interface ProductSpec {
+  id: string;
+  specId: string;
+  name: string;
+  accessories: string;
+  insurancePrice: number;
+  priceRules: Record<string, number>;
+  productId: string;
+  bomItems: SpecBomItem[];
+}
+
+export interface InventoryItemType {
+  id: string;
+  name: string;
+  isSerialized: boolean;
+  unit?: string | null;
+  category?: string | null;
+}
+
+export interface InventoryItem {
+  id: string;
+  itemTypeId: string;
+  sn?: string | null;
+  status: string;
+  warehouseId: string;
+}
+
+export interface InventoryStock {
+  id: string;
+  itemTypeId: string;
+  warehouseId: string;
+  quantity: number;
+}
+
+export interface Warehouse {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export interface InventoryReservation {
+  id: string;
+  orderId: string;
+  specId?: string | null;
+  itemTypeId: string;
+  warehouseId: string;
+  quantity: number;
+  startDate: string;
+  endDate: string;
+}
+
+export interface InventoryAllocation {
+  id: string;
+  orderId: string;
+  itemId: string;
+  warehouseId: string;
+  allocatedAt: string;
+  returnedAt?: string | null;
 }
 
 export type OrderSource = 'AGENT' | 'PEER' | 'RETAIL' | 'PART_TIME' | 'PART_TIME_AGENT';
@@ -65,6 +134,7 @@ export interface Order {
   productId?: string;
   variantName: string;
   sn?: string; // SN码
+  specId?: string | null;
   itemTitle?: string;
   itemSku?: string;
   merchantName?: string;
@@ -159,6 +229,14 @@ export interface DB {
   users: User[];
   promoters: Promoter[];
   products: Product[];
+  productSpecs?: ProductSpec[];
+  specBoms?: SpecBomItem[];
+  inventoryItemTypes?: InventoryItemType[];
+  inventoryItems?: InventoryItem[];
+  inventoryStocks?: InventoryStock[];
+  warehouses?: Warehouse[];
+  inventoryReservations?: InventoryReservation[];
+  inventoryAllocations?: InventoryAllocation[];
   orders: Order[];
   accountGroups: AccountGroup[];
   channelConfigs: ChannelConfig[];
