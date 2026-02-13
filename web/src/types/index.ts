@@ -31,6 +31,7 @@ export interface Product {
 export interface SpecBomItem {
   itemTypeId: string;
   quantity: number;
+  itemTypeName?: string;
 }
 
 export interface ProductSpec {

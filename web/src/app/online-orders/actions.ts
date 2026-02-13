@@ -137,3 +137,70 @@ export async function getOnlineOrderCounts(params: {
 
     return { counts, total };
 }
+
+export async function getMatchProducts() {
+    const productsRaw = await prisma.product.findMany({
+        select: {
+            id: true,
+            name: true,
+            variants: true,
+            specs: {
+                select: {
+                    id: true,
+                    specId: true,
+                    name: true,
+                    bomItems: {
+                        select: {
+                            itemTypeId: true,
+                            quantity: true,
+                            itemType: { select: { name: true } }
+                        }
+                    }
+                }
+            }
+        }
+    })
+
+    return productsRaw.map(p => ({
+        ...p,
+        variants: typeof p.variants === 'string' ? JSON.parse(p.variants) : p.variants,
+        specs: p.specs?.map(s => ({
+            ...s,
+            bomItems: s.bomItems?.map(b => ({
+                itemTypeId: b.itemTypeId,
+                quantity: b.quantity,
+                itemTypeName: b.itemType?.name
+            })) || []
+        }))
+    }))
+}
+
+export async function updateOnlineOrderMatchSpec(orderId: string, productId: string | null, specValue: string | null) {
+    if (!specValue) {
+        await prisma.onlineOrder.update({
+            where: { id: orderId },
+            data: { specId: null, productId: null }
+        })
+        return { success: true }
+    }
+
+    const spec = await prisma.productSpec.findFirst({
+        where: {
+            OR: [
+                { id: specValue },
+                ...(productId ? [{ productId, name: specValue }] : [])
+            ]
+        },
+        select: { id: true, productId: true }
+    })
+
+    if (!spec) {
+        throw new Error("未找到匹配规格")
+    }
+
+    await prisma.onlineOrder.update({
+        where: { id: orderId },
+        data: { specId: spec.id, productId: spec.productId }
+    })
+    return { success: true }
+}

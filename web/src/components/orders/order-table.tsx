@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useTransition } from "react"
 import Image from "next/image"
-import { useRouter } from "next/navigation"
-import { Order, OrderStatus, Product, OrderSource, Promoter } from "@/types"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Order, OrderStatus, Product, ProductVariant, OrderSource, Promoter } from "@/types"
 import { compressImage } from "@/lib/image-utils"
 import {
   Table,
@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot, fetchOrders } from "@/app/actions"
+import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot, fetchOrders, updateOrderMatchSpec } from "@/app/actions"
 import { format, addDays, differenceInDays } from "date-fns"
 import { Edit2, Plus, Search, ArrowUpDown, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy, Upload, Image as ImageIcon, Loader2 } from "lucide-react"
 import { closeOrder } from "@/app/actions"
@@ -107,7 +107,10 @@ import { toast } from "sonner"
 
 
 export function OrderTable({ orders, products, promoters = [], initialTotal, initialBaseTotal, initialStatusCounts, initialTodayCount, initialTodayAmount }: OrderTableProps) {
-  const [filterOrderNo, setFilterOrderNo] = useState('')
+  const searchParams = useSearchParams()
+  const initialQuery = searchParams.get('q') || ''
+  
+  const [filterOrderNo, setFilterOrderNo] = useState(initialQuery)
   const [filterXianyuOrderNo, setFilterXianyuOrderNo] = useState('')
   const [filterCustomer, setFilterCustomer] = useState('')
   const [filterPromoter, setFilterPromoter] = useState('')
@@ -470,6 +473,8 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
               <TableHead className="w-[100px]">推广员</TableHead>
               <TableHead className="w-[150px]">物流信息</TableHead>
               <TableHead className="w-[200px]">设备信息</TableHead>
+              <TableHead className="w-[200px]">匹配规格</TableHead>
+              <TableHead className="w-[100px]">匹配状态</TableHead>
               <TableHead className="w-[150px]">
                   <Button variant="ghost" size="sm" onClick={toggleRentSort} className="-ml-3 hover:bg-transparent">
                       租期/时间
@@ -488,7 +493,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
               ))}
               {displayOrders.length === 0 && (
               <TableRow>
-                  <TableCell colSpan={11} className="text-center h-24">
+                  <TableCell colSpan={15} className="text-center h-24">
                       {isLoading || isPending ? "加载中..." : "暂无符合条件的订单"}
                   </TableCell>
               </TableRow>
@@ -863,6 +868,10 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
   const [xianyuNo, setXianyuNo] = useState(order.xianyuOrderNo || '')
   const [isXianyuOpen, setIsXianyuOpen] = useState(false)
 
+  const [isMatchOpen, setIsMatchOpen] = useState(false)
+  const [matchProductId, setMatchProductId] = useState(order.productId || '')
+  const [matchSpecValue, setMatchSpecValue] = useState(order.specId || '')
+
   const [isRejectOpen, setIsRejectOpen] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -1202,6 +1211,57 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
     }
   }
 
+  const fallbackProductId = matchProductId || (order.productName ? products.find(p => p.name === order.productName)?.id : '') || ''
+  const activeProduct = products.find(p => p.id === fallbackProductId)
+  const matchSpecOptions = activeProduct?.specs?.length
+    ? activeProduct.specs.map(s => ({ id: s.id, name: s.name }))
+    : (Array.isArray(activeProduct?.variants) ? activeProduct?.variants : []).map((v: ProductVariant) => ({ id: v.specId || v.name, name: v.name }))
+  const selectedBomItems = (() => {
+    if (!activeProduct || !matchSpecValue) return []
+    const specMatch = activeProduct.specs?.find(s =>
+      s.id === matchSpecValue || s.specId === matchSpecValue || s.name === matchSpecValue
+    )
+    if (specMatch) return specMatch.bomItems || []
+    const variantMatch = (Array.isArray(activeProduct.variants) ? activeProduct.variants : []).find(v =>
+      v.specId === matchSpecValue || v.name === matchSpecValue
+    )
+    return variantMatch?.bomItems || []
+  })()
+
+  const handleSaveMatchSpec = async () => {
+    try {
+        const res = await updateOrderMatchSpec(order.id, fallbackProductId || null, matchSpecValue || null)
+        if (res?.success) {
+            toast.success("匹配已保存")
+            setIsMatchOpen(false)
+            onOrderUpdated()
+        } else {
+            toast.error(res?.message || "保存失败")
+        }
+    } catch (error) {
+        console.error(error)
+        toast.error("保存失败")
+    }
+  }
+
+  const handleClearMatchSpec = async () => {
+    try {
+        const res = await updateOrderMatchSpec(order.id, null, null)
+        if (res?.success) {
+            toast.success("已清空匹配")
+            setMatchSpecValue('')
+            setMatchProductId('')
+            setIsMatchOpen(false)
+            onOrderUpdated()
+        } else {
+            toast.error(res?.message || "清空失败")
+        }
+    } catch (error) {
+        console.error(error)
+        toast.error("清空失败")
+    }
+  }
+
   return (
     <>
     <TableRow className="border-b-0 group">
@@ -1346,6 +1406,96 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         )}
       </TableCell>
       <TableCell className="align-top">
+        <Popover
+          open={isMatchOpen}
+          onOpenChange={open => {
+            setIsMatchOpen(open)
+            if (open) {
+              const nextProductId = fallbackProductId
+              const nextProduct = products.find(p => p.id === nextProductId)
+              const nextOptions = nextProduct?.specs?.length
+                ? nextProduct.specs.map(s => ({ id: s.id, name: s.name }))
+                : (Array.isArray(nextProduct?.variants) ? nextProduct?.variants : []).map((v: ProductVariant) => ({ id: v.specId || v.name, name: v.name }))
+              const matchedSpec = order.specId || (order.variantName ? nextOptions.find(v => v.name === order.variantName)?.id : "")
+              setMatchProductId(nextProductId)
+              setMatchSpecValue(matchedSpec || "")
+            }
+          }}
+        >
+            <PopoverTrigger asChild>
+                <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700">
+                    {order.specId ? `${order.productName || ''}${order.variantName ? ` - ${order.variantName}` : ''}` : <span className="text-gray-300 italic text-[10px]">点击选择</span>}
+                </div>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-3">
+                <div className="space-y-3">
+                    <div className="space-y-1">
+                        <Label className="text-xs">商品</Label>
+                        <Select
+                            value={fallbackProductId}
+                            onValueChange={(value) => {
+                                setMatchProductId(value)
+                                setMatchSpecValue('')
+                            }}
+                        >
+                            <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="选择商品" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {products.map(p => (
+                                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="space-y-1">
+                        <Label className="text-xs">规格</Label>
+                        <Select
+                            value={matchSpecValue}
+                            onValueChange={setMatchSpecValue}
+                            disabled={!fallbackProductId}
+                        >
+                            <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder={fallbackProductId ? "选择规格" : "先选择商品"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {matchSpecOptions.map(v => (
+                                    <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    {matchSpecValue ? (
+                        <div className="space-y-1">
+                            <Label className="text-xs">BOM</Label>
+                            <div className="text-xs text-muted-foreground space-y-1">
+                                {selectedBomItems.length > 0 ? (
+                                    selectedBomItems.map((b, idx) => (
+                                        <div key={`${b.itemTypeId}-${idx}`} className="flex items-center justify-between">
+                                            <span>{b.itemTypeName || b.itemTypeId}</span>
+                                            <span className="font-mono">x{b.quantity}</span>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="text-gray-400 italic text-[10px]">无BOM</div>
+                                )}
+                            </div>
+                        </div>
+                    ) : null}
+                    <div className="flex justify-end gap-2 pt-1">
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleClearMatchSpec}>清空</Button>
+                        <Button size="sm" className="h-7 text-xs" onClick={handleSaveMatchSpec} disabled={!matchSpecValue}>保存</Button>
+                    </div>
+                </div>
+            </PopoverContent>
+        </Popover>
+      </TableCell>
+      <TableCell className="align-top">
+        <Badge variant="outline" className={order.specId ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-gray-50 text-gray-500 border-gray-200"}>
+            {order.specId ? "已匹配" : "未匹配"}
+        </Badge>
+      </TableCell>
+      <TableCell className="align-top">
         <div className="font-medium">{order.duration} 天</div>
         <div className={`text-xs mt-1 ${getDeliveryTimeColor()}`} title="预计发货">预发: {order.deliveryTime ? format(new Date(order.deliveryTime), 'yyyy-MM-dd') : '-'}</div>
         <div className="text-xs text-muted-foreground" title="实际发货">实发: {order.actualDeliveryTime ? format(new Date(order.actualDeliveryTime), 'yyyy-MM-dd') : '-'}</div>
@@ -1458,7 +1608,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
       </TableCell>
     </TableRow>
     <TableRow className="bg-gray-50/40 hover:bg-gray-50/60 border-b">
-        <TableCell colSpan={11} className="p-2">
+        <TableCell colSpan={15} className="p-2">
             <div className="flex items-center justify-start gap-2 flex-wrap">
                 {/* Logs - Moved to start */}
                 <Dialog open={isLogsOpen} onOpenChange={setIsLogsOpen}>

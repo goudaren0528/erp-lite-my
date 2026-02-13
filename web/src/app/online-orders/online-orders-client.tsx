@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
@@ -39,12 +40,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { setAppConfigValue } from "@/app/actions"
 import { fetchOrders } from "@/app/actions"
-import { fetchOnlineOrders, getOnlineOrderCounts } from "./actions"
+import { fetchOnlineOrders, getOnlineOrderCounts, getMatchProducts, updateOnlineOrderMatchSpec } from "./actions"
 import { ArrowUpDown, Plus, Settings2, Trash2, Truck, Play, Square, FileText, RefreshCw, Search } from "lucide-react"
 import { toast } from "sonner"
-import { Order } from "@/types"
+import { Order, Product, ProductVariant } from "@/types"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { OfflineSyncCard, OfflineSyncConfig } from "@/components/settings/offline-sync-card"
@@ -160,6 +166,9 @@ const platformMap: Record<string, string> = {
 }
 
 export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrdersConfig }) {
+  const searchParams = useSearchParams()
+  const initialQuery = searchParams.get('q') || ''
+
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [config, setConfig] = useState<OnlineOrdersConfig>(initialConfig)
@@ -184,10 +193,14 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   const [dbRefreshKey, setDbRefreshKey] = useState(0)
   const [hoverSync, setHoverSync] = useState(false)
   const [logsOpen, setLogsOpen] = useState(false)
+  const [products, setProducts] = useState<Product[]>([])
+  const [matchOrderId, setMatchOrderId] = useState<string | null>(null)
+  const [matchProductId, setMatchProductId] = useState("")
+  const [matchSpecValue, setMatchSpecValue] = useState("")
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
-  const [filterOrderNo, setFilterOrderNo] = useState('')
+  const [filterOrderNo, setFilterOrderNo] = useState(initialQuery)
   const [filterRecipientName, setFilterRecipientName] = useState('')
   const [filterProduct, setFilterProduct] = useState('')
   
@@ -209,6 +222,12 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
         .catch(console.error)
     }
   }, [open, activeSiteId, offlineConfigs])
+
+  useEffect(() => {
+    getMatchProducts()
+      .then(setProducts)
+      .catch(() => toast.error("加载商品失败"))
+  }, [])
 
   const handleOfflineConfigChange = (siteId: string, config: OfflineSyncConfig) => {
     setOfflineConfigs(prev => ({ ...prev, [siteId]: config }))
@@ -447,6 +466,86 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   }
   const formatDate = (value?: string | Date | null) =>
     value ? new Date(value).toLocaleDateString() : "-"
+
+  const resolveMatchProductId = (order: Order) => {
+    if (order.productId) return order.productId
+    if (order.productName) {
+      const p = products.find(p => p.name === order.productName)
+      return p?.id || ""
+    }
+    return ""
+  }
+
+  const resolveMatchSpecValue = (order: Order, productId: string) => {
+    if (order.specId) return order.specId
+    if (order.variantName && productId) {
+      const p = products.find(p => p.id === productId)
+      const spec = p?.specs?.find(s => s.name === order.variantName)
+      if (spec) return spec.id
+    }
+    return ""
+  }
+
+  const getMatchSpecOptions = (productId: string) => {
+    const product = products.find(p => p.id === productId)
+    if (!product) return []
+    if (product.specs && product.specs.length > 0) {
+      return product.specs.map(s => ({ id: s.id, name: s.name }))
+    }
+    const vars = Array.isArray(product.variants) ? product.variants : []
+    return vars.map((v: ProductVariant) => ({ id: v.specId || v.name, name: v.name }))
+  }
+
+  const getMatchBomItems = (productId: string, specValue: string) => {
+    if (!productId || !specValue) return []
+    const product = products.find(p => p.id === productId)
+    if (!product) return []
+    const specMatch = product.specs?.find(s =>
+      s.id === specValue || s.specId === specValue || s.name === specValue
+    )
+    if (specMatch) return specMatch.bomItems || []
+    const vars = Array.isArray(product.variants) ? product.variants : []
+    const variantMatch = vars.find(v => v.specId === specValue || v.name === specValue)
+    return variantMatch?.bomItems || []
+  }
+
+  const handleSaveMatchSpec = async (orderId: string) => {
+    try {
+      const res = await updateOnlineOrderMatchSpec(
+        orderId,
+        matchProductId || null,
+        matchSpecValue || null
+      )
+      if (res?.success) {
+        toast.success("匹配已保存")
+        setMatchOrderId(null)
+        setDbRefreshKey(key => key + 1)
+      } else {
+        toast.error(res?.message || "保存失败")
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error("保存失败")
+    }
+  }
+
+  const handleClearMatchSpec = async (orderId: string) => {
+    try {
+      const res = await updateOnlineOrderMatchSpec(orderId, null, null)
+      if (res?.success) {
+        toast.success("已清空匹配")
+        setMatchOrderId(null)
+        setMatchProductId("")
+        setMatchSpecValue("")
+        setDbRefreshKey(key => key + 1)
+      } else {
+        toast.error(res?.message || "清空失败")
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error("清空失败")
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -1034,6 +1133,8 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                               </TableHead>
                               <TableHead className="w-[150px]">物流信息</TableHead>
                               <TableHead className="w-[200px]">设备信息</TableHead>
+                              <TableHead className="w-[200px]">匹配规格</TableHead>
+                              <TableHead className="w-[100px]">匹配状态</TableHead>
                               <TableHead className="w-[150px]">租期/时间</TableHead>
                               <TableHead className="w-[120px]">金额详情</TableHead>
                               <TableHead className="w-[100px]">状态</TableHead>
@@ -1042,7 +1143,15 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {onlineOrderDisplay.map((order, i) => (
+                            {onlineOrderDisplay.map((order, i) => {
+                              const isMatchOpen = matchOrderId === order.id
+                              const fallbackProductId = isMatchOpen ? matchProductId : resolveMatchProductId(order)
+                              const matchOptions = getMatchSpecOptions(fallbackProductId)
+                              const displayText = order.specId
+                                ? `${order.productName || ""}${order.variantName ? ` - ${order.variantName}` : ""}`
+                                : ""
+
+                              return (
                               <TableRow key={`${order.orderNo}-${i}`}>
                                 <TableCell>
                                   <div className="text-xs">{platformMap[order.platform || ""] || order.platform || "-"}</div>
@@ -1139,6 +1248,118 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                   ) : null}
                                 </TableCell>
                                 <TableCell>
+                                  <Popover
+                                    open={isMatchOpen}
+                                    onOpenChange={open => {
+                                      if (open) {
+                                        const pid = resolveMatchProductId(order)
+                                        setMatchOrderId(order.id)
+                                        setMatchProductId(pid)
+                                        setMatchSpecValue(resolveMatchSpecValue(order, pid))
+                                      } else if (isMatchOpen) {
+                                        setMatchOrderId(null)
+                                      }
+                                    }}
+                                  >
+                                    <PopoverTrigger asChild>
+                                      <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700">
+                                        {displayText || <span className="text-gray-300 italic text-[10px]">点击选择</span>}
+                                      </div>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-72 p-3">
+                                      <div className="space-y-3">
+                                        <div className="space-y-1">
+                                          <Label className="text-xs">商品</Label>
+                                          <Select
+                                            value={fallbackProductId}
+                                            onValueChange={value => {
+                                              setMatchProductId(value)
+                                              setMatchSpecValue("")
+                                            }}
+                                          >
+                                            <SelectTrigger className="h-8 text-xs">
+                                              <SelectValue placeholder="选择商品" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {products.map(p => (
+                                                <SelectItem key={p.id} value={p.id}>
+                                                  {p.name}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <Label className="text-xs">规格</Label>
+                                          <Select
+                                            value={matchSpecValue}
+                                            onValueChange={setMatchSpecValue}
+                                            disabled={!fallbackProductId}
+                                          >
+                                            <SelectTrigger className="h-8 text-xs">
+                                              <SelectValue placeholder={fallbackProductId ? "选择规格" : "先选择商品"} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {matchOptions.map(v => (
+                                                <SelectItem key={v.id} value={v.id}>
+                                                  {v.name}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        {matchSpecValue ? (
+                                          <div className="space-y-1">
+                                            <Label className="text-xs">BOM</Label>
+                                            <div className="text-xs text-muted-foreground space-y-1">
+                                              {getMatchBomItems(fallbackProductId, matchSpecValue).length > 0 ? (
+                                                getMatchBomItems(fallbackProductId, matchSpecValue).map((b, idx) => (
+                                                  <div key={`${b.itemTypeId}-${idx}`} className="flex items-center justify-between">
+                                                    <span>{b.itemTypeName || b.itemTypeId}</span>
+                                                    <span className="font-mono">x{b.quantity}</span>
+                                                  </div>
+                                                ))
+                                              ) : (
+                                                <div className="text-gray-400 italic text-[10px]">无BOM</div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                        <div className="flex justify-end gap-2 pt-1">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 text-xs"
+                                            onClick={() => handleClearMatchSpec(order.id)}
+                                          >
+                                            清空
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            className="h-7 text-xs"
+                                            onClick={() => handleSaveMatchSpec(order.id)}
+                                            disabled={!matchSpecValue}
+                                          >
+                                            保存
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant="outline"
+                                    className={
+                                      order.specId
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                        : "bg-gray-50 text-gray-500 border-gray-200"
+                                    }
+                                  >
+                                    {order.specId ? "已匹配" : "未匹配"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
                                   {(() => {
                                     const rentStart = order.rentStartDate ? new Date(order.rentStartDate) : undefined
                                     const hasRentStart = rentStart && !Number.isNaN(rentStart.getTime())
@@ -1204,10 +1425,11 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                   <div className="text-xs line-clamp-2">{order.remark || ""}</div>
                                 </TableCell>
                               </TableRow>
-                            ))}
+                              )
+                            })}
                             {onlineOrderDisplay.length === 0 ? (
                               <TableRow>
-                                <TableCell colSpan={10} className="text-center h-20">
+                                <TableCell colSpan={13} className="text-center h-20">
                                   暂无符合条件的订单
                                 </TableCell>
                               </TableRow>

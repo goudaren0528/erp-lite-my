@@ -17,7 +17,7 @@ export async function getInventoryData(startStr: string, endStr: string) {
     const itemCounts = await prisma.inventoryItem.groupBy({
         by: ['itemTypeId'],
         where: {
-            status: { notIn: ['SCRAPPED', 'LOST', 'SOLD'] }
+            status: { notIn: ['SCRAPPED', 'LOST', 'SOLD', 'DELETED'] }
         },
         _count: true
     })
@@ -103,18 +103,48 @@ export async function getInventoryData(startStr: string, endStr: string) {
         // Calculate Product Total Stock
         // Logic: Use direct stock of InventoryItemType with same name as Product
         // If not found, default to 0 (as per user requirement: "Item View unrelated to BOM")
-        const directStock = nameStockMap.get(p.name) || 0
+        let directStock = nameStockMap.get(p.name) || 0
+        let hasSharedComponents = false
+        const allBomItemTypes = new Set<string>()
+
+        p.specs.forEach(spec => {
+            spec.bomItems.forEach(bom => {
+                if (allBomItemTypes.has(bom.itemTypeId)) {
+                    hasSharedComponents = true
+                }
+                allBomItemTypes.add(bom.itemTypeId)
+            })
+        })
+
+        // Fallback: If direct stock is 0 but we have specs with stock, try to derive a meaningful total.
+        // This handles cases where user tracks stock at Spec level (via BOM) but views Product level.
+        if (directStock === 0 && specsWithStock.length > 0) {
+            if (hasSharedComponents) {
+                // If components are shared (e.g. Bundles sharing a Body), use MAX to avoid overcounting
+                // Example: 5 Bodies. Spec A (Body) has 5. Spec B (Body+Lens) has 5. Total is 5, not 10.
+                directStock = Math.max(...specsWithStock.map(s => s.stock))
+            } else {
+                // If components are distinct (e.g. Colors/Sizes), use SUM
+                // Example: 5 Red, 5 Blue. Total is 10.
+                directStock = specsWithStock.reduce((acc, s) => acc + s.stock, 0)
+            }
+        }
 
         return {
             id: p.id,
             name: p.name,
             variants: p.variants, // Keep original variants JSON/Array
             matchKeywords: p.matchKeywords,
-            totalStock: directStock, // Use direct stock match
+            totalStock: directStock, // Use direct stock match or derived fallback
+            hasSharedComponents,
             specs: specsWithStock.map(s => ({
                 id: s.id,
                 name: s.name,
-                stock: s.stock
+                stock: s.stock,
+                bomItems: s.bomItems.map(b => ({
+                    itemTypeId: b.itemTypeId,
+                    quantity: b.quantity
+                }))
             }))
         }
     })
@@ -140,36 +170,25 @@ export async function getInventoryData(startStr: string, endStr: string) {
                     'RENTING', 
                     'OVERDUE', 
                     'RETURNING',
-                    'COMPLETED' // Include COMPLETED to check actual return time if needed, though usually COMPLETED frees up stock. 
-                    // Wait, user wants forecast. If completed, it's done. 
-                    // But if looking at past dates, we need history. 
-                    // For simplicity and performance, we focus on active orders + recently completed if logic demands.
-                    // But standard logic: if status is COMPLETED, it is NOT occupying stock NOW.
-                    // However, for calendar view of the past, we might want to see it was occupied.
-                    // Let's stick to active statuses for "Available Stock" calculation usually.
-                    // But if user scrolls to last month, they expect to see what WAS occupied?
-                    // Yes. So we should include COMPLETED but filter by actual return time.
+                    'COMPLETED' 
                 ]
             }
         },
         select: {
             id: true,
             orderNo: true,
+            platform: true,
+            xianyuOrderNo: true,
+            miniProgramOrderNo: true,
             productName: true,
             variantName: true,
             rentStartDate: true,
             returnDeadline: true,
             status: true,
             productId: true,
+            specId: true,
+            sn: true, // Include SN for occupancy matching
             deliveryTime: true, // Actual delivery time
-            // We need actual return time, usually updated at 'completedAt' or we can infer from logs or just use returnDeadline if not perfect.
-            // Let's check if we have a return time field. Schema says 'returnLatestLogisticsInfo' but maybe not a date.
-            // We'll use returnDeadline for now as base, and logic in client can handle 'COMPLETED' by checking if date < today?
-            // Actually, if order is COMPLETED, we can assume it was returned.
-            // For accurate history, we need 'actualReturnTime'.
-            // Checking schema... Order has 'actualDeliveryTime'.
-            // It has 'createdAt'.
-            // Let's add 'actualDeliveryTime' to selection.
             actualDeliveryTime: true,
             completedAt: true,
         }
@@ -193,11 +212,14 @@ export async function getInventoryData(startStr: string, endStr: string) {
             returnDeadline: true,
             status: true,
             platform: true,
-            updatedAt: true
+            productId: true,
+            updatedAt: true,
+            returnLatestLogisticsInfo: true,
+            latestLogisticsInfo: true
         }
     })
 
-    return { products, offlineOrders, onlineOrders }
+    return { products, offlineOrders, onlineOrders, componentStock: Object.fromEntries(stockMap) }
 }
 
 type CalendarConfigRow = {
@@ -260,3 +282,111 @@ export async function saveInventoryCalendarConfig(config: { deliveryBufferDays: 
     return { success: true, message: "配置已保存" }
 }
 
+export async function getInventoryItems(productName: string, variantName?: string) {
+    // 1. Try to find InventoryItemType by exact name match (Product View logic)
+    // If variantName is provided, we might be looking for a Spec's BOM.
+    
+    // Logic:
+    // If variantName is present, we first look for the Spec to get BOM.
+    // If no variantName, we look for ItemType with productName.
+
+    let items: any[] = []
+
+    if (variantName) {
+        // Spec View: Find Product -> Spec -> BOM
+        // First find product by name (assuming productName is valid)
+        const product = await prisma.product.findFirst({
+            where: { name: productName },
+            include: {
+                specs: {
+                    where: { name: variantName },
+                    include: {
+                        bomItems: {
+                            include: {
+                                itemType: {
+                                    include: {
+                                        items: {
+                                            where: { status: { notIn: ['SCRAPPED', 'LOST', 'SOLD', 'DELETED'] } },
+                                            include: { warehouse: true }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+
+        if (product?.specs[0]?.bomItems) {
+            // Flatten BOM items
+            items = product.specs[0].bomItems.flatMap(bom => 
+                bom.itemType.items.map(item => ({
+                    ...item,
+                    componentName: bom.itemType.name // Add component name for display
+                }))
+            )
+        }
+    } else {
+        // Item View: Find ItemType by name
+        let itemType = await prisma.inventoryItemType.findFirst({
+            where: { name: productName },
+            include: {
+                items: {
+                    where: { status: { notIn: ['SCRAPPED', 'LOST', 'SOLD', 'DELETED'] } },
+                    include: { warehouse: true }
+                }
+            }
+        })
+
+        if (itemType) {
+            items = itemType.items
+        } else {
+            // Fallback: If no direct ItemType match, look for Product -> Specs -> BOMs
+            // This aligns with the 'derived stock' logic in getInventoryData
+            const product = await prisma.product.findFirst({
+                where: { name: productName },
+                include: {
+                    specs: {
+                        include: {
+                            bomItems: {
+                                include: {
+                                    itemType: {
+                                        include: {
+                                            items: {
+                                                    where: { status: { notIn: ['SCRAPPED', 'LOST', 'SOLD', 'DELETED'] } },
+                                                    include: { warehouse: true }
+                                                }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+
+            if (product) {
+                // Collect all unique items from all BOMs
+                const itemMap = new Map<string, any>()
+                
+                product.specs.forEach(spec => {
+                    spec.bomItems.forEach(bom => {
+                        bom.itemType.items.forEach(item => {
+                            if (!itemMap.has(item.id)) {
+                                itemMap.set(item.id, {
+                                    ...item,
+                                    componentName: bom.itemType.name // Add component name
+                                })
+                            }
+                        })
+                    })
+                })
+                
+                items = Array.from(itemMap.values())
+            }
+        }
+    }
+
+    return items
+}

@@ -119,6 +119,8 @@ model OnlineOrder {
   itemTitle             String?
   itemSku               String?
   productId             String?
+  specId                String?
+  spec                  ProductSpec? @relation(fields: [specId], references: [id], onDelete: SetNull)
   customerXianyuId      String?
   sourceContact         String?
   source                String?
@@ -162,6 +164,7 @@ model ProductSpec {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   orders        Order[]
+  onlineOrders  OnlineOrder[]
   reservations  InventoryReservation[]
 }
 

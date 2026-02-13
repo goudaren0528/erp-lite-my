@@ -22,6 +22,12 @@ type ProductRaw = {
   id: string;
   name: string;
   variants: string;
+  specs?: {
+    id: string;
+    specId: string;
+    name: string;
+    bomItems: { itemTypeId: string; quantity: number; itemType: { name: string } }[];
+  }[];
 };
 
 export default async function OrdersPage() {
@@ -50,10 +56,35 @@ export default async function OrdersPage() {
       updatedAt: p.updatedAt.toISOString()
   }));
 
-  const productsRaw = await prisma.product.findMany();
+  const productsRaw = await prisma.product.findMany({
+    include: {
+      specs: {
+        select: {
+          id: true,
+          specId: true,
+          name: true,
+          bomItems: {
+            select: {
+              itemTypeId: true,
+              quantity: true,
+              itemType: { select: { name: true } }
+            }
+          }
+        }
+      }
+    }
+  });
   const products = productsRaw.map((p: ProductRaw) => ({
     ...p,
-    variants: JSON.parse(p.variants)
+    variants: JSON.parse(p.variants),
+    specs: p.specs?.map(s => ({
+      ...s,
+      bomItems: s.bomItems?.map(b => ({
+        itemTypeId: b.itemTypeId,
+        quantity: b.quantity,
+        itemTypeName: b.itemType?.name
+      })) || []
+    }))
   }));
   
   const pageSize = 20

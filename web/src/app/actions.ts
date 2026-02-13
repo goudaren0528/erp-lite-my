@@ -946,6 +946,43 @@ export async function updateOrderSourceInfo(orderId: string, source: string, sou
     }
 }
 
+export async function updateOrderMatchSpec(orderId: string, productId: string | null, specValue: string | null) {
+    if (!specValue) {
+        await prisma.order.update({
+            where: { id: orderId },
+            data: { specId: null }
+        })
+        revalidatePath('/orders')
+        return { success: true }
+    }
+
+    const spec = await prisma.productSpec.findFirst({
+        where: {
+            OR: [
+                { id: specValue },
+                ...(productId ? [{ productId, name: specValue }] : [])
+            ]
+        },
+        include: { product: true }
+    })
+
+    if (!spec) {
+        throw new Error("未找到匹配规格")
+    }
+
+    await prisma.order.update({
+        where: { id: orderId },
+        data: {
+            specId: spec.id,
+            productId: spec.productId,
+            productName: spec.product.name,
+            variantName: spec.name
+        }
+    })
+    revalidatePath('/orders')
+    return { success: true }
+}
+
 export async function updateOrderStatus(orderId: string, newStatus: OrderStatus) {
   try {
     const currentUser = await getCurrentUser();
