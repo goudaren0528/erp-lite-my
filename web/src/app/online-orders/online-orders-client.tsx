@@ -1212,7 +1212,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                             <span className="text-sm text-muted-foreground">加载中...</span>
                           </div>
                         ) : null}
-                        <Table>
+                        <Table className="table-fixed min-w-[1800px]">
                           <TableHeader>
                             <TableRow>
                               <TableHead className="w-[80px]">订单平台</TableHead>
@@ -1228,15 +1228,14 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                   <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />
                                 </Button>
                               </TableHead>
-                              <TableHead className="w-[150px]">物流信息</TableHead>
+                              <TableHead className="w-[300px]">物流信息</TableHead>
                               <TableHead className="w-[200px]">设备信息</TableHead>
                               <TableHead className="w-[200px]">匹配规格</TableHead>
                               <TableHead className="w-[100px]">匹配状态</TableHead>
                               <TableHead className="w-[150px]">租期/时间</TableHead>
                               <TableHead className="w-[120px]">金额详情</TableHead>
                               <TableHead className="w-[100px]">状态</TableHead>
-                              <TableHead className="w-[100px]">截图凭证</TableHead>
-                              <TableHead className="min-w-[150px]">备注</TableHead>
+                              <TableHead className="w-[150px]">备注</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1251,46 +1250,48 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                               return (
                               <TableRow key={`${order.orderNo}-${i}`}>
                                 <TableCell>
-                                  <div className="text-xs">{platformMap[order.platform || ""] || order.platform || "-"}</div>
+                                  <div className="text-xs truncate" title={platformMap[order.platform || ""] || order.platform || "-"}>
+                                    {platformMap[order.platform || ""] || order.platform || "-"}
+                                  </div>
                                 </TableCell>
                                 <TableCell>
-                                  <div className="text-xs text-muted-foreground">
+                                  <div className="text-xs text-muted-foreground truncate" title={order.merchantName || "-"}>
                                     {order.merchantName || "-"}
                                   </div>
                                 </TableCell>
                                 <TableCell>
-                                  <div className="text-xs text-muted-foreground">
+                                  <div className="text-xs text-muted-foreground truncate" title={(order as any).promotionChannel || "-"}>
                                     {(order as any).promotionChannel || "-"}
                                   </div>
                                 </TableCell>
                                 <TableCell>
-                                  <div className="text-xs font-bold">{order.orderNo}</div>
-                                  <div className="text-[10px] text-muted-foreground mt-1">
+                                  <div className="text-xs font-bold truncate" title={order.orderNo}>{order.orderNo}</div>
+                                  <div className="text-[10px] text-muted-foreground mt-1 truncate" title={new Date(order.createdAt).toLocaleString()}>
                                     {new Date(order.createdAt).toLocaleString()}
                                   </div>
                                 </TableCell>
                                 <TableCell>
                                   <div className="text-xs text-muted-foreground">
                                     {((order as any).customerName || order.recipientName || order.recipientPhone) && (
-                                      <div>
+                                      <div className="truncate" title={`${(order as any).customerName || order.recipientName || "-"} | ${order.recipientPhone || "-"}`}>
                                         {(order as any).customerName || order.recipientName || "-"} <span className="mx-1">|</span>{" "}
                                         {order.recipientPhone || "-"}
                                       </div>
                                     )}
-                                    <div>{order.address}</div>
+                                    <div className="truncate" title={order.address || ""}>{order.address}</div>
                                   </div>
                                   {(order.logisticsCompany || order.trackingNumber || order.latestLogisticsInfo) ? (
                                     <div className="space-y-1 pt-2 border-t border-dashed border-gray-200">
                                       <div className="text-[10px] font-semibold text-gray-500">发货物流</div>
                                       <div className="text-[10px]">
                                         {order.logisticsCompany && (
-                                          <div className="flex items-center text-blue-600 font-medium">
-                                            <Truck className="w-3 h-3 mr-1" />
+                                          <div className="flex items-center text-blue-600 font-medium truncate" title={order.logisticsCompany}>
+                                            <Truck className="w-3 h-3 mr-1 flex-shrink-0" />
                                             {order.logisticsCompany}
                                           </div>
                                         )}
                                         {order.trackingNumber ? (
-                                          <div className="font-mono text-gray-600">{order.trackingNumber}</div>
+                                          <div className="font-mono text-gray-600 truncate" title={order.trackingNumber}>{order.trackingNumber}</div>
                                         ) : null}
                                         {order.latestLogisticsInfo ? (
                                           <div
@@ -1308,12 +1309,12 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                       <div className="text-[10px] font-semibold text-gray-500">归还物流</div>
                                       <div className="text-[10px]">
                                         {order.returnLogisticsCompany && (
-                                          <div className="flex items-center text-purple-600 font-medium">
+                                          <div className="flex items-center text-purple-600 font-medium truncate" title={order.returnLogisticsCompany}>
                                             {order.returnLogisticsCompany}
                                           </div>
                                         )}
                                         {order.returnTrackingNumber ? (
-                                          <div className="font-mono text-gray-600">
+                                          <div className="font-mono text-gray-600 truncate" title={order.returnTrackingNumber}>
                                             {order.returnTrackingNumber}
                                           </div>
                                         ) : null}
@@ -1330,18 +1331,18 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                   ) : null}
                                 </TableCell>
                                 <TableCell>
-                                  <div className="font-semibold">{order.productName}</div>
+                                  <div className="font-semibold truncate" title={order.productName || ""}>{order.productName}</div>
                                   {order.itemTitle && !isSameDeviceText(order.itemTitle, order.productName) && !isSameDeviceText(order.itemTitle, order.variantName) ? (
-                                    <div className="text-[10px] text-muted-foreground">{order.itemTitle}</div>
+                                    <div className="text-[10px] text-muted-foreground truncate" title={order.itemTitle}>{order.itemTitle}</div>
                                   ) : null}
                                   {order.variantName ? (
-                                    <div className="text-xs text-muted-foreground">{order.variantName}</div>
+                                    <div className="text-xs text-muted-foreground truncate" title={order.variantName}>{order.variantName}</div>
                                   ) : null}
                                   {order.itemSku && !isSameDeviceText(order.itemSku, order.variantName) && !isSameDeviceText(order.itemSku, order.productName) && !isSameDeviceText(order.itemSku, order.itemTitle) ? (
-                                    <div className="text-[10px] text-muted-foreground mt-1">{order.itemSku}</div>
+                                    <div className="text-[10px] text-muted-foreground mt-1 truncate" title={order.itemSku}>{order.itemSku}</div>
                                   ) : null}
                                   {order.sn ? (
-                                    <div className="text-xs text-blue-600 font-mono mt-1">SN: {order.sn}</div>
+                                    <div className="text-xs text-blue-600 font-mono mt-1 truncate" title={`SN: ${order.sn}`}>SN: {order.sn}</div>
                                   ) : null}
                                 </TableCell>
                                 <TableCell>
@@ -1514,19 +1515,14 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                   </Badge>
                                 </TableCell>
                                 <TableCell>
-                                  <div className="text-xs">
-                                    {order.screenshot ? `已上传 ${order.screenshot.split(",").filter(Boolean).length} 张` : "-"}
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="text-xs line-clamp-2">{order.remark || ""}</div>
+                                  <div className="text-xs truncate" title={order.remark || ""}>{order.remark || ""}</div>
                                 </TableCell>
                               </TableRow>
                               )
                             })}
                             {onlineOrderDisplay.length === 0 ? (
                               <TableRow>
-                                <TableCell colSpan={13} className="text-center h-20">
+                                <TableCell colSpan={12} className="text-center h-20">
                                   暂无符合条件的订单
                                 </TableCell>
                               </TableRow>
