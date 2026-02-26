@@ -59,9 +59,10 @@ const PERMISSIONS_MAP: Record<string, string> = {
     'stats_promoters': '推广员结算',
     'products': '商品库管理',
     'inventory_calendar': '库存日历',
-    'inventory_manage': '库存管理',
+    'inventory_manage': '资产库存管理',
     'users': '账号权限管理',
     'backup': '导出导入数据',
+    'manual': '操作指南管理',
 }
 
 export function UserList({ users }: UserListProps) {

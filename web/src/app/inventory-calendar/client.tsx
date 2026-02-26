@@ -167,7 +167,6 @@ type OrderSimple = {
     rentStartDate: Date | null
     returnDeadline: Date | null
     status: string
-    productId?: string | null
     isOnline?: boolean
     deliveryTime?: Date | null
     actualDeliveryTime?: Date | null

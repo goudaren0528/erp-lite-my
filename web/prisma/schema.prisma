@@ -355,3 +355,13 @@ model OrderLog {
   orderId   String
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
+
+model ManualChapter {
+  id        String   @id @default(uuid())
+  title     String
+  content   String   // Markdown content
+  order     Int      @default(0)
+  isEnabled Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

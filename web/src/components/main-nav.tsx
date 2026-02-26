@@ -4,11 +4,12 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, List, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database, PanelLeftClose, PanelLeftOpen, Percent, ChevronDown, ChevronUp, Megaphone, Cloud, Calendar } from "lucide-react"
+import { LayoutDashboard, List, BarChart, Users, LogOut, User as UserIcon, Package, Shield, Database, PanelLeftClose, PanelLeftOpen, Percent, ChevronDown, ChevronUp, Megaphone, Cloud, Calendar, BookOpen } from "lucide-react"
 import { User } from "@/types"
 import { logout } from "@/lib/auth"
 import { useState } from "react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { UserManual } from "@/components/help/user-manual"
 
 interface MainNavProps {
   user?: User | null
@@ -116,7 +117,7 @@ export function MainNav({ user }: MainNavProps) {
         },
         {
           href: "/inventory",
-          label: "库存管理",
+          label: "资产库存管理",
           icon: Database,
           active: pathname === "/inventory",
           permission: "inventory_manage",
@@ -150,6 +151,13 @@ export function MainNav({ user }: MainNavProps) {
            active: pathname === "/backup",
            permission: "backup",
          },
+         {
+            href: "/system/manual",
+            label: "操作指南管理",
+            icon: BookOpen,
+            active: pathname === "/system/manual",
+            permission: "manual",
+         },
       ]
     },
   ]
@@ -165,7 +173,7 @@ export function MainNav({ user }: MainNavProps) {
         return hasPermission("products") || hasPermission("inventory_calendar") || hasPermission("inventory_manage")
     }
     if (permission === "system_group") {
-        return hasPermission("users") || hasPermission("backup")
+        return hasPermission("users") || hasPermission("backup") || hasPermission("manual")
     }
     if (permission === "settlement_group") {
         return hasPermission("stats_accounts") || hasPermission("stats_promoters")
@@ -306,6 +314,10 @@ export function MainNav({ user }: MainNavProps) {
               </div>
             )
         })}
+      </div>
+
+      <div className={cn("px-4 pb-2", isCollapsed && "px-2")}>
+        <UserManual collapsed={isCollapsed} />
       </div>
 
       <div className={cn("p-4 border-t bg-gray-50 transition-all", isCollapsed && "p-2")}>

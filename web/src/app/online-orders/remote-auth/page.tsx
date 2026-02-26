@@ -13,8 +13,15 @@ export default function RemoteAuthPage() {
   const [inputText, setInputText] = useState("")
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [isInteracting, setIsInteracting] = useState(false)
+  const [activeSite, setActiveSite] = useState("zanchen") // Default site
   const imgRef = useRef<HTMLImageElement>(null)
   const lastMousePos = useRef<{ x: number; y: number } | null>(null)
+
+  // Pre-defined sites list (could be fetched from API in future)
+  const sites = [
+    { id: "zanchen", name: "赞晨" },
+    { id: "chenglin", name: "诚赁" }
+  ]
 
   useEffect(() => {
     let interval: NodeJS.Timeout
@@ -31,7 +38,7 @@ export default function RemoteAuthPage() {
       await fetch("/api/online-orders/remote/interact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, siteId: activeSite }),
       })
       // Refresh shortly after action
       setTimeout(() => setTimestamp(Date.now()), 500)
@@ -114,6 +121,25 @@ export default function RemoteAuthPage() {
             远程人工介入
           </CardTitle>
           <div className="flex items-center gap-2">
+            <div className="flex border rounded-md overflow-hidden mr-2">
+              {sites.map(site => (
+                <button
+                  key={site.id}
+                  onClick={() => {
+                      setActiveSite(site.id)
+                      setLoading(true)
+                      setTimestamp(Date.now())
+                  }}
+                  className={`px-3 py-1 text-sm font-medium transition-colors ${
+                    activeSite === site.id 
+                      ? "bg-primary text-primary-foreground" 
+                      : "bg-background hover:bg-muted"
+                  }`}
+                >
+                  {site.name}
+                </button>
+              ))}
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -136,7 +162,7 @@ export default function RemoteAuthPage() {
              */}
             <img
               ref={imgRef}
-              src={`/api/online-orders/remote/screenshot?t=${timestamp}`}
+              src={`/api/online-orders/remote/screenshot?siteId=${activeSite}&t=${timestamp}`}
               alt="Remote Screen"
               className="max-w-full h-auto cursor-crosshair select-none active:cursor-grabbing"
               draggable={false}

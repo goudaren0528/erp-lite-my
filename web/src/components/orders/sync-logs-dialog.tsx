@@ -96,7 +96,7 @@ export function SyncLogsDialog({ siteId, open, onOpenChange }: Props) {
                              setOnlineLogs((data.logs || []).slice().reverse())
                         }
                     } else {
-                        const res = await fetch("/api/online-orders/zanchen/status", { cache: "no-store" })
+                        const res = await fetch(`/api/online-orders/zanchen/status?siteId=${encodeURIComponent(siteId)}`, { cache: "no-store" })
                         if (res.ok) {
                             const data = await res.json() as ZanchenStatus
                             // Backend returns logs in chronological order (oldest -> newest)

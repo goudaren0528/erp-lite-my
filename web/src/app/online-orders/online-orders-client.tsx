@@ -100,6 +100,7 @@ type ZanchenStatus = {
   lastRunAt?: string
   needsAttention?: boolean
   heartbeatActive?: boolean
+  logs?: string[]
   lastResult?: {
     pendingCount?: number
     extractedCount?: number
@@ -130,7 +131,26 @@ type ZanchenStatus = {
     }[]
   }
   snapshotSaved?: boolean
-  logs?: string[]
+}
+
+type MatchProductBomItem = {
+  itemTypeId: string
+  quantity: number
+  itemTypeName?: string | null
+}
+
+type MatchProductSpec = {
+  id: string
+  specId: string | null
+  name: string
+  bomItems?: MatchProductBomItem[]
+}
+
+type MatchProduct = {
+  id: string
+  name: string
+  variants: unknown
+  specs?: MatchProductSpec[]
 }
 
 const statusMap: Record<string, { label: string; color: string; hex: string }> = {
@@ -144,6 +164,12 @@ const statusMap: Record<string, { label: string; color: string; hex: string }> =
   COMPLETED: { label: "已完成", color: "bg-slate-600", hex: "#475569" },
   BOUGHT_OUT: { label: "已购买", color: "bg-teal-700", hex: "#0f766e" },
   CLOSED: { label: "已关闭", color: "bg-gray-500", hex: "#6b7280" },
+  WAIT_PAY: { label: "待支付", color: "bg-orange-500", hex: "#f97316" },
+  UNAUTHORIZED: { label: "未授权", color: "bg-red-500", hex: "#ef4444" },
+  SHIPPED: { label: "已发货", color: "bg-blue-500", hex: "#3b82f6" },
+  DUE_REPAYMENT: { label: "到期还款", color: "bg-yellow-600", hex: "#ca8a04" },
+  RENEWAL: { label: "续租订单", color: "bg-indigo-500", hex: "#6366f1" },
+  RETURNING_SOON: { label: "即将归还", color: "bg-emerald-500", hex: "#10b981" },
   待审核: { label: "待审核", color: "bg-amber-500", hex: "#f59e0b" },
   待发货: { label: "待发货", color: "bg-sky-500", hex: "#0ea5e9" },
   已发货待确认: { label: "已发货待确认", color: "bg-blue-600", hex: "#2563eb" },
@@ -193,7 +219,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   const [dbRefreshKey, setDbRefreshKey] = useState(0)
   const [hoverSync, setHoverSync] = useState(false)
   const [logsOpen, setLogsOpen] = useState(false)
-  const [products, setProducts] = useState<Product[]>([])
+  const [products, setProducts] = useState<MatchProduct[]>([])
   const [matchOrderId, setMatchOrderId] = useState<string | null>(null)
   const [matchProductId, setMatchProductId] = useState("")
   const [matchSpecValue, setMatchSpecValue] = useState("")
@@ -225,7 +251,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
 
   useEffect(() => {
     getMatchProducts()
-      .then(setProducts)
+      .then(res => setProducts(res as unknown as Product[]))
       .catch(() => toast.error("加载商品失败"))
   }, [])
 
@@ -257,11 +283,17 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   }, [activeSite, selectorMode])
 
   useEffect(() => {
-    if (activeTab !== "zanchen") return
+    const tabSite = draft.sites.find(site => site.id === activeTab)
+    const shouldPoll =
+      activeTab === "zanchen" ||
+      activeTab.toLowerCase().includes("chenglin") ||
+      activeTab.toLowerCase().includes("chenlin") ||
+      !!tabSite?.name?.includes("诚赁")
+    if (!shouldPoll) return
     let stopped = false
     const loadStatus = async () => {
       try {
-        const res = await fetch("/api/online-orders/zanchen/status", { cache: "no-store" })
+        const res = await fetch(`/api/online-orders/zanchen/status?siteId=${encodeURIComponent(activeTab)}`, { cache: "no-store" })
         if (!res.ok) return
         const data = (await res.json()) as ZanchenStatus
         if (!stopped) setZanchenStatus(data)
@@ -275,7 +307,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
       stopped = true
       clearInterval(timer)
     }
-  }, [activeTab])
+  }, [activeTab, draft.sites])
 
   const onlineOrderTotal = dbTotal
   const onlineOrderTotalPages = Math.max(1, Math.ceil(onlineOrderTotal / onlineOrderPageSize))
@@ -291,7 +323,27 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   }, [onlineOrderPage, onlineOrderTotalPages])
 
   useEffect(() => {
-    if (activeTab !== "zanchen") return
+    // Determine platform to filter by
+    const targetSite = draft.sites.find(s => s.id === activeTab)
+    let platformFilter = undefined
+    
+    if (activeTab === "zanchen") {
+        platformFilter = "ZANCHEN"
+    } else if (activeTab === "chenglin" || activeTab.toLowerCase().includes("chenglin") || activeTab.toLowerCase().includes("chenlin") || targetSite?.name?.includes("诚赁")) {
+        platformFilter = "诚赁"
+    }
+    
+    // If we have a platform filter, or if it's zanchen (which implies filter), fetch orders.
+    // Actually we should fetch for ANY active tab if we can determine the platform.
+    // If platformFilter is undefined, maybe show all? Or show nothing?
+    // Let's assume undefined means "show all" OR we enforce filter.
+    // Given the request "ChengLin tab shows Zanchen orders", we MUST filter.
+    
+    if (!platformFilter && activeTab !== "zanchen") {
+        setDbOrders([])
+        return 
+    }
+    
     setDbLoading(true)
     ;(async () => {
       try {
@@ -304,6 +356,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
           searchOrderNo: filterOrderNo,
           searchRecipient: filterRecipientName,
           searchProduct: filterProduct,
+          filterPlatform: platformFilter // Pass the filter
         })
         setDbOrders(res.orders as unknown as Order[])
         setDbTotal(res.total)
@@ -317,11 +370,23 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct])
 
   useEffect(() => {
-    if (activeTab !== "zanchen") return
+    // Same logic for counts
+    const targetSite = draft.sites.find(s => s.id === activeTab)
+    let platformFilter = undefined
+    
+    if (activeTab === "zanchen") {
+        platformFilter = "ZANCHEN"
+    } else if (activeTab === "chenglin" || activeTab.toLowerCase().includes("chenglin") || activeTab.toLowerCase().includes("chenlin") || targetSite?.name?.includes("诚赁")) {
+        platformFilter = "诚赁"
+    }
+    
+    if (!platformFilter && activeTab !== "zanchen") return
+
     getOnlineOrderCounts({
       searchOrderNo: filterOrderNo,
       searchRecipient: filterRecipientName,
       searchProduct: filterProduct,
+      filterPlatform: platformFilter
     }).then(res => {
       setStatusCounts(res.counts)
       setStatusTotal(res.total)
@@ -506,7 +571,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
     if (specMatch) return specMatch.bomItems || []
     const vars = Array.isArray(product.variants) ? product.variants : []
     const variantMatch = vars.find(v => v.specId === specValue || v.name === specValue)
-    return variantMatch?.bomItems || []
+    return (variantMatch?.bomItems || []) as unknown as { itemTypeId: string; quantity: number; itemTypeName?: string }[]
   }
 
   const handleSaveMatchSpec = async (orderId: string) => {
@@ -521,7 +586,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
         setMatchOrderId(null)
         setDbRefreshKey(key => key + 1)
       } else {
-        toast.error(res?.message || "保存失败")
+        toast.error("保存失败")
       }
     } catch (error) {
       console.error(error)
@@ -539,7 +604,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
         setMatchSpecValue("")
         setDbRefreshKey(key => key + 1)
       } else {
-        toast.error(res?.message || "清空失败")
+        toast.error("清空失败")
       }
     } catch (error) {
       console.error(error)
@@ -654,7 +719,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                       <SelectContent>
                         {draft.sites.map(site => (
                           <SelectItem key={site.id} value={site.id}>
-                            {site.name}
+                            {site.name} ({site.id})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -858,6 +923,19 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                           }
                         />
                       </div>
+                      <div className="space-y-2">
+                        <Label>全部订单Tab选择器</Label>
+                        <Input
+                          value={activeSite.selectors.all_orders_tab_selector || ""}
+                          onChange={e =>
+                            updateSite(activeSite.id, site => ({
+                              ...site,
+                              selectors: { ...site.selectors, all_orders_tab_selector: e.target.value }
+                            }))
+                          }
+                          placeholder="例如: .nav-tabs > li:nth-child(2)"
+                        />
+                      </div>
                       <div className="space-y-2 col-span-2">
                         <Label>订单列表容器</Label>
                         <Input
@@ -987,25 +1065,31 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
             </Tabs>
           </SheetContent>
         </Sheet>
-        {activeTab === "zanchen" && (
+        {activeTab === "zanchen" || config.sites.some(s => s.id === activeTab) ? (
           <>
             <Button
               size="sm"
               onClick={() => {
-                if (zanchenStatus?.status !== "running") {
-                  handleZanchenSync("zanchen")
+                if (activeTab === "zanchen") {
+                    if (zanchenStatus?.status !== "running") {
+                        handleZanchenSync("zanchen")
+                    }
+                } else {
+                    // For other sites, use generic sync if possible
+                    handleZanchenSync(activeTab)
                 }
               }}
+              // Check global running status for current tab
               disabled={zanchenStatus?.status === "running" || zanchenLoading}
             >
               <Play className="h-4 w-4 mr-1" />
-              {zanchenLoading ? "启动中..." : "开始同步"}
+              {zanchenLoading ? "启动中..." : (zanchenStatus?.status === "running" ? "同步中..." : "开始同步")}
             </Button>
             <Button
               size="sm"
               variant="destructive"
               onClick={handleStopSync}
-              disabled={zanchenStatus?.status !== "running"}
+              disabled={zanchenStatus?.status !== "running" && zanchenStatus?.status !== "awaiting_user"}
             >
               <Square className="h-4 w-4 mr-1" />
               停止同步
@@ -1016,16 +1100,16 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
               onClick={() => setLogsOpen(true)}
             >
               <FileText className="h-4 w-4 mr-1" />
-              查看日志
+              查看日志 {zanchenStatus?.status === "running" && <span className="ml-1 animate-pulse">●</span>}
             </Button>
             
             <SyncLogsDialog 
-              siteId="zanchen" 
+              siteId={activeTab} 
               open={logsOpen} 
               onOpenChange={setLogsOpen} 
             />
           </>
-        )}
+        ) : null}
         </div>
       </div>
 
@@ -1040,7 +1124,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
           </TabsList>
           {config.sites.map(site => (
             <TabsContent key={site.id} value={site.id}>
-              {site.id === "zanchen" ? (
+              {site.id === "zanchen" || site.id === "chenglin" || site.name.includes("诚赁") ? (
                 <div className="space-y-4">
                   {!site.selectors.order_list_container?.trim() ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -1049,7 +1133,16 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                   ) : null}
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-muted-foreground">
-                      {site.enabled ? (zanchenStatus?.lastRunAt ? `最近同步: ${new Date(zanchenStatus.lastRunAt).toLocaleString()}` : "将复用浏览器会话并保持心跳") : "该平台未启用"}
+                      {site.enabled ? (
+                          (site.id === "zanchen" || site.id === "chenglin" || site.name.includes("诚赁"))
+                            ? (
+                                <>
+                                {zanchenStatus?.status === "running" ? "正在同步中..." : (zanchenStatus?.lastRunAt ? `最近同步: ${new Date(zanchenStatus.lastRunAt).toLocaleString()}` : "等待启动")}
+                                {zanchenStatus?.message && <span className="ml-2 text-blue-600">[{zanchenStatus.message}]</span>}
+                                </>
+                              )
+                            : "自动同步已启用"
+                      ) : "该平台未启用"}
                     </span>
                   </div>
                   <div className="space-y-2">
@@ -1064,12 +1157,16 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                       <Tabs value={filterStatus} onValueChange={(val) => { setFilterStatus(val); setOnlineOrderPage(1); }} className="w-full">
                           <TabsList className="flex flex-wrap h-auto w-full justify-start">
                               <TabsTrigger value="ALL">全部 ({statusTotal})</TabsTrigger>
+                              <TabsTrigger value="WAIT_PAY">待支付 ({statusCounts['WAIT_PAY'] || 0})</TabsTrigger>
                               <TabsTrigger value="PENDING_REVIEW">待审核 ({statusCounts['PENDING_REVIEW'] || 0})</TabsTrigger>
                               <TabsTrigger value="PENDING_SHIPMENT">待发货 ({statusCounts['PENDING_SHIPMENT'] || 0})</TabsTrigger>
+                              <TabsTrigger value="SHIPPED">已发货 ({statusCounts['SHIPPED'] || 0})</TabsTrigger>
                               <TabsTrigger value="PENDING_RECEIPT">待收货 ({statusCounts['PENDING_RECEIPT'] || 0})</TabsTrigger>
                               <TabsTrigger value="RENTING">待归还 ({statusCounts['RENTING'] || 0})</TabsTrigger>
                               <TabsTrigger value="RETURNING">归还中 ({statusCounts['RETURNING'] || 0})</TabsTrigger>
                               <TabsTrigger value="OVERDUE">已逾期 ({statusCounts['OVERDUE'] || 0})</TabsTrigger>
+                              <TabsTrigger value="DUE_REPAYMENT">到期还款 ({statusCounts['DUE_REPAYMENT'] || 0})</TabsTrigger>
+                              <TabsTrigger value="BOUGHT_OUT">已买断 ({statusCounts['BOUGHT_OUT'] || 0})</TabsTrigger>
                               <TabsTrigger value="COMPLETED">已完成 ({statusCounts['COMPLETED'] || 0})</TabsTrigger>
                               <TabsTrigger value="CLOSED">已关闭 ({statusCounts['CLOSED'] || 0})</TabsTrigger>
                           </TabsList>

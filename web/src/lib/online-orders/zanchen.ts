@@ -2173,7 +2173,15 @@ async function runZanchenSync(siteId: string) {
   }
 
   setStatus({ status: "running", message: "已登录，正在打开订单列表" })
-  await openOrderList(page, site.selectors)
+  
+  // Smart Navigation: Only open order list if not already there
+  const orderUrl = site.selectors.order_menu_link
+  const currentOrderUrl = page.url()
+  if (orderUrl && (currentOrderUrl.includes(orderUrl) || (orderUrl.startsWith("http") && currentOrderUrl.startsWith(orderUrl)))) {
+      addLog("Already on order list page, skipping navigation.")
+  } else {
+      await openOrderList(page, site.selectors)
+  }
   
   await waitRandom(page, 800, 1600)
 

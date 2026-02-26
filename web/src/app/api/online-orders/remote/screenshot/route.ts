@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getRunningPage } from "@/lib/online-orders/zanchen"
+import { getSessionPage } from "@/lib/online-orders/session-manager"
 import { getCurrentUser } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
@@ -11,8 +11,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
   }
 
-  const page = getRunningPage()
+  const { searchParams } = new URL(req.url)
+  const siteId = searchParams.get("siteId") || "auto"
+
+  const page = getSessionPage(siteId)
   if (!page || page.isClosed()) {
+    // Return a placeholder or 404
     return NextResponse.json({ error: "No active session" }, { status: 404 })
   }
 

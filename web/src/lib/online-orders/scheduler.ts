@@ -1,4 +1,5 @@
 import { loadConfig, startZanchenSync, getZanchenStatus, stopZanchenSync, type OnlineOrdersConfig } from "./zanchen"
+import { startChenglinSync } from "./chenglin"
 import { initSchedulers as initOfflineSchedulers } from "../offline-sync/service"
 
 export type LogEntry = {
@@ -41,6 +42,11 @@ function addLog(message: string) {
   if (runtime.status.logs.length > 100) runtime.status.logs.pop()
 }
 
+// Global logger export for other modules
+export const schedulerLogger = {
+    log: addLog
+}
+
 export function getSchedulerStatus() {
   return {
       ...runtime.status,
@@ -49,18 +55,19 @@ export function getSchedulerStatus() {
 }
 
 async function runScheduler() {
-  if (runtime.status.isRunning) return
+  // if (runtime.status.isRunning) return // Removed to allow parallel runs
   
   const config = await loadConfig()
   if (!config) return
 
-  runtime.status.isRunning = true
+  // runtime.status.isRunning = true // No longer a single global flag
   
   try {
     const sites = config.sites || []
     if (sites.length === 0) return
 
-    for (const site of sites) {
+    // Run all site checks in parallel
+    const promises = sites.map(async (site) => {
         // Determine if enabled and interval
         let enabled = false
         let interval = 3600 // seconds
@@ -72,8 +79,17 @@ async function runScheduler() {
             enabled = site.autoSync?.enabled ?? false
             interval = site.autoSync?.interval ?? 3600
         }
+
+        // Debug log for scheduler decision
+        // console.log(`[Scheduler] Site: ${site.name} (${site.id}), Enabled: ${enabled}, Interval: ${interval}`)
       
-        if (!enabled) continue
+        if (!enabled) {
+            // Only log if it's NOT zanchen (to avoid spamming logs for the main site if user disabled it intentionally)
+            if (site.id !== 'zanchen') {
+                 addLog(`[调度] 跳过 ${site.name}: 自动同步未启用`)
+            }
+            return
+        }
 
         // Check if due
         const lastRunStr = runtime.siteLastRun[site.id]
@@ -87,7 +103,13 @@ async function runScheduler() {
         }
         
         // If never run, run immediately. Otherwise check interval.
-        if (previousRunTime > 0 && (now - previousRunTime < interval * 1000)) continue
+        if (previousRunTime > 0 && (now - previousRunTime < interval * 1000)) {
+            if (site.id !== 'zanchen') {
+                 // Optional: Log verbose skip
+                 // addLog(`[调度] 跳过 ${site.name}: 冷却中 (上次: ${new Date(lastRunStr).toLocaleTimeString()})`)
+            }
+            return
+        }
 
         // Update site last run at start for Fixed Rate scheduling
         runtime.siteLastRun[site.id] = new Date().toISOString()
@@ -100,42 +122,57 @@ async function runScheduler() {
         }
 
         addLog(`开始同步站点: ${site.name}`)
-        runtime.status.lastRunAt = new Date().toISOString() // Update global last run for UI
+        // runtime.status.lastRunAt = new Date().toISOString() // Update global last run for UI - Deprecated for per-site tracking
         
-        await startZanchenSync(site.id)
+        // Check for Chenglin by ID or Name
+        // Normalized check: ignore case, check for specific keywords
+        const isChenglin = site.id === 'chenglin' || site.id === 'chenlin' || site.name.includes('诚赁') || site.name.includes('Chenglin');
 
-        // Poll until finished
-        while (true) {
-            const status = getZanchenStatus()
-            if (status.status !== "running" && status.status !== "idle" && status.status !== "awaiting_user") {
-            // Success or Error
-            if (status.status === "error") {
-                addLog(`站点 ${site.name} 同步失败: ${status.message}`)
-            } else {
-                const count = status.lastResult?.parsedOrders?.length || 0
-                addLog(`站点 ${site.name} 同步完成，获取订单: ${count} 单`)
-            }
-            break
-            }
-            // Also break if idle (which means it didn't start or finished abruptly)
-            if (status.status === "idle" && !status.lastRunAt) {
-                // Probably just started or waiting
-            } else if (status.status === "idle") {
-                // Finished
+        if (isChenglin) {
+           addLog(`检测到诚赁站点，准备启动 Chenglin Worker...`)
+           try {
+               await startChenglinSync(site.id)
+               addLog(`站点 ${site.name} 同步完成`)
+           } catch (e) {
+               addLog(`站点 ${site.name} 同步失败: ${e}`)
+               console.error(`[Scheduler] Chenglin sync failed:`, e)
+           }
+        } else {
+            await startZanchenSync(site.id)
+
+            // Poll until finished
+            while (true) {
+                const status = getZanchenStatus()
+                if (status.status !== "running" && status.status !== "idle" && status.status !== "awaiting_user") {
+                // Success or Error
+                if (status.status === "error") {
+                    addLog(`站点 ${site.name} 同步失败: ${status.message}`)
+                } else {
+                    const count = status.lastResult?.parsedOrders?.length || 0
+                    addLog(`站点 ${site.name} 同步完成，获取订单: ${count} 单`)
+                }
                 break
-            }
+                }
+                // Also break if idle (which means it didn't start or finished abruptly)
+                if (status.status === "idle" && !status.lastRunAt) {
+                    // Probably just started or waiting
+                } else if (status.status === "idle") {
+                    // Finished
+                    break
+                }
 
-            // Wait 2s
-            await new Promise(r => setTimeout(r, 2000))
+                // Wait 2s
+                await new Promise(r => setTimeout(r, 2000))
+            }
         }
-        
-        // Small delay between sites
-        await new Promise(r => setTimeout(r, 5000))
-    }
+    })
+
+    await Promise.all(promises)
+
   } catch (e) {
     addLog(`自动同步任务异常: ${e}`)
   } finally {
-    runtime.status.isRunning = false
+    // runtime.status.isRunning = false
   }
 }
 

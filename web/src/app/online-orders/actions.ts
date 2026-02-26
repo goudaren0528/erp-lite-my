@@ -13,6 +13,7 @@ export async function fetchOnlineOrders(params: {
     searchOrderNo?: string;
     searchRecipient?: string;
     searchProduct?: string;
+    filterPlatform?: string;
 }) {
     const {
         page,
@@ -23,9 +24,14 @@ export async function fetchOnlineOrders(params: {
         searchOrderNo,
         searchRecipient,
         searchProduct,
+        filterPlatform,
     } = params;
 
     const where: Prisma.OnlineOrderWhereInput = {};
+
+    if (filterPlatform) {
+        where.platform = filterPlatform;
+    }
 
     if (status && status !== 'ALL') {
         where.status = status;
@@ -101,9 +107,14 @@ export async function getOnlineOrderCounts(params: {
     searchOrderNo?: string;
     searchRecipient?: string;
     searchProduct?: string;
+    filterPlatform?: string;
 }) {
     const where: Prisma.OnlineOrderWhereInput = {};
     
+    if (params.filterPlatform) {
+        where.platform = params.filterPlatform;
+    }
+
     if (params.searchOrderNo) {
         where.orderNo = { contains: params.searchOrderNo };
     }

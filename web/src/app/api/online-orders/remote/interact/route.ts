@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getRunningPage } from "@/lib/online-orders/zanchen"
+import { getSessionPage } from "@/lib/online-orders/session-manager"
 import { getCurrentUser } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
@@ -11,14 +11,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
   }
 
-  const page = getRunningPage()
-  if (!page || page.isClosed()) {
-    return NextResponse.json({ error: "No active session" }, { status: 404 })
-  }
-
   try {
     const body = await req.json()
-    const { type, x, y, text, key, deltaX, deltaY } = body
+    const { siteId, type, x, y, text, key, deltaX, deltaY } = body
+
+    const page = getSessionPage(siteId || "auto")
+    if (!page || page.isClosed()) {
+      return NextResponse.json({ error: "No active session for this site" }, { status: 404 })
+    }
 
     if (type === "click") {
       await page.mouse.click(x, y)

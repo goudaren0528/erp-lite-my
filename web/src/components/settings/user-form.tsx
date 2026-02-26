@@ -52,7 +52,7 @@ const PERMISSION_GROUPS = [
         permissions: [
             { key: 'products', label: '商品库管理' },
             { key: 'inventory_calendar', label: '库存日历' },
-            { key: 'inventory_manage', label: '库存管理' },
+            { key: 'inventory_manage', label: '资产库存管理' },
         ]
     },
     {
@@ -60,6 +60,7 @@ const PERMISSION_GROUPS = [
         permissions: [
             { key: 'users', label: '账号权限管理' },
             { key: 'backup', label: '导出导入数据' },
+            { key: 'manual', label: '操作指南管理' },
         ]
     }
 ]

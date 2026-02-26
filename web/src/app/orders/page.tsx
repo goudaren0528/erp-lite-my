@@ -26,6 +26,10 @@ type ProductRaw = {
     id: string;
     specId: string;
     name: string;
+    accessories: string;
+    insurancePrice: number;
+    priceRules: any;
+    productId: string;
     bomItems: { itemTypeId: string; quantity: number; itemType: { name: string } }[];
   }[];
 };
@@ -63,6 +67,10 @@ export default async function OrdersPage() {
           id: true,
           specId: true,
           name: true,
+          accessories: true,
+          insurancePrice: true,
+          priceRules: true,
+          productId: true,
           bomItems: {
             select: {
               itemTypeId: true,
@@ -79,6 +87,9 @@ export default async function OrdersPage() {
     variants: JSON.parse(p.variants),
     specs: p.specs?.map(s => ({
       ...s,
+      accessories: s.accessories || "",
+      insurancePrice: Number(s.insurancePrice) || 0,
+      priceRules: typeof s.priceRules === 'string' ? JSON.parse(s.priceRules) : s.priceRules || {},
       bomItems: s.bomItems?.map(b => ({
         itemTypeId: b.itemTypeId,
         quantity: b.quantity,

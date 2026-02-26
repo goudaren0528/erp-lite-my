@@ -1236,7 +1236,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
             setIsMatchOpen(false)
             onOrderUpdated()
         } else {
-            toast.error(res?.message || "保存失败")
+            toast.error("保存失败")
         }
     } catch (error) {
         console.error(error)
@@ -1254,7 +1254,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
             setIsMatchOpen(false)
             onOrderUpdated()
         } else {
-            toast.error(res?.message || "清空失败")
+            toast.error("清空失败")
         }
     } catch (error) {
         console.error(error)
