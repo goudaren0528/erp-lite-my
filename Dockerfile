@@ -41,12 +41,9 @@ RUN adduser --system --uid 1001 nextjs
 # Install Playwright system dependencies
 RUN npx playwright@1.55.0 install-deps chromium
 
-# Install Google Chrome + Xvfb (virtual display for headful mode on Linux)
+# Install Xvfb (virtual display for headful mode on Linux)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget gnupg xvfb \
-    && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/public ./public
