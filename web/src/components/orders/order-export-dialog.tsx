@@ -24,7 +24,7 @@ import { fetchOrdersForExport } from "@/app/actions"
 import { toast } from "sonner"
 import * as XLSX from "xlsx"
 import { format } from "date-fns"
-import { OrderStatus, OrderSource, OrderPlatform } from "@/types"
+import { OrderSource } from "@/types"
 
 const statusMap: Record<string, string> = {
   PENDING_REVIEW: '待审核',
@@ -85,6 +85,7 @@ export function OrderExportDialog() {
 
         return {
           '订单号': order.orderNo,
+          '小程序订单号': order.miniProgramOrderNo || '-',
           '状态': statusMap[order.status] || order.status,
           '渠道': sourceMap[order.source as OrderSource] || order.source,
           '平台': platformMap[order.platform as string] || order.platform || '-',
@@ -137,7 +138,7 @@ export function OrderExportDialog() {
       setOpen(false)
     } catch (error) {
       console.error(error)
-      toast.error("导出失败")
+      toast.error(error instanceof Error ? error.message : "导出失败")
     } finally {
       setLoading(false)
     }

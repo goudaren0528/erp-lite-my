@@ -1,5 +1,9 @@
-import { loadConfig, startZanchenSync, getZanchenStatus, stopZanchenSync, type OnlineOrdersConfig } from "./zanchen"
-import { startChenglinSync } from "./chenglin"
+import { loadConfig, startZanchenSync, getZanchenStatus } from "./zanchen"
+import { startChenglinSync, getChenglinStatus } from "./chenglin"
+import { startAolzuSync, getAolzuStatus } from "./aolzu"
+import { startYoupinSync, getYoupinStatus } from "./youpin"
+import { startLlxzuSync, getLlxzuStatus } from "./llxzu"
+import { startRrzSync, getRrzStatus } from "./rrz"
 import { initSchedulers as initOfflineSchedulers } from "../offline-sync/service"
 
 export type LogEntry = {
@@ -124,47 +128,86 @@ async function runScheduler() {
         addLog(`开始同步站点: ${site.name}`)
         // runtime.status.lastRunAt = new Date().toISOString() // Update global last run for UI - Deprecated for per-site tracking
         
-        // Check for Chenglin by ID or Name
-        // Normalized check: ignore case, check for specific keywords
-        const isChenglin = site.id === 'chenglin' || site.id === 'chenlin' || site.name.includes('诚赁') || site.name.includes('Chenglin');
+        const siteIdLower = (site.id || "").toLowerCase()
+        const siteNameLower = (site.name || "").toLowerCase()
+        const isChenglin = siteIdLower === "chenglin" || siteIdLower === "chenlin" || site.name.includes("诚赁") || siteNameLower.includes("chenglin") || siteNameLower.includes("chenlin")
+        const isAolzu = siteIdLower === "aolzu" || siteIdLower === "aozu" || siteIdLower.includes("aolzu") || siteIdLower.includes("aozu") || site.name.includes("奥租") || siteNameLower.includes("aolzu") || siteNameLower.includes("aozu")
+        const isYoupin = siteIdLower === "youpin" || siteIdLower.includes("youpin") || site.name.includes("优品") || siteNameLower.includes("youpin")
+        const isLlxzu = siteIdLower === "llxzu" || siteIdLower.includes("llxzu") || site.name.includes("零零享") || siteNameLower.includes("llxzu")
+        const isRrz = siteIdLower === "rrz" || siteIdLower.includes("rrz") || site.name.includes("人人租") || siteNameLower.includes("rrz")
 
-        if (isChenglin) {
-           addLog(`检测到诚赁站点，准备启动 Chenglin Worker...`)
-           try {
-               await startChenglinSync(site.id)
-               addLog(`站点 ${site.name} 同步完成`)
-           } catch (e) {
-               addLog(`站点 ${site.name} 同步失败: ${e}`)
-               console.error(`[Scheduler] Chenglin sync failed:`, e)
-           }
-        } else {
-            await startZanchenSync(site.id)
-
-            // Poll until finished
+        type SyncStatus = { status: string; message?: string; lastResult?: { parsedOrders?: unknown[] } }
+        const poll = async (getStatus: () => SyncStatus) => {
             while (true) {
-                const status = getZanchenStatus()
+                const status = getStatus()
                 if (status.status !== "running" && status.status !== "idle" && status.status !== "awaiting_user") {
-                // Success or Error
-                if (status.status === "error") {
-                    addLog(`站点 ${site.name} 同步失败: ${status.message}`)
-                } else {
-                    const count = status.lastResult?.parsedOrders?.length || 0
-                    addLog(`站点 ${site.name} 同步完成，获取订单: ${count} 单`)
-                }
-                break
-                }
-                // Also break if idle (which means it didn't start or finished abruptly)
-                if (status.status === "idle" && !status.lastRunAt) {
-                    // Probably just started or waiting
-                } else if (status.status === "idle") {
-                    // Finished
+                    if (status.status === "error") {
+                        addLog(`站点 ${site.name} 同步失败: ${status.message}`)
+                    } else {
+                        const count = status.lastResult?.parsedOrders?.length || 0
+                        addLog(`站点 ${site.name} 同步完成，获取订单: ${count} 单`)
+                    }
                     break
                 }
-
-                // Wait 2s
+                if (status.status === "idle") break
                 await new Promise(r => setTimeout(r, 2000))
             }
         }
+
+        if (isChenglin) {
+            addLog(`检测到诚赁站点，准备启动 Chenglin Worker...`)
+            try {
+                await startChenglinSync(site.id)
+                await poll(() => getChenglinStatus() as unknown as SyncStatus)
+            } catch (e) {
+                addLog(`站点 ${site.name} 同步失败: ${e}`)
+                console.error(`[Scheduler] Chenglin sync failed:`, e)
+            }
+            return
+        }
+
+        if (isAolzu) {
+            addLog(`检测到奥租站点，准备启动 Aolzu Worker...`)
+            startAolzuSync(site.id).catch(e => {
+                addLog(`站点 ${site.name} 同步失败: ${e}`)
+                console.error(`[Scheduler] Aolzu sync failed:`, e)
+            })
+            await poll(() => getAolzuStatus() as unknown as SyncStatus)
+            return
+        }
+
+        if (isYoupin) {
+            addLog(`检测到优品租站点，准备启动 Youpin Worker...`)
+            startYoupinSync(site.id).catch(e => {
+                addLog(`站点 ${site.name} 同步失败: ${e}`)
+                console.error(`[Scheduler] Youpin sync failed:`, e)
+            })
+            await poll(() => getYoupinStatus() as unknown as SyncStatus)
+            return
+        }
+
+        if (isLlxzu) {
+            addLog(`检测到零零享站点，准备启动 Llxzu Worker...`)
+            startLlxzuSync(site.id).catch(e => {
+                addLog(`站点 ${site.name} 同步失败: ${e}`)
+                console.error(`[Scheduler] Llxzu sync failed:`, e)
+            })
+            await poll(() => getLlxzuStatus() as unknown as SyncStatus)
+            return
+        }
+
+        if (isRrz) {
+            addLog(`检测到人人租站点，准备启动 Rrz Worker...`)
+            startRrzSync(site.id).catch(e => {
+                addLog(`站点 ${site.name} 同步失败: ${e}`)
+                console.error(`[Scheduler] Rrz sync failed:`, e)
+            })
+            await poll(() => getRrzStatus() as unknown as SyncStatus)
+            return
+        }
+
+        await startZanchenSync(site.id)
+        await poll(() => getZanchenStatus() as unknown as SyncStatus)
     })
 
     await Promise.all(promises)

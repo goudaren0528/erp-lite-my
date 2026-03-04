@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useTransition, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { InventoryItemType, Product } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -50,11 +50,22 @@ interface ProductListProps {
 
 export function ProductList({ products, itemTypes }: ProductListProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
   const [isMigrating, setIsMigrating] = useState(false)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+
+  useEffect(() => {
+    const editId = searchParams.get("edit")
+    if (editId) {
+      const product = products.find((p) => p.id === editId)
+      if (product) {
+        setEditingProduct(product)
+      }
+    }
+  }, [searchParams, products])
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null)
   const [productToDelete, setProductToDelete] = useState<Product | null>(null)
   const [searchQuery, setSearchQuery] = useState("")

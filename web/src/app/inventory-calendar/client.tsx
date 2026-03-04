@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ChevronLeft, ChevronRight, Loader2, Settings, ExternalLink, Calendar as CalendarIcon, Table as TableIcon } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2, Settings, ExternalLink, Calendar as CalendarIcon, Table as TableIcon, Edit } from "lucide-react"
 import { getInventoryData, getInventoryCalendarConfig, saveInventoryCalendarConfig, getInventoryItems } from "./actions"
 import { toast } from "sonner"
 import {
@@ -67,6 +67,10 @@ const statusMap: Record<string, { label: string; color: string }> = {
     DELETED: { label: '已删除', color: 'bg-gray-200 text-gray-500' },
     REPAIRING: { label: '维修中', color: 'bg-yellow-100 text-yellow-800' },
     INSPECTION: { label: '检测中', color: 'bg-orange-100 text-orange-800' },
+    
+    // New status from crawlers
+    DUE_REPAYMENT: { label: '待结算', color: 'bg-red-100 text-red-800' },
+    WAIT_PAY: { label: '待支付', color: 'bg-yellow-100 text-yellow-800' },
 
     // Chinese status fallback
     待审核: { label: "待审核", color: "bg-orange-100 text-orange-800" },
@@ -86,6 +90,11 @@ const platformMap: Record<string, string> = {
     TAOBAO: "淘宝",
     XIANYU: "闲鱼",
     ZANCHEN: "赞晨",
+    CHENGLIN: "诚赁",
+    AOLZU: "奥租",
+    YOUPIN: "优品租",
+    LLXZU: "零零享",
+    RRZ: "人人租",
     OTHER: "其他"
 }
 
@@ -112,15 +121,23 @@ const extractSignedAt = (raw?: string | null) => {
 }
 
 const StatsCell = ({ available, inCount, outCount, compact = false, onInClick, onOutClick, onStockClick }: { available: number, inCount: number, outCount: number, compact?: boolean, onInClick?: () => void, onOutClick?: () => void, onStockClick?: () => void }) => {
-    const textSize = compact ? 'text-[10px]' : 'text-xs'
-    const gap = compact ? 'gap-0' : 'gap-1'
     const bgClass = available <= 0 ? 'bg-red-100/70' : available < 2 ? 'bg-yellow-100/70' : 'bg-emerald-50/70'
 
     const getClickableClass = (handler?: () => void) => 
         handler ? "cursor-pointer hover:underline underline-offset-2" : "cursor-default"
 
+    if (compact) {
+        return (
+            <div className={`flex flex-col justify-center h-full w-full ${bgClass} rounded-sm px-1 py-1`}>
+                <div className={`flex justify-center items-center leading-none ${getClickableClass(onStockClick)}`} onClick={onStockClick}>
+                    <span className="text-base font-semibold text-foreground tabular-nums">{available}</span>
+                </div>
+            </div>
+        )
+    }
+
     return (
-        <div className={`flex flex-col justify-center h-full w-full ${textSize} ${gap} ${bgClass} rounded-sm`}>
+        <div className={`flex flex-col justify-center h-full w-full text-xs gap-1 ${bgClass} rounded-sm`}>
             <div className={`flex justify-center items-center text-foreground ${getClickableClass(onInClick)}`} onClick={onInClick}>
                 入库: {inCount}
             </div>
@@ -142,6 +159,7 @@ type BomItem = {
 
 type ProductSpec = {
     id: string
+    specId?: string
     name: string
     stock: number
     bomItems?: BomItem[]
@@ -150,7 +168,7 @@ type ProductSpec = {
 type Product = {
     id: string
     name: string
-    variants: any[]
+    variants: unknown[]
     matchKeywords: string | null
     totalStock: number
     hasSharedComponents?: boolean
@@ -164,6 +182,7 @@ type OrderSimple = {
     variantName: string | null
     productId?: string | null
     specId?: string | null
+    itemTitle?: string | null
     rentStartDate: Date | null
     returnDeadline: Date | null
     status: string
@@ -196,6 +215,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const [componentStock, setComponentStock] = useState<Record<string, number>>({})
     const [loading, setLoading] = useState(false)
     const [refreshKey, setRefreshKey] = useState(0)
+    const [isMobile, setIsMobile] = useState(false)
     
     // Config state
     const [deliveryBufferDays, setDeliveryBufferDays] = useState(2)
@@ -263,10 +283,14 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 
                 const res = await getInventoryData(startStr, endStr)
                 
-                const parsedProducts = res.products.map((p: any) => ({
-                    ...p,
-                    variants: typeof p.variants === 'string' ? JSON.parse(p.variants) : p.variants
-                }))
+                const parsedProducts = res.products.map((p: Omit<Product, 'variants'> & { variants: unknown }) => {
+                    const raw = p.variants
+                    const variants =
+                        typeof raw === 'string'
+                            ? (JSON.parse(raw) as unknown[])
+                            : (Array.isArray(raw) ? raw : [])
+                    return { ...p, variants }
+                })
 
                 setProducts(parsedProducts)
                 setComponentStock(res.componentStock || {})
@@ -313,6 +337,18 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         fetchData()
     }, [currentMonth, refreshKey])
 
+    useEffect(() => {
+        const mql = window.matchMedia('(max-width: 640px)')
+        const update = () => setIsMobile(mql.matches)
+        update()
+        if (mql.addEventListener) mql.addEventListener('change', update)
+        else mql.addListener(update)
+        return () => {
+            if (mql.removeEventListener) mql.removeEventListener('change', update)
+            else mql.removeListener(update)
+        }
+    }, [])
+
     // Helper: Map order to product ID
     const getOrderProductId = (order: OrderSimple) => {
         if (order.productId) return order.productId
@@ -324,7 +360,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 try {
                     const keywords = JSON.parse(p.matchKeywords)
                     if (Array.isArray(keywords)) {
-                        return keywords.some(k => order.productName?.includes(k) || (order as any).itemTitle?.includes(k))
+                        return keywords.some(k => order.productName?.includes(k) || order.itemTitle?.includes(k))
                     }
                 } catch {}
             }
@@ -335,20 +371,24 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
     const specLookup = useMemo(() => {
         const byId = new Map<string, { spec: ProductSpec; product: Product }>()
+        const bySpecId = new Map<string, { spec: ProductSpec; product: Product }>()
         const byName = new Map<string, { spec: ProductSpec; product: Product }>()
         products.forEach(p => {
             p.specs?.forEach(s => {
                 byId.set(s.id, { spec: s, product: p })
+                if (s.specId) bySpecId.set(s.specId, { spec: s, product: p })
                 byName.set(`${p.id}:${s.name}`, { spec: s, product: p })
             })
         })
-        return { byId, byName }
+        return { byId, bySpecId, byName }
     }, [products])
 
     const getOrderSpecInfo = (order: OrderSimple) => {
         if (order.specId) {
             const hit = specLookup.byId.get(order.specId)
             if (hit) return hit
+            const hitBySpecId = specLookup.bySpecId.get(order.specId)
+            if (hitBySpecId) return hitBySpecId
         }
         const pid = getOrderProductId(order)
         if (pid && order.variantName) {
@@ -358,9 +398,17 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         return null
     }
 
-    // Flattened variants for Spec View
+    type VariantOption = {
+        id: string
+        name: string
+        productId: string
+        productName: string
+        fullName: string
+        stock: number
+    }
+
     const allVariants = useMemo(() => {
-        return products.flatMap(p => {
+        return products.flatMap<VariantOption>(p => {
             // Use specs if available (contains stock), otherwise fallback to variants (names only)
             if (p.specs && p.specs.length > 0) {
                 return p.specs.map(s => ({
@@ -368,21 +416,30 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                     name: s.name,
                     productId: p.id,
                     productName: p.name,
-                    fullName: `${p.name} - ${s.name}`,
+                    fullName: s.name.includes(p.name) ? s.name : `${p.name} - ${s.name}`,
                     stock: s.stock
                 }))
             }
             
             // Fallback for legacy data without specs relation
             const vars = Array.isArray(p.variants) ? p.variants : []
-            return vars.map((v: any) => ({
-                id: v.specId || `${p.id}:${v.name}`,
-                name: v.name,
-                productId: p.id,
-                productName: p.name,
-                fullName: `${p.name} - ${v.name}`,
-                stock: 0
-            }))
+            return vars
+                .map(v => {
+                    if (!v || typeof v !== "object") return null
+                    const raw = v as { specId?: unknown; name?: unknown }
+                    const name = typeof raw.name === "string" ? raw.name : ""
+                    if (!name) return null
+                    const specId = typeof raw.specId === "string" ? raw.specId : ""
+                    return {
+                        id: specId || `${p.id}:${name}`,
+                        name,
+                        productId: p.id,
+                        productName: p.name,
+                        fullName: name.includes(p.name) ? name : `${p.name} - ${name}`,
+                        stock: 0
+                    }
+                })
+                .filter((v): v is VariantOption => v !== null)
         })
     }, [products])
 
@@ -423,7 +480,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             endRaw = new Date(o.completedAt)
         }
 
-        let end = addDays(endRaw, returnBufferDays)
+        const end = addDays(endRaw, returnBufferDays)
         
         let outDate = start
         if (o.actualDeliveryTime || o.deliveryTime) {
@@ -545,6 +602,13 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 const selectedVariant = allVariants.find(v => v.id === selectedVariantId)
                 if (!selectedVariant) return false
 
+                // Relaxed filtering for Online Orders
+                if (o.isOnline) {
+                    if (o.specId === selectedVariant.id) return true
+                    // Fallback to name matching if specId doesn't match directly
+                    return o.productId === selectedVariant.productId && o.variantName === selectedVariant.name
+                }
+
                 if (pid !== selectedVariant.productId) return false
 
                 if (o.specId) {
@@ -634,8 +698,8 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
     // Calendar view render
     const renderCalendarView = () => (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {[currentMonth, addMonths(currentMonth, 1)].map((monthDate, index) => {
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
+            {(isMobile ? [currentMonth] : [currentMonth, addMonths(currentMonth, 1)]).map((monthDate, index) => {
                 const days = eachDayOfInterval({
                     start: startOfMonth(monthDate),
                     end: endOfMonth(monthDate)
@@ -648,14 +712,14 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                         </div>
                         <div className="grid grid-cols-7 gap-1">
                             {['日', '一', '二', '三', '四', '五', '六'].map(day => (
-                                <div key={day} className="text-center text-xs font-medium text-muted-foreground py-2 bg-muted/30 rounded-sm">
+                                <div key={day} className="text-center text-xs font-medium text-muted-foreground py-1.5 sm:py-2 bg-muted/30 rounded-sm">
                                     {day}
                                 </div>
                             ))}
                             
                             {/* Empty cells for start of month */}
                             {Array.from({ length: startOfMonth(monthDate).getDay() }).map((_, i) => (
-                                <div key={`empty-${i}`} className="h-32 bg-muted/5 rounded-md border border-dashed border-muted/20" />
+                                <div key={`empty-${i}`} className="h-20 sm:h-32 bg-muted/5 rounded-md border border-dashed border-muted/20" />
                             ))}
 
                             {/* Days */}
@@ -686,13 +750,13 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                 return (
                                     <div 
                                         key={day.toString()} 
-                                        className={`min-h-[120px] p-2 rounded-md border hover:shadow-sm transition-all flex flex-col justify-between
+                                        className={`min-h-[88px] sm:min-h-[120px] p-1.5 sm:p-2 rounded-md border hover:shadow-sm transition-all flex flex-col justify-between
                                             ${isToday ? 'ring-2 ring-primary ring-offset-1' : 'border-border'}
                                             ${isPast ? 'bg-gray-100 text-muted-foreground grayscale' : ''}
                                         `}
                                     >
-                                        <div className="flex justify-between items-start mb-2">
-                                            <span className={`text-sm font-medium ${isToday ? 'text-primary' : ''}`}>{format(day, 'd')}</span>
+                                        <div className="flex justify-between items-start mb-1 sm:mb-2">
+                                            <span className={`text-xs sm:text-sm font-medium ${isToday ? 'text-primary' : ''}`}>{format(day, 'd')}</span>
                                         </div>
                                         
                                         <div className="flex-1">
@@ -700,7 +764,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                 available={stats.available}
                                                 inCount={stats.inCount}
                                                 outCount={stats.outCount}
-                                                compact={false}
+                                                compact={isMobile}
                                                 onInClick={() => handleDayClick(day, dayInOrders, 'in')}
                                                 onOutClick={() => handleDayClick(day, dayOutOrders, 'out')}
                                                 onStockClick={() => handleDayClick(day, dayOccupancy, 'stock')}
@@ -763,7 +827,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             if (range.end < start || range.start > end) return
 
             // Iterate days in range
-            let current = range.start < start ? start : range.start
+            const current = range.start < start ? start : range.start
             const last = range.end > end ? end : range.end
             
             // Check Out (Start Date)
@@ -855,7 +919,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                             <table className="min-w-full divide-y divide-border border-separate border-spacing-0">
                                 <thead className="bg-muted/50 sticky top-0 z-20">
                                     <tr>
-                                        <th scope="col" className="sticky left-0 z-30 bg-background px-3 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider w-[200px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] border-b">
+                                        <th scope="col" className="sticky left-0 z-30 bg-background px-3 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider w-[140px] sm:w-[200px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] border-b">
                                             商品/规格
                                         </th>
                                         {days.map(day => {
@@ -877,7 +941,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                         
                                         return (
                                             <tr key={row.id} className={`group ${zebra ? 'bg-muted/60' : ''} hover:bg-muted/70`}>
-                                                <td className={`sticky left-0 z-10 px-3 py-2 whitespace-nowrap text-sm font-medium text-foreground border-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] ${zebra ? 'bg-muted/60' : 'bg-background'} group-hover:bg-muted/70`}>
+                                                <td className={`sticky left-0 z-10 px-3 py-2 whitespace-nowrap text-sm font-medium text-foreground border-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] w-[140px] sm:w-[200px] ${zebra ? 'bg-muted/60' : 'bg-background'} group-hover:bg-muted/70`}>
                                                     <div className="flex flex-col">
                                                         <span>{row.name}</span>
                                                         <span className="text-xs text-muted-foreground font-normal">库存: {row.stock}</span>
@@ -935,7 +999,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     return (
         <div className="space-y-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 w-full">
                     <div className="flex bg-muted p-1 rounded-lg">
                         <Button 
                             variant={viewMode === 'calendar' ? 'default' : 'ghost'} 
@@ -957,7 +1021,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                         </Button>
                     </div>
 
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-[200px]">
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-[200px]">
                         <TabsList>
                             <TabsTrigger value="item">物品库存</TabsTrigger>
                             <TabsTrigger value="spec">规格库存</TabsTrigger>
@@ -966,7 +1030,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                     
                     {activeTab === "item" ? (
                         <Select value={selectedProductId} onValueChange={setSelectedProductId}>
-                            <SelectTrigger className="w-[250px]">
+                            <SelectTrigger className="w-full sm:w-[250px]">
                                 <SelectValue placeholder="选择商品" />
                             </SelectTrigger>
                             <SelectContent>
@@ -978,14 +1042,29 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                         </Select>
                     ) : (
                         <Select value={selectedVariantId} onValueChange={setSelectedVariantId}>
-                            <SelectTrigger className="w-[300px]">
+                            <SelectTrigger className="w-full sm:w-[300px]">
                                 <SelectValue placeholder="选择规格" />
                             </SelectTrigger>
                             <SelectContent>
                                 {viewMode === 'table' && <SelectItem value="ALL">全部规格</SelectItem>}
-                                {allVariants.map(v => (
-                                    <SelectItem key={v.id} value={v.id}>{v.fullName}</SelectItem>
-                                ))}
+                                {allVariants.map(v => {
+                                    // Check if this variant has BOM
+                                    const specInfo = specLookup.byId.get(v.id) || specLookup.byName.get(`${v.productId}:${v.name}`)
+                                    const hasBom = specInfo?.spec?.bomItems && specInfo.spec.bomItems.length > 0
+                                    
+                                    return (
+                                        <SelectItem key={v.id} value={v.id}>
+                                            <div className="flex items-center gap-2">
+                                                <span>{v.fullName}</span>
+                                                {!hasBom && (
+                                                    <Badge variant="outline" className="text-[10px] px-1 h-4 text-red-600 border-red-200 bg-red-50">
+                                                        无BOM
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                        </SelectItem>
+                                    )
+                                })}
                             </SelectContent>
                         </Select>
                     )}
@@ -1048,7 +1127,8 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                             <ChevronLeft className="h-4 w-4" />
                         </Button>
                         <span className="text-sm font-medium px-2">
-                            {format(currentMonth, 'yyyy年MM月', { locale: zhCN })} - {format(addMonths(currentMonth, 1), 'yyyy年MM月', { locale: zhCN })}
+                            <span className="sm:hidden">{format(currentMonth, 'yyyy年MM月', { locale: zhCN })}</span>
+                            <span className="hidden sm:inline">{format(currentMonth, 'yyyy年MM月', { locale: zhCN })} - {format(addMonths(currentMonth, 1), 'yyyy年MM月', { locale: zhCN })}</span>
                         </span>
                         <Button variant="ghost" size="icon" onClick={handleNextMonth} className="h-8 w-8">
                             <ChevronRight className="h-4 w-4" />
@@ -1059,18 +1139,39 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
             <Card>
                 <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium flex justify-between items-center">
-                        <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm font-medium flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <span>库存日历 - {activeTab === "item" ? "物品视图" : "规格视图"}</span>
                             <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded">
                                 总容量: {currentStock}
                             </span>
+                            {activeTab === 'spec' && selectedVariantId && selectedVariantId !== 'ALL' && (() => {
+                                const variant = allVariants.find(v => v.id === selectedVariantId)
+                                if (!variant) return null
+                                const specInfo = specLookup.byId.get(selectedVariantId) || specLookup.byName.get(`${variant.productId}:${variant.name}`)
+                                const hasBom = specInfo?.spec?.bomItems && specInfo.spec.bomItems.length > 0
+                                
+                                if (!hasBom) {
+                                    return (
+                                        <Button 
+                                            variant="destructive" 
+                                            size="sm" 
+                                            className="h-6 text-xs px-2" 
+                                            onClick={() => window.open(`../products?edit=${encodeURIComponent(variant.productId)}`, '_blank')}
+                                        >
+                                            <Edit className="h-3 w-3 mr-1" />
+                                            未配置BOM (点击配置)
+                                        </Button>
+                                    )
+                                }
+                                return null
+                            })()}
                         </div>
-                        <div className="flex gap-4 text-xs font-normal text-muted-foreground">
-                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500"></span> 充足</span>
-                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500"></span> 紧张</span>
-                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500"></span> 缺货</span>
-                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-gray-200 border border-gray-300"></span> 过去</span>
+                        <div className="grid grid-cols-2 sm:flex gap-x-4 gap-y-1 text-xs font-normal text-muted-foreground">
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500"></span>充足</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500"></span>紧张</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500"></span>缺货</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-gray-200 border border-gray-300"></span>过去</span>
                         </div>
                     </CardTitle>
                 </CardHeader>
@@ -1086,7 +1187,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             </Card>
 
             <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-                <SheetContent className="w-[600px] sm:max-w-[600px] overflow-y-auto">
+                <SheetContent className="w-full sm:w-[600px] sm:max-w-[600px] overflow-y-auto">
                     <SheetHeader>
                         <SheetTitle>
                             {selectedDate && format(selectedDate, 'yyyy年MM月dd日', { locale: zhCN })} {dayTypeLabel}详情
@@ -1106,6 +1207,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                                 </div>
                             ) : (
+                                <div className="overflow-x-auto">
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
@@ -1171,14 +1273,17 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                         )}
                                     </TableBody>
                                 </Table>
+                                </div>
                             )
                         ) : (
                         <>
+                        <div className="overflow-x-auto">
                         <Table>
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>来源</TableHead>
                                     <TableHead>平台</TableHead>
+                                    <TableHead>商品/规格</TableHead>
                                     <TableHead>订单号</TableHead>
                                     <TableHead>状态</TableHead>
                                     <TableHead className="text-right">操作</TableHead>
@@ -1204,6 +1309,12 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                 <TableCell>
                                                     {order.isOnline ? getPlatformDisplay(order.platform) : "-"}
                                                 </TableCell>
+                                                <TableCell>
+                                                    <div className="flex flex-col max-w-[180px]">
+                                                        <span className="text-sm font-medium truncate" title={order.productName || ''}>{order.productName || '-'}</span>
+                                                        <span className="text-xs text-muted-foreground truncate" title={order.variantName || ''}>{order.variantName || '-'}</span>
+                                                    </div>
+                                                </TableCell>
                                                 <TableCell className="font-medium font-mono text-xs">
                                                     {getDisplayOrderNo(order)}
                                                 </TableCell>
@@ -1228,6 +1339,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                 )}
                             </TableBody>
                         </Table>
+                        </div>
 
                         {totalPages > 1 && (
                             <Pagination>

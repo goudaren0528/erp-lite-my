@@ -139,6 +139,7 @@ export async function getInventoryData(startStr: string, endStr: string) {
             hasSharedComponents,
             specs: specsWithStock.map(s => ({
                 id: s.id,
+                specId: s.specId,
                 name: s.name,
                 stock: s.stock,
                 bomItems: s.bomItems.map(b => ({
@@ -197,8 +198,16 @@ export async function getInventoryData(startStr: string, endStr: string) {
     // Fetch online orders that occupy stock
     const onlineOrders = await prisma.onlineOrder.findMany({
         where: {
-            rentStartDate: { lte: queryEnd },
-            returnDeadline: { gte: queryStart },
+            OR: [
+                {
+                    rentStartDate: { lte: queryEnd },
+                    returnDeadline: { gte: queryStart }
+                },
+                {
+                    rentStartDate: { lte: queryEnd },
+                    returnDeadline: null
+                }
+            ],
             status: {
                 notIn: ['TRADE_CLOSED', 'WAIT_BUYER_PAY', 'CANCELED', 'REFUNDED', '已关闭', '已取消', '已买断']
             }
@@ -213,6 +222,7 @@ export async function getInventoryData(startStr: string, endStr: string) {
             status: true,
             platform: true,
             productId: true,
+            specId: true,
             updatedAt: true,
             returnLatestLogisticsInfo: true,
             latestLogisticsInfo: true

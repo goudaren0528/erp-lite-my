@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot, fetchOrders, updateOrderMatchSpec } from "@/app/actions"
+import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot, fetchOrders, syncOrderMatchSpec, updateOrderMatchSpec } from "@/app/actions"
 import { format, addDays, differenceInDays } from "date-fns"
 import { Edit2, Plus, Search, ArrowUpDown, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy, Upload, Image as ImageIcon, Loader2 } from "lucide-react"
 import { closeOrder } from "@/app/actions"
@@ -120,6 +120,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
   const [filterRecipientName, setFilterRecipientName] = useState('')
   const [filterRecipientPhone, setFilterRecipientPhone] = useState('')
   const [isFilterExpanded, setIsFilterExpanded] = useState(false)
+  const [matchFilter, setMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
   
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
   const [filterSource, setFilterSource] = useState<string>('ALL')
@@ -202,7 +203,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, filterStatus, filterSource, filterPlatform, startDate, endDate, pageSize])
+  }, [filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, startDate, endDate, pageSize])
 
   useEffect(() => {
     setIsLoading(true)
@@ -222,6 +223,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
           filterDuration: filterDuration || undefined,
           filterRecipientName: filterRecipientName || undefined,
           filterRecipientPhone: filterRecipientPhone || undefined,
+          matchFilter,
           filterStatus,
           filterSource,
           filterPlatform,
@@ -240,7 +242,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
         setIsLoading(false)
       }
     })
-  }, [currentPage, pageSize, sortBy, sortDirection, filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, filterStatus, filterSource, filterPlatform, startDate, endDate, refreshKey])
+  }, [currentPage, pageSize, sortBy, sortDirection, filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, startDate, endDate, refreshKey])
 
   const resetFilters = () => {
     setFilterOrderNo('')
@@ -252,6 +254,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
     setFilterDuration('')
     setFilterRecipientName('')
     setFilterRecipientPhone('')
+    setMatchFilter('ALL')
     setFilterStatus('ALL')
     setFilterSource('ALL')
     setFilterPlatform('ALL')
@@ -340,6 +343,16 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
                   onChange={e => setFilterProduct(e.target.value)}
                   className="h-8 text-xs"
               />
+              <Select value={matchFilter} onValueChange={(v) => setMatchFilter(v as 'ALL' | 'MATCHED' | 'UNMATCHED')}>
+                  <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="匹配规格" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="ALL">全部</SelectItem>
+                      <SelectItem value="MATCHED">已匹配规格</SelectItem>
+                      <SelectItem value="UNMATCHED">未匹配规格</SelectItem>
+                  </SelectContent>
+              </Select>
               
               <Select value={filterPlatform} onValueChange={setFilterPlatform}>
                   <SelectTrigger className="w-full h-8 text-xs">
@@ -1211,7 +1224,20 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
     }
   }
 
-  const fallbackProductId = matchProductId || (order.productName ? products.find(p => p.name === order.productName)?.id : '') || ''
+  const matchedSpecInfo = (() => {
+    if (!order.specId) return null
+    for (const p of products) {
+      const s = p.specs?.find(s => s.id === order.specId || s.specId === order.specId)
+      if (s) return { productName: p.name, specName: s.name, optionId: s.id }
+    }
+    return null
+  })()
+
+  const fallbackProductId =
+    matchProductId ||
+    order.productId ||
+    (order.productName ? products.find(p => p.name === order.productName)?.id : '') ||
+    ''
   const activeProduct = products.find(p => p.id === fallbackProductId)
   const matchSpecOptions = activeProduct?.specs?.length
     ? activeProduct.specs.map(s => ({ id: s.id, name: s.name }))
@@ -1416,17 +1442,62 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
               const nextOptions = nextProduct?.specs?.length
                 ? nextProduct.specs.map(s => ({ id: s.id, name: s.name }))
                 : (Array.isArray(nextProduct?.variants) ? nextProduct?.variants : []).map((v: ProductVariant) => ({ id: v.specId || v.name, name: v.name }))
-              const matchedSpec = order.specId || (order.variantName ? nextOptions.find(v => v.name === order.variantName)?.id : "")
+              const matchedSpec = (() => {
+                if (order.specId) {
+                  if (nextProduct?.specs?.length) {
+                    const direct = nextProduct.specs.find(s => s.id === order.specId || s.specId === order.specId)
+                    return direct?.id || ""
+                  }
+                  return order.specId
+                }
+                if (order.variantName) {
+                  return nextOptions.find(v => v.name === order.variantName)?.id || ""
+                }
+                return ""
+              })()
               setMatchProductId(nextProductId)
               setMatchSpecValue(matchedSpec || "")
             }
           }}
         >
-            <PopoverTrigger asChild>
-                <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700">
-                    {order.specId ? `${order.productName || ''}${order.variantName ? ` - ${order.variantName}` : ''}` : <span className="text-gray-300 italic text-[10px]">点击选择</span>}
-                </div>
-            </PopoverTrigger>
+            <div className="flex items-center gap-2">
+                <PopoverTrigger asChild>
+                    <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700">
+                        {order.specId ? (matchedSpecInfo ? `${matchedSpecInfo.productName}${matchedSpecInfo.specName ? ` - ${matchedSpecInfo.specName}` : ""}` : `${order.productName || ''}${order.variantName ? ` - ${order.variantName}` : ''}`) : <span className="text-gray-300 italic text-[10px]">点击选择</span>}
+                    </div>
+                </PopoverTrigger>
+                {order.specId ? (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={async (e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            if (!order.productName || !order.variantName) {
+                                toast.error("该订单缺少设备信息，无法同步")
+                                return
+                            }
+                            const ok = window.confirm("确认同步匹配规格到所有设备信息完全一致且未匹配的订单？")
+                            if (!ok) return
+                            try {
+                                const res = await syncOrderMatchSpec(order.id)
+                                if (res?.success) {
+                                    toast.success(`已同步 ${res.updated} 条订单`)
+                                    onOrderUpdated()
+                                } else {
+                                    toast.error("同步失败")
+                                }
+                            } catch (err) {
+                                toast.error(err instanceof Error ? err.message : "同步失败")
+                            }
+                        }}
+                    >
+                        同步匹配规格
+                    </Button>
+                ) : null}
+            </div>
             <PopoverContent className="w-72 p-3">
                 <div className="space-y-3">
                     <div className="space-y-1">

@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { MainNav } from "@/components/main-nav";
 import { getCurrentUser } from "@/lib/auth";
+import { MobileNav } from "@/components/mobile-nav";
 
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
@@ -36,7 +37,12 @@ export default async function RootLayout({
                   <MainNav user={user} />
                 </aside>
               )}
-              <main className="flex-1 overflow-y-auto p-8 bg-background">
+              <main className="flex-1 overflow-y-auto p-4 sm:p-8 bg-background">
+                {user && (
+                  <div className="md:hidden mb-4 flex items-center">
+                    <MobileNav user={user} />
+                  </div>
+                )}
                 {children}
               </main>
             </div>

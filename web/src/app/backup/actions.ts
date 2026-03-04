@@ -42,13 +42,36 @@ export async function importData(formData: FormData) {
                     const configValue = Array.isArray(data.onlineOrdersConfig)
                         ? data.onlineOrdersConfig[0]
                         : data.onlineOrdersConfig
+                    
                     if (configValue && typeof configValue === "object") {
-                        const rawValue = (configValue as { value?: unknown }).value
-                        const value = typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue ?? {})
+                        // Handle both old format (array of key-value objects) and new direct format
+                        const rawValue = (configValue as { value?: unknown }).value ?? configValue
+                        
+                        // If it's the full config object directly (from new export)
+                        // it won't have a 'value' wrapper property, so we use it as is.
+                        // But if it's from the DB export format { key: "...", value: "..." }, we unwrap it.
+                        
+                        let valueToStore = rawValue
+                        
+                        // Compatibility: If importing old data where value might be a stringified JSON
+                        if (typeof rawValue === "string") {
+                            try {
+                                // Try to parse to check if it's valid JSON, but store as string
+                                JSON.parse(rawValue)
+                                valueToStore = rawValue
+                            } catch {
+                                // If not valid JSON, wrap it (unlikely for this specific config)
+                                valueToStore = JSON.stringify({ value: rawValue })
+                            }
+                        } else {
+                            // If it's an object, stringify it for the DB text field
+                            valueToStore = JSON.stringify(rawValue)
+                        }
+
                         await appConfigClient.upsert({
                             where: { key: "online_orders_sync_config" },
-                            update: { value },
-                            create: { key: "online_orders_sync_config", value }
+                            update: { value: valueToStore },
+                            create: { key: "online_orders_sync_config", value: valueToStore }
                         })
                         importedTypes.push("OnlineOrdersConfig(1)")
                     }

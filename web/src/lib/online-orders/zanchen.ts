@@ -199,6 +199,29 @@ function resolveSite(config: OnlineOrdersConfig | null, siteId: string) {
   return config.sites.find(site => site.name.includes("赞晨")) || null
 }
 
+function getOriginFromUrl(url: string) {
+  try {
+    return new URL(url).origin
+  } catch {
+    return ""
+  }
+}
+
+function getDefaultBrowserUserAgent() {
+  if (process.platform === "linux") {
+    return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  }
+  return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+function getDefaultExtraHeaders() {
+  return {
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3",
+    Connection: "keep-alive"
+  }
+}
+
 async function ensureContext(headlessConfig: boolean = false): Promise<BrowserContext> {
   if (runtime.context) {
     try {
@@ -230,6 +253,10 @@ async function ensureContext(headlessConfig: boolean = false): Promise<BrowserCo
     runtime.context = await chromium.launchPersistentContext(userDataDir, {
       headless: finalHeadless,
     viewport: { width: 1280, height: 720 },
+    userAgent: getDefaultBrowserUserAgent(),
+    locale: "zh-CN",
+    timezoneId: "Asia/Shanghai",
+    extraHTTPHeaders: getDefaultExtraHeaders(),
     args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -266,7 +293,11 @@ async function ensureOnLogin(page: Page, site: SiteConfig) {
   if (!site.loginUrl) return
   const currentUrl = page.url()
   if (currentUrl && currentUrl.startsWith(site.loginUrl)) return
-  await page.goto(site.loginUrl, { waitUntil: "domcontentloaded" })
+  const origin = getOriginFromUrl(site.loginUrl)
+  await page.goto(site.loginUrl, {
+    waitUntil: "domcontentloaded",
+    referer: origin ? `${origin}/` : undefined
+  })
 }
 
 async function tryLogin(page: Page, site: SiteConfig) {
@@ -471,6 +502,24 @@ async function waitRandom(scope: PageOrFrame, minMs: number, maxMs: number) {
   await scope.waitForTimeout(ms)
 }
 
+async function simulateHumanMouse(page: Page, minMoves = 2, maxMoves = 5) {
+  try {
+    const size =
+      page.viewportSize() ||
+      ({ width: 1280, height: 720 } as { width: number; height: number })
+    const moves = minMoves + Math.floor(Math.random() * (Math.max(maxMoves - minMoves, 0) + 1))
+    for (let i = 0; i < moves; i += 1) {
+      const x = Math.max(1, Math.floor(Math.random() * (size.width - 2)))
+      const y = Math.max(1, Math.floor(Math.random() * (size.height - 2)))
+      const steps = 8 + Math.floor(Math.random() * 12)
+      await page.mouse.move(x, y, { steps }).catch(() => void 0)
+      await page.waitForTimeout(100 + Math.floor(Math.random() * 250))
+    }
+  } catch {
+    void 0
+  }
+}
+
 async function resolveOrderFrame(page: Page, selectors: SelectorMap) {
   const container = getContainerSelector(selectors)
   if (!container) return page
@@ -633,6 +682,77 @@ async function openOrderList(page: Page, selectors: SelectorMap) {
     return
   }
   await page.click(orderTarget)
+}
+
+async function clickNav(page: Page, selector: string) {
+  const sel = sanitizeSelector(selector)
+  if (!sel) return false
+  for (let i = 0; i < 4; i += 1) {
+    try {
+      const loc = page.locator(sel).first()
+      await loc.waitFor({ state: "visible", timeout: 8000 })
+      await waitRandom(page, 900, 2200)
+      await loc.click({ timeout: 8000 })
+      await waitRandom(page, 900, 2200)
+      return true
+    } catch {
+      await page.waitForTimeout(800)
+    }
+  }
+  return false
+}
+
+async function openZanchenOrderListByClicks(page: Page) {
+  const steps = [
+    "#navheight > li:nth-child(5) > a",
+    "body > div.wb-subnav > div > div:nth-child(4)",
+    "body > div.wb-subnav > div > ul:nth-child(5) > li.menu_web.active > a",
+  ]
+  for (const sel of steps) {
+    const ok = await clickNav(page, sel)
+    if (!ok) return false
+  }
+
+  await page.waitForTimeout(600)
+  try {
+    await page.evaluate(() => window.scrollTo(0, 0)).catch(() => void 0)
+  } catch {
+    void 0
+  }
+
+  const allOrdersTab = "#myTab > li:nth-child(1) > a"
+  for (let i = 0; i < 6; i += 1) {
+    const ok = await clickNav(page, allOrdersTab)
+    if (ok) break
+    await page.waitForTimeout(800)
+  }
+  try {
+    await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => void 0)
+  } catch {
+    void 0
+  }
+  return true
+}
+
+async function ensureAllOrdersTab(page: Page) {
+  const allOrdersTab = "#myTab > li:nth-child(1) > a"
+  for (let i = 0; i < 6; i += 1) {
+    const isActive = await page
+      .evaluate(() => {
+        const li = document.querySelector("#myTab > li:nth-child(1)")
+        return !!li && li.classList.contains("active")
+      })
+      .catch(() => false)
+    if (isActive) return true
+
+    const ok = await clickNav(page, allOrdersTab)
+    if (ok) {
+      await page.waitForTimeout(600)
+      return true
+    }
+    await page.waitForTimeout(800)
+  }
+  return false
 }
 
 async function extractOrderSummary(page: PageOrFrame, selectors: SelectorMap) {
@@ -1984,8 +2104,15 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
         const currentPriority = statusPriority[existingOfflineOrder.status] ?? -1
         const newPriority = statusPriority[mappedStatus] ?? -1
         
-        // Always update logistics, but only update status if new status is advanced (>=)
-        const updateData: any = {
+        const updateData: {
+          logisticsCompany?: string
+          trackingNumber?: string
+          latestLogisticsInfo?: string
+          returnLogisticsCompany?: string
+          returnTrackingNumber?: string
+          returnLatestLogisticsInfo?: string
+          status?: string
+        } = {
           logisticsCompany: o.logisticsCompany || undefined,
           trackingNumber: o.trackingNumber || undefined,
           latestLogisticsInfo: o.latestLogisticsInfo || undefined,
@@ -2143,7 +2270,10 @@ async function runZanchenSync(siteId: string) {
           setStatus({ status: "running", message: "登录失败，正在刷新重试..." })
           
           if (site.loginUrl) {
-              await page.goto(site.loginUrl, { waitUntil: "domcontentloaded" }).catch(() => page.reload())
+              const origin = getOriginFromUrl(site.loginUrl)
+              await page
+                .goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
+                .catch(() => page.reload())
           } else {
               await page.reload({ waitUntil: "domcontentloaded" }).catch(() => void 0)
           }
@@ -2180,10 +2310,15 @@ async function runZanchenSync(siteId: string) {
   if (orderUrl && (currentOrderUrl.includes(orderUrl) || (orderUrl.startsWith("http") && currentOrderUrl.startsWith(orderUrl)))) {
       addLog("Already on order list page, skipping navigation.")
   } else {
-      await openOrderList(page, site.selectors)
+      const ok = await openZanchenOrderListByClicks(page)
+      if (!ok) {
+        await openOrderList(page, site.selectors)
+      }
   }
   
-  await waitRandom(page, 800, 1600)
+  await waitRandom(page, 1200, 3000)
+  await ensureAllOrdersTab(page)
+  await waitRandom(page, 600, 1800)
 
   const scope = await resolveOrderFrame(page, site.selectors)
 
@@ -2280,7 +2415,7 @@ async function runZanchenSync(siteId: string) {
     const pageOrders = await extractParsedOrders(page, scope, site.selectors, { concurrencyLimit })
     
     // Log parsed count to reassure user
-    addLog(`[System] Page ${pagesVisited + 1}: Parsed ${pageOrders.length} valid orders.`)
+    addLog(`[System] Page ${pagesVisited}: Parsed ${pageOrders.length} valid orders.`)
     if (pageOrders.length > 0) {
         addLog(`[System] Sample Order: ${pageOrders[0].orderNo} (${pageOrders[0].status})`)
     } else {
@@ -2337,6 +2472,14 @@ async function runZanchenSync(siteId: string) {
       pendingSaveOrders.push(order)
     }
 
+    await simulateHumanMouse(page)
+    await waitRandom(page, 1000, 3000)
+    if (pagesVisited > 0 && pagesVisited % 5 === 0) {
+      addLog(`[System] 已抓取 ${pagesVisited} 页，随机暂停一段时间...`)
+      await simulateHumanMouse(page, 2, 5)
+      await waitRandom(page, 3000, 5000)
+    }
+
     // Batch save every 200 orders
     if (pendingSaveOrders.length >= 200) {
         addLog(`[System] 触发批量保存，正在写入 ${pendingSaveOrders.length} 条订单...`)
@@ -2344,10 +2487,13 @@ async function runZanchenSync(siteId: string) {
         pendingSaveOrders = []
     }
 
-    if (maxPages > 0 && pagesVisited >= maxPages) break
-    if (!site.selectors.pagination_next_selector?.trim()) break
+    if (maxPages > 0 && pagesVisited >= maxPages) {
+        addLog(`[System] Reached maxPages=${maxPages}, stopping pagination.`)
+        break
+    }
 
-    let nextButton = await scope.$(site.selectors.pagination_next_selector).catch(() => null)
+    const configuredNextSelector = site.selectors.pagination_next_selector?.trim() || ""
+    let nextButton = configuredNextSelector ? await scope.$(configuredNextSelector).catch(() => null) : null
     let verified = false
     
     // 1. Check if configured selector matches "Next Page" text
@@ -2413,6 +2559,10 @@ async function runZanchenSync(siteId: string) {
         break
     }
 
+    const activePageBefore = await scope
+      .$eval("#foreach_page li.active", el => (el.textContent || "").trim())
+      .catch(() => "")
+
     const ariaDisabled = await nextButton.getAttribute("aria-disabled").catch(() => null)
     const disabledAttr = await nextButton.getAttribute("disabled").catch(() => null)
     const className = await nextButton.getAttribute("class").catch(() => "")
@@ -2458,6 +2608,19 @@ async function runZanchenSync(siteId: string) {
     
     if (container) {
       await scope.waitForSelector(container, { timeout: 10000 }).catch(() => void 0)
+    }
+    if (activePageBefore) {
+      await scope
+        .waitForFunction(
+          before => {
+            const el = document.querySelector("#foreach_page li.active")
+            const t = (el?.textContent || "").trim()
+            return !!t && t !== before
+          },
+          activePageBefore,
+          { timeout: 10000 }
+        )
+        .catch(() => void 0)
     }
     await waitRandom(page, 800, 1600)
    } catch (e) {
@@ -2561,7 +2724,7 @@ async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
         ? `${baseUrl}/online-orders/remote-auth`
         : "(未配置APP_URL - 请在环境变量中设置 NEXT_PUBLIC_APP_URL)"
         
-    const payload = {
+    const payload: { msgtype: "text"; text: { content: string } } = {
         msgtype: "text",
         text: {
             content: `[ERP Lite] 线上订单同步需要人工介入\n原因: ${message}\n远程处理链接: ${remoteLink}`
@@ -2573,14 +2736,15 @@ async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
     for (const url of config.webhookUrls) {
         try {
             // Feishu (Lark) adaptation
-            let finalPayload = payload
+            let finalPayload: { msgtype: "text"; text: { content: string } } | { msg_type: "text"; content: { text: string } } =
+              payload
             if (url.includes("feishu") || url.includes("larksuite")) {
                 finalPayload = {
                     msg_type: "text",
                     content: {
                         text: payload.text.content
                     }
-                } as any
+                }
             }
 
             console.log(`[Webhook] Sending to ${url}:`, JSON.stringify(finalPayload))

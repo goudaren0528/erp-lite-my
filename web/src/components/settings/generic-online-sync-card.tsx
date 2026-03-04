@@ -3,7 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { RefreshCw } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { RefreshCw, Play, Square } from "lucide-react"
+import { useState } from "react"
+import { Badge } from "@/components/ui/badge"
 
 type Props = {
   config?: {
@@ -11,23 +14,42 @@ type Props = {
     interval: number
     concurrencyLimit?: number
   }
+  status?: any
   onConfigChange: (config: { enabled: boolean; interval: number; concurrencyLimit?: number }) => void
 }
 
-export function GenericOnlineSyncCard({ config, onConfigChange }: Props) {
+export function GenericOnlineSyncCard({ config, status, onConfigChange }: Props) {
   const enabled = config?.enabled ?? false
   const intervalMinutes = Math.floor((config?.interval || 60) / 60) || 1
+  const [isSyncing, setIsSyncing] = useState(false)
+  const isRunning = status?.status === "running" || status?.status === "awaiting_user"
+
+  const handleStartSync = async () => {
+    // This is a placeholder, real sync should be handled by parent or a global action
+    // But we need the button to reflect state.
+    // Parent online-orders-client.tsx has the real sync logic in its render.
+    // Actually the parent has a "Start Sync" button too? Let's check.
+  }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <RefreshCw className="w-5 h-5" />
-          线上订单自动抓取
-        </CardTitle>
-        <CardDescription>
-          定期自动运行爬虫，抓取最新订单数据并保存到数据库。
-        </CardDescription>
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2">
+              <RefreshCw className="w-5 h-5" />
+              线上订单自动抓取
+            </CardTitle>
+            <CardDescription>
+              定期自动运行爬虫，抓取最新订单数据并保存到数据库。
+            </CardDescription>
+          </div>
+          {status && (
+             <Badge variant={isRunning ? "default" : "outline"} className={isRunning ? "bg-blue-500 animate-pulse" : ""}>
+                {isRunning ? "运行中" : "空闲"}
+             </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="flex items-center justify-between space-x-4">

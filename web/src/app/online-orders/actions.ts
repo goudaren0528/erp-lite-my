@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/db"
 import { Prisma } from "@prisma/client"
 import { matchDeviceMapping } from "@/lib/product-matching"
+import { revalidatePath } from "next/cache"
 
 export async function fetchOnlineOrders(params: {
     page: number;
@@ -14,6 +15,7 @@ export async function fetchOnlineOrders(params: {
     searchRecipient?: string;
     searchProduct?: string;
     filterPlatform?: string;
+    matchFilter?: 'ALL' | 'MATCHED' | 'UNMATCHED';
 }) {
     const {
         page,
@@ -25,12 +27,19 @@ export async function fetchOnlineOrders(params: {
         searchRecipient,
         searchProduct,
         filterPlatform,
+        matchFilter,
     } = params;
 
     const where: Prisma.OnlineOrderWhereInput = {};
 
     if (filterPlatform) {
         where.platform = filterPlatform;
+    }
+
+    if (matchFilter === 'MATCHED') {
+        where.specId = { not: null };
+    } else if (matchFilter === 'UNMATCHED') {
+        where.specId = null;
     }
 
     if (status && status !== 'ALL') {
@@ -55,8 +64,8 @@ export async function fetchOnlineOrders(params: {
     const orders = await prisma.onlineOrder.findMany({
         where,
         orderBy: {
-            createdAt: sortDirection
-        },
+            [sortBy]: sortDirection
+        } as Prisma.OnlineOrderOrderByWithRelationInput,
         skip: (page - 1) * pageSize,
         take: pageSize,
     });
@@ -86,10 +95,11 @@ export async function fetchOnlineOrders(params: {
     const formattedOrders = orders.map(o => {
         // Try to match product dynamically
         const matched = matchDeviceMapping(o.itemTitle || undefined, o.itemSku || undefined, products);
+        const keepManualProduct = Boolean(o.productId || o.specId)
 
         return {
             ...o,
-            productName: matched ? matched.deviceName : o.productName,
+            productName: keepManualProduct ? o.productName : (matched ? matched.deviceName : o.productName),
             createdAt: o.createdAt.toISOString(),
             updatedAt: o.updatedAt.toISOString(),
             rentStartDate: o.rentStartDate?.toISOString() || null,
@@ -192,6 +202,7 @@ export async function updateOnlineOrderMatchSpec(orderId: string, productId: str
             where: { id: orderId },
             data: { specId: null, productId: null }
         })
+        revalidatePath('/online-orders')
         return { success: true }
     }
 
@@ -202,7 +213,7 @@ export async function updateOnlineOrderMatchSpec(orderId: string, productId: str
                 ...(productId ? [{ productId, name: specValue }] : [])
             ]
         },
-        select: { id: true, productId: true }
+        include: { product: true }
     })
 
     if (!spec) {
@@ -211,7 +222,44 @@ export async function updateOnlineOrderMatchSpec(orderId: string, productId: str
 
     await prisma.onlineOrder.update({
         where: { id: orderId },
-        data: { specId: spec.id, productId: spec.productId }
+        data: {
+            specId: spec.id,
+            productId: spec.productId,
+        }
     })
+    revalidatePath('/online-orders')
     return { success: true }
+}
+
+export async function syncOnlineOrderMatchSpec(orderId: string) {
+    const source = await prisma.onlineOrder.findUnique({
+        where: { id: orderId },
+        select: {
+            id: true,
+            specId: true,
+            productId: true,
+            itemTitle: true,
+            itemSku: true,
+        }
+    })
+
+    if (!source) throw new Error("订单不存在")
+    if (!source.specId || !source.productId) throw new Error("该订单尚未匹配规格")
+    if (!source.itemTitle || !source.itemSku) throw new Error("该订单缺少商品标题或SKU，无法按标题+SKU同步")
+
+    const res = await prisma.onlineOrder.updateMany({
+        where: {
+            id: { not: source.id },
+            itemTitle: source.itemTitle,
+            itemSku: source.itemSku,
+            OR: [{ specId: null }, { productId: null }],
+        },
+        data: {
+            specId: source.specId,
+            productId: source.productId,
+        }
+    })
+
+    revalidatePath('/online-orders')
+    return { success: true, updated: res.count }
 }

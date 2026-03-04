@@ -9,7 +9,8 @@ import { getCurrentUser } from "@/lib/auth";
 // Helper to determine query mode based on database type
 // SQLite does not support 'insensitive' mode, but Postgres does.
 const isPostgres = process.env.DATABASE_URL?.startsWith('postgres');
-const dbMode: any = isPostgres ? 'insensitive' : undefined;
+const dbMode = isPostgres ? ('insensitive' as const) : undefined;
+const containsFilter = (value: string) => (dbMode ? ({ contains: value, mode: dbMode } as const) : ({ contains: value } as const))
 
 export async function fetchOrdersForExport({
     startDate,
@@ -21,6 +22,9 @@ export async function fetchOrdersForExport({
     status?: string;
 }) {
     const currentUser = await getCurrentUser();
+    if (!currentUser) {
+        throw new Error("未登录")
+    }
     const isAdmin = currentUser?.role === 'ADMIN';
     const canViewAllOrders = isAdmin || currentUser?.permissions?.includes('view_all_orders');
     
@@ -56,21 +60,106 @@ export async function fetchOrdersForExport({
     
     const orders = await prisma.order.findMany({
         where,
-        include: {
-            extensions: true,
-            logs: {
-                orderBy: { createdAt: 'desc' },
-                take: 1
-            }
+        select: {
+            id: true,
+            orderNo: true,
+            source: true,
+            platform: true,
+            status: true,
+            customerXianyuId: true,
+            sourceContact: true,
+            miniProgramOrderNo: true,
+            xianyuOrderNo: true,
+            productName: true,
+            variantName: true,
+            sn: true,
+            duration: true,
+            rentPrice: true,
+            deposit: true,
+            insurancePrice: true,
+            overdueFee: true,
+            totalAmount: true,
+            address: true,
+            recipientName: true,
+            recipientPhone: true,
+            logisticsCompany: true,
+            trackingNumber: true,
+            latestLogisticsInfo: true,
+            returnLogisticsCompany: true,
+            returnTrackingNumber: true,
+            returnLatestLogisticsInfo: true,
+            rentStartDate: true,
+            deliveryTime: true,
+            actualDeliveryTime: true,
+            completedAt: true,
+            returnDeadline: true,
+            remark: true,
+            creatorId: true,
+            creatorName: true,
+            createdAt: true,
+            updatedAt: true,
+            extensions: { select: { days: true, price: true } },
         },
         orderBy: { createdAt: 'desc' }
     });
     
-    return orders;
+    return orders.map(o => ({
+        ...o,
+        rentStartDate: o.rentStartDate ? o.rentStartDate.toISOString() : null,
+        deliveryTime: o.deliveryTime ? o.deliveryTime.toISOString() : null,
+        actualDeliveryTime: o.actualDeliveryTime ? o.actualDeliveryTime.toISOString() : null,
+        completedAt: o.completedAt ? o.completedAt.toISOString() : null,
+        returnDeadline: o.returnDeadline ? o.returnDeadline.toISOString() : null,
+        createdAt: o.createdAt.toISOString(),
+        updatedAt: o.updatedAt.toISOString(),
+    }));
+}
+
+export async function syncOrderMatchSpec(orderId: string) {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+        throw new Error("未登录")
+    }
+
+    const src = await prisma.order.findUnique({
+        where: { id: orderId },
+        select: {
+            id: true,
+            specId: true,
+            productId: true,
+            productName: true,
+            variantName: true,
+        }
+    })
+
+    if (!src) throw new Error("订单不存在")
+    if (!src.specId || !src.productId) throw new Error("该订单尚未匹配规格")
+    if (!src.productName || !src.variantName) throw new Error("该订单缺少设备信息，无法按设备信息同步")
+
+    const res = await prisma.order.updateMany({
+        where: {
+            id: { not: src.id },
+            productName: src.productName,
+            variantName: src.variantName,
+            OR: [{ specId: null }, { productId: null }],
+        },
+        data: {
+            specId: src.specId,
+            productId: src.productId,
+        }
+    })
+
+    revalidatePath('/orders')
+    return { success: true, updated: res.count }
 }
 
 async function resolveOrderSpec(order: { specId?: string | null; productId?: string | null; variantName?: string | null }) {
     if (order.specId) {
+        const byId = await prisma.productSpec.findUnique({
+            where: { id: order.specId },
+            include: { bomItems: true }
+        })
+        if (byId) return byId
         return prisma.productSpec.findFirst({
             where: { specId: order.specId },
             include: { bomItems: true }
@@ -280,13 +369,23 @@ export async function createOrder(formData: FormData) {
 
       // Calculate standard price
       let standardPrice = 0;
-      const productId = rawData.productId as string;
-      const variantName = rawData.variantName as string;
-      const specId = rawData.specId as string;
+      const productId = (rawData.productId as string) || "";
+      const variantName = (rawData.variantName as string) || "";
+      const inputSpecId = (rawData.specId as string) || "";
+      const specLookupKey = inputSpecId.trim()
+      const spec =
+          (specLookupKey
+              ? (await prisma.productSpec.findUnique({ where: { id: specLookupKey } })) ||
+                (await prisma.productSpec.findFirst({ where: { specId: specLookupKey } }))
+              : null) ||
+          (productId && variantName
+              ? await prisma.productSpec.findFirst({ where: { productId, name: variantName } })
+              : null)
+      const resolvedSpecDbId = spec?.id || ""
       const duration = Number(rawData.duration);
 
       if (duration > 0) {
-          standardPrice = await getStandardPriceSnapshot({ specId, productId, variantName, duration });
+          standardPrice = await getStandardPriceSnapshot({ specId: specLookupKey || undefined, productId, variantName, duration });
       }
 
       const order = await prisma.order.create({
@@ -306,7 +405,7 @@ export async function createOrder(formData: FormData) {
             productName: (rawData.productName as string) || '',
             productId: (rawData.productId as string) || null,
             variantName: (rawData.variantName as string) || '',
-            specId: (rawData.specId as string) || null,
+            specId: resolvedSpecDbId || null,
             sn: (rawData.sn as string) || null,
             
             duration: Number(rawData.duration) || 0,
@@ -357,6 +456,7 @@ export async function fetchOrders(params: {
     sortBy: 'status' | 'createdAt';
     sortDirection: 'asc' | 'desc';
     includeSystem?: boolean;
+    matchFilter?: 'ALL' | 'MATCHED' | 'UNMATCHED';
     filterOrderNo?: string;
     filterXianyuOrderNo?: string;
     filterCustomer?: string;
@@ -383,6 +483,7 @@ export async function fetchOrders(params: {
         sortBy,
         sortDirection,
         includeSystem,
+        matchFilter,
         filterOrderNo: rawFilterOrderNo,
         filterXianyuOrderNo: rawFilterXianyuOrderNo,
         filterCustomer: rawFilterCustomer,
@@ -419,23 +520,29 @@ export async function fetchOrders(params: {
         baseWhere = { creatorId: { not: 'system' } };
     }
 
+    if (matchFilter === 'MATCHED') {
+        baseWhere.specId = { not: null };
+    } else if (matchFilter === 'UNMATCHED') {
+        baseWhere.specId = null;
+    }
+
     if (filterOrderNo) {
         baseWhere.OR = [
-            { orderNo: { contains: filterOrderNo, mode: dbMode } as any },
-            { miniProgramOrderNo: { contains: filterOrderNo, mode: dbMode } as any }
+            { orderNo: containsFilter(filterOrderNo) },
+            { miniProgramOrderNo: containsFilter(filterOrderNo) }
         ];
     }
 
     if (filterXianyuOrderNo) {
-        baseWhere.xianyuOrderNo = { contains: filterXianyuOrderNo, mode: dbMode } as any;
+        baseWhere.xianyuOrderNo = containsFilter(filterXianyuOrderNo);
     }
 
     if (filterCustomer) {
-        baseWhere.customerXianyuId = { contains: filterCustomer, mode: dbMode } as any;
+        baseWhere.customerXianyuId = containsFilter(filterCustomer);
     }
 
     if (filterProduct) {
-        baseWhere.productName = { contains: filterProduct, mode: dbMode } as any;
+        baseWhere.productName = containsFilter(filterProduct);
     }
 
     if (filterDuration) {
@@ -446,7 +553,7 @@ export async function fetchOrders(params: {
     }
 
     if (filterRecipientName) {
-        baseWhere.recipientName = { contains: filterRecipientName, mode: dbMode } as any;
+        baseWhere.recipientName = containsFilter(filterRecipientName);
     }
 
     if (filterRecipientPhone) {
@@ -480,7 +587,7 @@ export async function fetchOrders(params: {
     if (filterCreator) {
         const creatorUsers = await prisma.user.findMany({
             where: {
-                name: { contains: filterCreator, mode: dbMode } as any
+                name: containsFilter(filterCreator)
             },
             select: { id: true }
         });
@@ -496,7 +603,7 @@ export async function fetchOrders(params: {
         const matchedPromoters = await prisma.promoter.findMany({
             where: {
                 OR: [
-                    { name: { contains: filterPromoter, mode: dbMode } as any },
+                    { name: containsFilter(filterPromoter) },
                     { phone: { contains: filterPromoter } }
                 ]
             },
@@ -506,7 +613,7 @@ export async function fetchOrders(params: {
         const promoterNames = matchedPromoters.map(p => p.name);
         baseWhere.OR = [
             ...(baseWhere.OR || []),
-            { sourceContact: { contains: filterPromoter, mode: dbMode } as any },
+            { sourceContact: containsFilter(filterPromoter) },
             ...(promoterIds.length > 0 ? [{ promoterId: { in: promoterIds } }] : []),
             ...(promoterNames.length > 0 ? [{ sourceContact: { in: promoterNames } }] : [])
         ];
@@ -725,9 +832,9 @@ export async function deletePromoter(promoterId: string) {
 
 async function getStandardPriceBySpec(specId: string, duration: number): Promise<number> {
     try {
-        const spec = await prisma.productSpec.findFirst({
-            where: { specId }
-        });
+        const spec =
+            (await prisma.productSpec.findUnique({ where: { id: specId } })) ||
+            (await prisma.productSpec.findFirst({ where: { specId } }))
         if (!spec || !spec.priceRules) return 0;
         const rules = JSON.parse(spec.priceRules) as Record<string, number>;
         const price = rules[String(duration)];
@@ -950,7 +1057,7 @@ export async function updateOrderMatchSpec(orderId: string, productId: string | 
     if (!specValue) {
         await prisma.order.update({
             where: { id: orderId },
-            data: { specId: null }
+            data: { specId: null, productId: null }
         })
         revalidatePath('/orders')
         return { success: true }
@@ -975,8 +1082,6 @@ export async function updateOrderMatchSpec(orderId: string, productId: string | 
         data: {
             specId: spec.id,
             productId: spec.productId,
-            productName: spec.product.name,
-            variantName: spec.name
         }
     })
     revalidatePath('/orders')

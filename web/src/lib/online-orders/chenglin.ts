@@ -3,6 +3,7 @@ import fs from "fs"
 import { chromium, type BrowserContext, type Page } from "playwright"
 import { loadConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
 import { schedulerLogger } from "./scheduler"
+import { prisma } from "@/lib/db"
 
 // Re-use types or define specific ones
 export type ChenglinStatus = {
@@ -10,6 +11,26 @@ export type ChenglinStatus = {
   message?: string
   needsAttention?: boolean
   logs?: string[]
+}
+
+type ChenglinParsedOrder = {
+  orderNo: string
+  customerName: string
+  recipientPhone: string
+  address: string
+  totalAmount: number
+  rentPrice: number
+  status: string
+  rentStartDate?: Date
+  returnDeadline?: Date
+  duration: number
+  platform: string
+  productName: string
+  variantName: string
+  logisticsCompany: string
+  trackingNumber: string
+  returnLogisticsCompany: string
+  returnTrackingNumber: string
 }
 
 type ChenglinRuntime = {
@@ -31,6 +52,87 @@ const runtime: ChenglinRuntime = globalForChenglin.chenglinRuntime ?? {
   shouldStop: false
 }
 globalForChenglin.chenglinRuntime = runtime
+
+function getOriginFromUrl(url: string) {
+  try {
+    return new URL(url).origin
+  } catch {
+    return ""
+  }
+}
+
+function getDefaultBrowserUserAgent() {
+  if (process.platform === "linux") {
+    return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  }
+  return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+function getDefaultExtraHeaders() {
+  return {
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3",
+    Connection: "keep-alive"
+  }
+}
+
+async function waitRandom(page: Page, minMs: number, maxMs: number) {
+  const span = Math.max(maxMs - minMs, 0)
+  const ms = minMs + Math.floor(Math.random() * (span + 1))
+  await page.waitForTimeout(ms)
+}
+
+async function simulateHumanMouse(page: Page, minMoves = 2, maxMoves = 5) {
+  try {
+    const size = page.viewportSize() || ({ width: 1280, height: 800 } as { width: number; height: number })
+    const moves = minMoves + Math.floor(Math.random() * (Math.max(maxMoves - minMoves, 0) + 1))
+    for (let i = 0; i < moves; i += 1) {
+      const x = Math.max(1, Math.floor(Math.random() * (size.width - 2)))
+      const y = Math.max(1, Math.floor(Math.random() * (size.height - 2)))
+      const steps = 8 + Math.floor(Math.random() * 12)
+      await page.mouse.move(x, y, { steps }).catch(() => void 0)
+      await page.waitForTimeout(100 + Math.floor(Math.random() * 250))
+    }
+  } catch {
+    void 0
+  }
+}
+
+function sanitizeSelector(raw?: string) {
+  const text = raw?.trim() || ""
+  if (!text) return ""
+  return text.replace(/([>+~]\s*)+$/g, "").replace(/,\s*$/g, "").trim()
+}
+
+async function clickNav(page: Page, selector: string) {
+  const sel = sanitizeSelector(selector)
+  if (!sel) return false
+  for (let i = 0; i < 4; i += 1) {
+    try {
+      const loc = page.locator(sel).first()
+      await loc.waitFor({ state: "visible", timeout: 8000 })
+      await simulateHumanMouse(page, 1, 2)
+      await waitRandom(page, 600, 1800)
+      await loc.click({ timeout: 8000 })
+      await waitRandom(page, 900, 2200)
+      return true
+    } catch {
+      await page.waitForTimeout(800)
+    }
+  }
+  return false
+}
+
+async function openChenglinOrderListByClicks(page: Page) {
+  const menu = "#app > div > div.sidebar-container > div > div.scrollbar-wrapper.el-scrollbar__wrap > div > ul > div:nth-child(4) > li > div"
+  const list = "#app > div > div.sidebar-container > div > div.scrollbar-wrapper.el-scrollbar__wrap > div > ul > div:nth-child(4) > li > ul > div:nth-child(1) > a > li"
+  const ok1 = await clickNav(page, menu)
+  if (!ok1) return false
+  const ok2 = await clickNav(page, list)
+  if (!ok2) return false
+  await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => void 0)
+  return true
+}
 
 function getLogFilePath() {
   const date = new Date().toISOString().split('T')[0]
@@ -142,6 +244,10 @@ async function ensureContext(headless: boolean): Promise<BrowserContext> {
       runtime.context = await chromium.launchPersistentContext(userDataDir, {
         headless: finalHeadless,
         viewport: { width: 1280, height: 800 },
+        userAgent: getDefaultBrowserUserAgent(),
+        locale: "zh-CN",
+        timezoneId: "Asia/Shanghai",
+        extraHTTPHeaders: getDefaultExtraHeaders(),
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -246,7 +352,8 @@ async function login(page: Page, site: SiteConfig) {
   // Check if already logged in
   if (await isOnLoginPage(page, site) || page.url() === "about:blank") {
      appendLog(`Navigating to login: ${site.loginUrl}`)
-     await page.goto(site.loginUrl, { waitUntil: "domcontentloaded" })
+     const origin = getOriginFromUrl(site.loginUrl)
+     await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
   }
 
   // Auto-fill if selectors exist
@@ -272,7 +379,7 @@ async function login(page: Page, site: SiteConfig) {
         if (await page.isVisible(login_button, { timeout: 2000 })) {
             appendLog("Clicking login button...")
             await page.click(login_button)
-            await page.waitForTimeout(2000)
+            await waitRandom(page, 1200, 2600)
         }
      } catch {}
   }
@@ -359,6 +466,53 @@ async function switchToAllOrdersTab(page: Page, selector: string) {
     }
 }
 
+async function setChenglinPageSize(page: Page) {
+    const perPageInputSelector =
+      "#pane-全部订单 > div.flex-c.jc-s > div:nth-child(2) > div > span.el-pagination__sizes > div > div > input"
+    for (let i = 0; i < 4; i += 1) {
+        try {
+            const input = page.locator(perPageInputSelector).first()
+            await input.waitFor({ state: "visible", timeout: 8000 })
+            await simulateHumanMouse(page, 1, 2)
+            await waitRandom(page, 600, 1800)
+            await input.click({ timeout: 8000, force: true })
+            await waitRandom(page, 120, 260)
+            await page.keyboard.press("ArrowDown").catch(() => void 0)
+            await waitRandom(page, 200, 450)
+
+            const clicked = await page
+              .evaluate(() => {
+                const dropdowns = Array.from(document.querySelectorAll<HTMLElement>("body .el-select-dropdown.el-popper"))
+                const visible = dropdowns.filter(el => {
+                  const style = window.getComputedStyle(el)
+                  const rect = el.getBoundingClientRect()
+                  return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0
+                })
+                const dropdown = visible[visible.length - 1]
+                if (!dropdown) return false
+
+                const items = Array.from(dropdown.querySelectorAll<HTMLElement>("li.el-select-dropdown__item"))
+                const enabled = items.filter(el => !el.classList.contains("is-disabled") && !el.getAttribute("disabled"))
+                if (enabled.length === 0) return false
+
+                const pick100 = enabled.find(el => (el.innerText || "").trim().includes("100"))
+                const target = pick100 || enabled[enabled.length - 1]
+                target.click()
+                return true
+              })
+              .catch(() => false)
+            if (!clicked) throw new Error("Dropdown option click failed")
+            appendLog("已设置每页数量，等待页面刷新...")
+            await page.waitForTimeout(6000)
+            return true
+        } catch (e) {
+            appendLog(`设置每页数量失败，重试中: ${e}`)
+            await page.waitForTimeout(1000)
+        }
+    }
+    return false
+}
+
 async function handlePopup(page: Page) {
     try {
         // Check for common popup texts
@@ -406,10 +560,10 @@ async function handlePopup(page: Page) {
     }
 }
 
-async function parseOrders(page: Page, site: SiteConfig): Promise<any[]> {
+async function parseOrders(page: Page, site: SiteConfig): Promise<ChenglinParsedOrder[]> {
     const rowSelector = site.selectors.order_row_selectors
     const templateSelector = site.selectors.order_row_selector_template
-    const parsedOrders: any[] = []
+    const parsedOrders: ChenglinParsedOrder[] = []
     
     if (!rowSelector && !templateSelector) {
         appendLog("No row selector configured, skipping parsing.")
@@ -432,27 +586,34 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<any[]> {
             await page.waitForSelector(firstSelector, { timeout: 10000 })
         } catch {
             appendLog(`Timeout waiting for first order row: ${firstSelector}`)
+            const fallbackRows = await page.$$("#pane-全部订单 table tbody tr.el-table__row, #pane-全部订单 table tbody tr").catch(() => [])
+            if (fallbackRows.length > 0) {
+                appendLog(`Fallback: found ${fallbackRows.length} table rows in #pane-全部订单`)
+                orderElements = fallbackRows
+            } else {
+                appendLog("Fallback: no rows found in #pane-全部订单")
+            }
         }
 
         let consecutiveMisses = 0
-        const MAX_CONSECUTIVE_MISSES = 3
+        const MAX_CONSECUTIVE_MISSES = 10
 
-        for (let i = start; i <= end; i += step) {
-            const currentSelector = templateSelector.replace("{i}", String(i))
-            try {
-                const element = await page.$(currentSelector)
-                if (element) {
-                    orderElements.push(element)
-                    consecutiveMisses = 0
-                } else {
-                    consecutiveMisses++
-                    if (consecutiveMisses >= MAX_CONSECUTIVE_MISSES) {
-                        appendLog(`Stopped scanning after ${MAX_CONSECUTIVE_MISSES} consecutive missing items at index ${i}.`)
-                        break
+        if (orderElements.length === 0) {
+            for (let i = start; i <= end; i += step) {
+                const currentSelector = templateSelector.replace("{i}", String(i))
+                try {
+                    const element = await page.$(currentSelector)
+                    if (element) {
+                        orderElements.push(element)
+                        consecutiveMisses = 0
+                    } else {
+                        consecutiveMisses++
+                        if (consecutiveMisses >= MAX_CONSECUTIVE_MISSES) {
+                            appendLog(`Stopped scanning after ${MAX_CONSECUTIVE_MISSES} consecutive missing items at index ${i}.`)
+                            break
+                        }
                     }
-                }
-            } catch (e) {
-                // ignore
+                } catch {}
             }
         }
     } else {
@@ -474,18 +635,20 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<any[]> {
             const fullText = await element.innerText()
             
             // 1. Order No
-            const orderNoText = await element.$eval(".sli-li span", el => el.innerText).catch(() => "")
-            let orderNoMatch = orderNoText.match(/订单编号[:：]?\s*(\d{10,})/)
+            const orderNoText = await element
+              .$eval(".sli-li span", el => (el as HTMLElement).innerText)
+              .catch(() => "")
+            const orderNoMatch = orderNoText.match(/订单编号[:：]?\s*([A-Za-z0-9]{8,})/)
             let orderNo = orderNoMatch ? orderNoMatch[1] : ""
             
             if (!orderNo) {
-                const match = fullText.match(/订单编号[:：]?\s*(\d{10,})/)
+                const match = fullText.match(/订单编号[:：]?\s*([A-Za-z0-9]{8,})/)
                 if (match) orderNo = match[1]
                 else continue // Skip if no order number
             }
 
             // 2. Product Name & Variant
-            const goodsNames = await element.$$eval(".goods_name", els => els.map(e => e.innerText))
+            const goodsNames = await element.$$eval(".goods_name", els => els.map(el => (el as HTMLElement).innerText))
             const productName = goodsNames[0] || ""
             const variantName = goodsNames[1] || ""
 
@@ -640,7 +803,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<any[]> {
     return parsedOrders
 }
 
-async function saveOrdersBatch(orders: any[]) {
+async function saveOrdersBatch(orders: ChenglinParsedOrder[]) {
     let savedCount = 0
     // Prisma upsert doesn't support createMany with update in one go easily without loop
     // But we can use transaction
@@ -648,7 +811,7 @@ async function saveOrdersBatch(orders: any[]) {
     
     // Using transaction for better performance
     try {
-        const operations = orders.map(order => 
+        const operations = orders.map(order =>
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
@@ -731,45 +894,26 @@ export async function startChenglinSync(siteId: string) {
     
     // Wait for any post-login redirects
     await page.waitForLoadState("domcontentloaded")
-    await page.waitForTimeout(2000)
+    await waitRandom(page, 1200, 3000)
     
     // Check for popup on Dashboard (immediately after login)
     await handlePopup(page)
+    await simulateHumanMouse(page)
 
-    if (targetSite.selectors.order_menu_link) {
-        const currentUrl = page.url()
-        const targetUrl = targetSite.selectors.order_menu_link
-        
-        appendLog(`Current URL: ${currentUrl}`)
-        appendLog(`Target Order Link: ${targetUrl}`)
-        
-        // Strict check to avoid false positives (e.g. dashboard url shouldn't match order list)
-        // Only skip if we are clearly on the order list page
-        const isAlreadyOnPage = currentUrl === targetUrl || (targetUrl.length > 10 && currentUrl.startsWith(targetUrl))
-        
-        if (isAlreadyOnPage) {
-             appendLog("Already on target order list page, skipping navigation.")
-        } else {
-             appendLog(`Navigating to order list...`)
-             try {
-                 await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 })
-                 
-                 // Wait for URL change to confirm we actually left dashboard
-                 // Sometimes SPA navigation needs time or explicit wait
-                 try {
-                    await page.waitForURL((url) => url.toString().includes('orderList'), { timeout: 10000 })
-                 } catch {
-                    appendLog("Warning: URL did not change to orderList after navigation. Retrying force navigation...")
-                    await page.goto(targetUrl, { waitUntil: "networkidle" })
-                 }
-                 
-                 await page.waitForTimeout(2000)
-             } catch (err) {
-                 appendLog(`Navigation failed: ${err}`)
-             }
+    appendLog("Opening order list via menu clicks...")
+    const clickOk = await openChenglinOrderListByClicks(page)
+    if (!clickOk) {
+        appendLog("Menu click navigation failed, falling back to configured order_menu_link if available.")
+        if (targetSite.selectors.order_menu_link) {
+            const targetUrl = targetSite.selectors.order_menu_link
+            try {
+                const origin = getOriginFromUrl(targetUrl)
+                await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000, referer: origin ? `${origin}/` : undefined })
+                await waitRandom(page, 1200, 3000)
+            } catch (err) {
+                appendLog(`Navigation failed: ${err}`)
+            }
         }
-    } else {
-        appendLog("No 'Order List URL' (order_menu_link) configured. Assuming we are on the right page.")
     }
     
     // Check for popup AGAIN after navigation (on Order List page)
@@ -780,6 +924,7 @@ export async function startChenglinSync(siteId: string) {
         // Double check popup again just in case it appeared late
         await handlePopup(page)
         await switchToAllOrdersTab(page, targetSite.selectors.all_orders_tab_selector)
+        await setChenglinPageSize(page)
     }
 
     let currentPage = 1
@@ -789,16 +934,20 @@ export async function startChenglinSync(siteId: string) {
     // But in some places it might be max_pages (snake_case)
     // We should check both to be safe
     // Cast to any to access potentially loose typed properties
-    const siteAny = targetSite as any
+    const siteAny = targetSite as unknown as { max_pages?: number | string }
     const configMaxPages = Number(targetSite.maxPages ?? siteAny.max_pages)
     const MAX_PAGES = !isNaN(configMaxPages) && configMaxPages > 0 ? configMaxPages : 50
     
     appendLog(`Max pages set to: ${MAX_PAGES} (Configured: ${targetSite.maxPages} or ${siteAny.max_pages})`)
     
     let hasMore = true
+    const stopThreshold = config?.stopThreshold ?? 20
+    let consecutiveFinalStateCount = 0
+    const finalStatuses = ["COMPLETED", "CLOSED", "BOUGHT_OUT", "CANCELED"]
+    appendLog(`Incremental stop threshold: ${stopThreshold}`)
     
     // Batch save buffer
-    let pendingSaveOrders: any[] = []
+    let pendingSaveOrders: ChenglinParsedOrder[] = []
     const BATCH_SIZE = 200
 
     while (hasMore && currentPage <= MAX_PAGES) {
@@ -809,7 +958,45 @@ export async function startChenglinSync(siteId: string) {
         }
 
         appendLog(`Processing page ${currentPage}...`)
+        await simulateHumanMouse(page)
+        await waitRandom(page, 800, 1600)
         const pageOrders = await parseOrders(page, targetSite)
+
+        if (stopThreshold > 0 && pageOrders.length > 0) {
+            const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean)
+            try {
+                const existingFinalOrders = await prisma.onlineOrder.findMany({
+                    where: {
+                        orderNo: { in: orderNos },
+                        platform: "诚赁",
+                        status: { in: finalStatuses }
+                    },
+                    select: { orderNo: true, status: true }
+                })
+                const finalSet = new Set(existingFinalOrders.map(o => o.orderNo))
+
+                let shouldStop = false
+                for (const order of pageOrders) {
+                    if (!order.orderNo) continue
+                    if (finalSet.has(order.orderNo)) {
+                        consecutiveFinalStateCount++
+                        if (consecutiveFinalStateCount >= stopThreshold) {
+                            appendLog(`已连续发现 ${consecutiveFinalStateCount} 个历史终态订单，触发增量同步停止阈值。`)
+                            shouldStop = true
+                            break
+                        }
+                    } else {
+                        consecutiveFinalStateCount = 0
+                    }
+                }
+                if (shouldStop) {
+                    hasMore = false
+                    break
+                }
+            } catch (e) {
+                appendLog(`增量阀值检查失败，继续全量抓取: ${e}`)
+            }
+        }
         
         if (pageOrders.length > 0) {
             pendingSaveOrders.push(...pageOrders)
@@ -821,6 +1008,12 @@ export async function startChenglinSync(siteId: string) {
 
         // Check for popup again during pagination (in case it appears randomly)
         await handlePopup(page)
+        await waitRandom(page, 1000, 3000)
+        if (currentPage > 0 && currentPage % 5 === 0) {
+            appendLog(`[System] 已抓取 ${currentPage} 页，随机暂停一段时间...`)
+            await simulateHumanMouse(page, 2, 5)
+            await waitRandom(page, 3000, 5000)
+        }
 
         // Check if batch size reached
         if (pendingSaveOrders.length >= BATCH_SIZE) {
@@ -862,9 +1055,11 @@ export async function startChenglinSync(siteId: string) {
                  
                  if (!isDisabled) {
                      appendLog(`Navigating to next page (Page ${currentPage + 1})...`)
-                     await nextBtn.click()
+                     await nextBtn.scrollIntoViewIfNeeded().catch(() => void 0)
+                     await waitRandom(page, 600, 1400)
+                     await nextBtn.click({ force: true })
                      // Wait for table to update. 
-                     await page.waitForTimeout(3000) 
+                     await waitRandom(page, 6000, 8000) 
                      currentPage++
                  } else {
                      appendLog("Next page button is disabled. Reached end of list.")

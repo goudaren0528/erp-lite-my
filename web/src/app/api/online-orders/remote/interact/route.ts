@@ -20,20 +20,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No active session for this site" }, { status: 404 })
     }
 
+    const toNum = (v: unknown) => {
+      if (typeof v === "number") return v
+      if (typeof v === "string" && v.trim() !== "") return Number(v)
+      return NaN
+    }
+
+    const px = toNum(x)
+    const py = toNum(y)
+    const dx = toNum(deltaX)
+    const dy = toNum(deltaY)
+
     if (type === "click") {
-      await page.mouse.click(x, y)
+      if (!Number.isFinite(px) || !Number.isFinite(py)) {
+        return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 })
+      }
+      await page.mouse.click(px, py, { delay: 45 })
     } else if (type === "mousemove") {
-      await page.mouse.move(x, y)
+      if (!Number.isFinite(px) || !Number.isFinite(py)) {
+        return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 })
+      }
+      await page.mouse.move(px, py)
     } else if (type === "mousedown") {
       await page.mouse.down()
     } else if (type === "mouseup") {
       await page.mouse.up()
     } else if (type === "type") {
-      if (text) await page.keyboard.type(text)
+      if (typeof text === "string" && text.length > 0) {
+        await page.keyboard.type(text, { delay: 90 })
+      }
     } else if (type === "press") {
       if (key) await page.keyboard.press(key)
     } else if (type === "scroll") {
-        await page.mouse.wheel(deltaX || 0, deltaY || 0)
+        await page.mouse.wheel(Number.isFinite(dx) ? dx : 0, Number.isFinite(dy) ? dy : 0)
     } else if (type === "reload") {
         await page.reload()
     } else if (type === "goto") {

@@ -55,6 +55,32 @@ chmod 777 ./public/uploads 2>/dev/null || echo "Warning: Could not chmod ./publi
 set -e
 
 echo "Starting application..."
+# Start Xvfb virtual display so headful Chrome can run on Linux without a real monitor
+if command -v Xvfb > /dev/null 2>&1; then
+  if [ -z "$DISPLAY" ]; then
+    Xvfb :99 -screen 0 1366x768x24 -ac +extension GLX +render -noreset &
+    XVFB_PID=$!
+    export DISPLAY=:99
+    i=0
+    while [ $i -lt 30 ]; do
+      if [ -S /tmp/.X11-unix/X99 ]; then
+        echo "Xvfb started on DISPLAY=:99 (pid=$XVFB_PID)"
+        break
+      fi
+      i=$((i + 1))
+      sleep 0.2
+    done
+    if [ ! -S /tmp/.X11-unix/X99 ]; then
+      echo "Xvfb failed to start (pid=$XVFB_PID). DISPLAY=:99 not available."
+      exit 1
+    fi
+  else
+    echo "DISPLAY is already set to $DISPLAY, skipping Xvfb startup."
+  fi
+else
+  echo "Xvfb not found, headful browser mode will not be available"
+fi
+
 # Use Next.js built-in start command via npm if standalone fails, or direct node if standalone
 if [ -f "server.js" ]; then
   exec node server.js

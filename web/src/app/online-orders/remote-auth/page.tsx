@@ -8,43 +8,67 @@ import { Loader2, RefreshCw, MousePointer2, Keyboard, MonitorPlay } from "lucide
 import { toast } from "sonner"
 
 export default function RemoteAuthPage() {
-  const [timestamp, setTimestamp] = useState(Date.now())
-  const [loading, setLoading] = useState(true)
+  const [timestamp, setTimestamp] = useState(1)
+  const [loading, setLoading] = useState(false)
   const [inputText, setInputText] = useState("")
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [isInteracting, setIsInteracting] = useState(false)
-  const [activeSite, setActiveSite] = useState("zanchen") // Default site
+  const [activeSite, setActiveSite] = useState("zanchen")
   const imgRef = useRef<HTMLImageElement>(null)
   const lastMousePos = useRef<{ x: number; y: number } | null>(null)
+  const lastMoveSentAt = useRef(0)
+  const actionQueue = useRef(Promise.resolve())
 
   // Pre-defined sites list (could be fetched from API in future)
   const sites = [
     { id: "zanchen", name: "赞晨" },
-    { id: "chenglin", name: "诚赁" }
+    { id: "chenglin", name: "诚赁" },
+    { id: "aolzu", name: "奥租" },
+    { id: "youpin", name: "优品租" },
+    { id: "llxzu", name: "零零享" },
+    { id: "rrz", name: "人人租" }
   ]
 
+  const [sessionActive, setSessionActive] = useState(true)
+
+  const triggerSync = async () => {
+    try {
+      await fetch(`/api/online-orders/zanchen/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteId: activeSite }),
+      })
+      toast.success("已触发同步，浏览器启动中...")
+    } catch {
+      toast.error("触发失败")
+    }
+  }
+
+  // Auto-refresh screenshot interval (single interval, 1s)
   useEffect(() => {
     let interval: NodeJS.Timeout
     if (autoRefresh && !isInteracting) {
-      interval = setInterval(() => {
-        setTimestamp(Date.now())
-      }, 1000)
+      interval = setInterval(() => setTimestamp((t) => t + 1), 1000)
     }
     return () => clearInterval(interval)
   }, [autoRefresh, isInteracting])
 
-  const sendAction = async (payload: any) => {
-    try {
-      await fetch("/api/online-orders/remote/interact", {
+  const sendAction = (payload: Record<string, unknown>) => {
+    const run = async () => {
+      const res = await fetch("/api/online-orders/remote/interact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...payload, siteId: activeSite }),
       })
-      // Refresh shortly after action
-      setTimeout(() => setTimestamp(Date.now()), 500)
-    } catch (e) {
-      console.error(e)
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      setTimeout(() => setTimestamp((t) => t + 1), 600)
     }
+
+    actionQueue.current = actionQueue.current.then(run, run)
+    return actionQueue.current
   }
 
   const getCoords = (e: React.MouseEvent) => {
@@ -66,50 +90,56 @@ export default function RemoteAuthPage() {
     setIsInteracting(true)
     const { x, y } = getCoords(e)
     lastMousePos.current = { x, y }
-    
-    // For simple click, we can just send move & down
-    // But to support drag, we need to track movement
+    lastMoveSentAt.current = Date.now()
+    // Only move to position on mousedown, don't send mousedown yet
+    // We'll decide click vs drag on mouseup
     sendAction({ type: "mousemove", x, y })
-    sendAction({ type: "mousedown" })
   }
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isInteracting) return
+    const now = Date.now()
+    if (now - lastMoveSentAt.current < 50) return
+    lastMoveSentAt.current = now
     const { x, y } = getCoords(e)
-    // Throttle? For now just send
     sendAction({ type: "mousemove", x, y })
   }
 
-  const handleMouseUp = (e: React.MouseEvent) => {
+  const handleMouseUp = async (e: React.MouseEvent) => {
     if (!isInteracting) return
     setIsInteracting(false)
     const { x, y } = getCoords(e)
-    
-    // Check for click (small movement, short time could be checked if we tracked time)
-    // Here we just check distance
-    const dist = lastMousePos.current 
-        ? Math.sqrt(Math.pow(x - lastMousePos.current.x, 2) + Math.pow(y - lastMousePos.current.y, 2)) 
-        : 0
-        
+
+    const dist = lastMousePos.current
+      ? Math.sqrt(Math.pow(x - lastMousePos.current.x, 2) + Math.pow(y - lastMousePos.current.y, 2))
+      : 0
+
     if (dist < 5) {
-        // It's a click
-        sendAction({ type: "click", x, y })
+      // Clean single click — move then click (Playwright mouse.click handles down+up internally)
+      await sendAction({ type: "mousemove", x, y })
+      await sendAction({ type: "click", x, y })
     } else {
-        // It's a drag release
-        sendAction({ type: "mouseup" })
+      // Drag: send mousedown at start, move, then mouseup at end
+      if (lastMousePos.current) {
+        await sendAction({ type: "mousedown" })
+      }
+      await sendAction({ type: "mousemove", x, y })
+      await sendAction({ type: "mouseup" })
     }
   }
 
   const handleType = () => {
     if (!inputText) return
     sendAction({ type: "type", text: inputText })
+      .then(() => toast.success("已发送文本"))
+      .catch(() => toast.error("发送失败"))
     setInputText("")
-    toast.success("已发送文本")
   }
 
   const handlePressKey = (key: string) => {
     sendAction({ type: "press", key })
-    toast.success(`已发送按键: ${key}`)
+      .then(() => toast.success(`已发送按键: ${key}`))
+      .catch(() => toast.error("发送失败"))
   }
 
   return (
@@ -126,9 +156,10 @@ export default function RemoteAuthPage() {
                 <button
                   key={site.id}
                   onClick={() => {
+                      setSessionActive(true)
                       setActiveSite(site.id)
                       setLoading(true)
-                      setTimestamp(Date.now())
+                      setTimestamp((t) => t + 1)
                   }}
                   className={`px-3 py-1 text-sm font-medium transition-colors ${
                     activeSite === site.id 
@@ -148,31 +179,49 @@ export default function RemoteAuthPage() {
             >
               {autoRefresh ? "自动刷新中" : "自动刷新已暂停"}
             </Button>
-            <Button size="sm" onClick={() => setTimestamp(Date.now())}>
-              <RefreshCw className="w-4 h-4 mr-1" />
-              刷新
+            <Button 
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                    if(confirm("确定要刷新远程网页吗？这相当于在远程浏览器按F5。")) {
+                        sendAction({ type: "reload" })
+                        toast.success("刷新指令已发送")
+                    }
+                }}
+                title="相当于在远程浏览器按F5"
+            >
+                <RefreshCw className="w-4 h-4 mr-1" />
+                F5刷新页面
+            </Button>
+            <Button size="sm" onClick={() => setTimestamp((t) => t + 1)}>
+              <MonitorPlay className="w-4 h-4 mr-1" />
+              刷新截图
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="bg-gray-100 rounded-lg overflow-hidden border relative flex justify-center">
-             {/* 
-                We use onDragStart false to prevent browser native image drag.
-                Use pointer events? React Mouse events work fine usually.
-             */}
+          <div className="bg-gray-100 rounded-lg overflow-hidden border relative flex justify-center min-h-[400px] items-center">
             <img
+              key={activeSite}
               ref={imgRef}
               src={`/api/online-orders/remote/screenshot?siteId=${activeSite}&t=${timestamp}`}
               alt="Remote Screen"
               className="max-w-full h-auto cursor-crosshair select-none active:cursor-grabbing"
               draggable={false}
-              onLoad={() => setLoading(false)}
+              onLoad={() => { setLoading(false); setSessionActive(true) }}
+              onError={() => { setSessionActive(false); setLoading(false) }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
             />
-            {loading && (
+            {!sessionActive && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-gray-100">
+                <p className="text-muted-foreground text-sm">浏览器未启动或会话不可用</p>
+                <Button size="sm" onClick={triggerSync}>启动 {sites.find(s => s.id === activeSite)?.name} 浏览器</Button>
+              </div>
+            )}
+            {loading && sessionActive && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-[1px]">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
               </div>
