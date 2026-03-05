@@ -40,6 +40,7 @@ import { closeOrder } from "@/app/actions"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { OrderForm } from "./order-form"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SearchableSelect } from "@/components/ui/searchable-select"
 import {
   Command,
   CommandGroup,
@@ -1200,6 +1201,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         "设备信息",
         order.productName || '-',
         order.variantName || '-',
+        `SN序列号: ${order.sn || '-'}`,
         "",
         "租期",
         `起: ${order.rentStartDate ? format(new Date(order.rentStartDate), 'yyyy-MM-dd') : '-'}`,
@@ -1511,39 +1513,31 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                 <div className="space-y-3">
                     <div className="space-y-1">
                         <Label className="text-xs">商品</Label>
-                        <Select
-                            value={fallbackProductId}
+                        <SearchableSelect
+                            options={products.map(p => ({ value: p.id, label: p.name }))}
+                            value={fallbackProductId || undefined}
                             onValueChange={(value) => {
                                 setMatchProductId(value)
                                 setMatchSpecValue('')
                             }}
-                        >
-                            <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="选择商品" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {products.map(p => (
-                                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                            placeholder="选择商品"
+                            searchPlaceholder="搜索商品..."
+                            triggerClassName="h-8 text-xs"
+                            className="w-64"
+                        />
                     </div>
                     <div className="space-y-1">
                         <Label className="text-xs">规格</Label>
-                        <Select
-                            value={matchSpecValue}
+                        <SearchableSelect
+                            options={matchSpecOptions.map(v => ({ value: v.id, label: v.name }))}
+                            value={matchSpecValue || undefined}
                             onValueChange={setMatchSpecValue}
+                            placeholder={fallbackProductId ? "选择规格" : "先选择商品"}
+                            searchPlaceholder="搜索规格..."
                             disabled={!fallbackProductId}
-                        >
-                            <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder={fallbackProductId ? "选择规格" : "先选择商品"} />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {matchSpecOptions.map(v => (
-                                    <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                            triggerClassName="h-8 text-xs"
+                            className="w-64"
+                        />
                     </div>
                     {matchSpecValue ? (
                         <div className="space-y-1">
@@ -1609,7 +1603,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         ) : null}
       </TableCell>
       <TableCell className="align-top">
-        <Select defaultValue={order.status} onValueChange={handleStatusChange}>
+        <Select value={order.status} onValueChange={handleStatusChange}>
           <SelectTrigger className={cn("w-[100px] h-8 text-xs text-white border-0", statusMap[order.status]?.color || 'bg-gray-400')}>
                   <SelectValue />
                 </SelectTrigger>
@@ -1752,6 +1746,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                                 <div className="pl-3 border-l-2 border-green-300 text-gray-700">
                                     <div>{order.productName || '-'}</div>
                                     <div className="text-gray-600">{order.variantName || '-'}</div>
+                                    <div className="text-gray-600">SN序列号: {order.sn || '-'}</div>
                                 </div>
                             </div>
                             

@@ -154,24 +154,129 @@ async function openAolzuOrderListByClicks(page: Page) {
 }
 
 async function setAolzuPageSizeTo50(page: Page) {
-  const sizer =
-    "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > div > div.ivu-page-options-sizer > div > div.ivu-select-selection > div > span"
-  const option50 =
-    "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > div > div.ivu-page-options-sizer > div > div.ivu-select-dropdown > ul.ivu-select-dropdown-list > li:nth-child(3)"
-  for (let i = 0; i < 4; i += 1) {
+  // Use user-provided exact selector for the sizer
+  const sizer = "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > div > div.ivu-page-options-sizer > div > div.ivu-select-selection > div > span"
+  const sizerSelection = "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > div > div.ivu-page-options-sizer > div > div.ivu-select-selection"
+  // Use user-provided exact selector for the 50/page option
+  const option50 = "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > div > div.ivu-page-options-sizer > div > div.ivu-select-dropdown > ul.ivu-select-dropdown-list > li:nth-child(3)"
+  
+  // Also keep generic selectors as fallback
+  // If default is 10/page, we can also look for that text
+  const genericSizer = ".ivu-page-options-sizer .ivu-select-selection"
+  
+  const isPageSize50 = async () => {
+      const valueTexts = [
+          "10 条/页",
+          "10条/页",
+          "20 条/页",
+          "20条/页",
+          "50 条/页",
+          "50条/页",
+          "100 条/页",
+          "100条/页"
+      ]
+      for (const text of valueTexts) {
+          const locator = page.locator(`text=${text}`).first()
+          try {
+              const visible = await locator.isVisible().catch(() => false)
+              if (!visible) continue
+              const actual = await locator.textContent()
+              if ((actual || "").includes("50")) return true
+          } catch {
+              continue
+          }
+      }
+      return false
+  }
+
+  for (let i = 0; i < 5; i += 1) {
     try {
       await simulateHumanScroll(page, 1, 2)
-      const ok = await clickNav(page, sizer)
-      if (!ok) throw new Error("Page size sizer click failed")
-      await waitRandom(page, 300, 900)
-      const ok2 = await clickNav(page, option50)
-      if (!ok2) throw new Error("Page size option click failed")
-      appendLog("已设置每页 50 条，等待页面刷新...")
-      await page.waitForTimeout(3000)
-      return true
+      
+      // 1. Find and click the sizer
+      let sizerEl = await page.waitForSelector(sizer, { timeout: 3000 }).catch(() => null)
+      if (!sizerEl) {
+           sizerEl = await page.waitForSelector(sizerSelection, { timeout: 3000 }).catch(() => null)
+      }
+      
+      if (!sizerEl) {
+           // Try generic sizer
+           sizerEl = await page.waitForSelector(genericSizer, { timeout: 3000 }).catch(() => null)
+      }
+      
+      // Try to find by text content if selector fails
+      if (!sizerEl) {
+           sizerEl = await page.waitForSelector("span:has-text('10 条/页')", { timeout: 2000 }).catch(() => null) ||
+                     await page.waitForSelector("span:has-text('10条/页')", { timeout: 2000 }).catch(() => null)
+      }
+      
+      if (!sizerEl) throw new Error("Page size sizer not found")
+      
+      // Try to click the center of the element to ensure dropdown opens
+      const box = await sizerEl.boundingBox()
+      if (box) {
+          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+      } else {
+          await sizerEl.click({ force: true })
+      }
+      await waitRandom(page, 500, 1200)
+      
+      // 2. Click the 50/page option
+      let clicked = false
+      
+      // Try specific option first
+      const optSpecific = await page.waitForSelector(option50, { state: 'visible', timeout: 2000 }).catch(() => null)
+      if (optSpecific) {
+          await optSpecific.click({ force: true })
+          clicked = true
+      }
+      
+      if (!clicked) {
+          // Dropdown might render in body; search globally for visible dropdown items
+          const optionInBody = await page.waitForSelector("body .ivu-select-dropdown .ivu-select-item:has-text('50')", { state: 'visible', timeout: 2000 }).catch(() => null)
+          if (optionInBody) {
+              await optionInBody.click({ force: true })
+              clicked = true
+          }
+      }
+      
+      if (!clicked) {
+          // Fallback options
+          const optionSelectors = [
+              "li.ivu-select-item:has-text('50 条/页')",
+              "li.ivu-select-item:has-text('50条/页')",
+              "li.ivu-select-item:has-text('50')",
+              ".ivu-select-dropdown-list li:nth-child(3)",
+              "body .ivu-select-dropdown .ivu-select-item:nth-child(3)"
+          ]
+          
+          for (const sel of optionSelectors) {
+              try {
+                  const opt = await page.waitForSelector(sel, { state: 'visible', timeout: 2000 })
+                  if (opt) {
+                      await opt.click({ force: true })
+                      clicked = true
+                      break
+                  }
+              } catch { continue }
+          }
+      }
+      
+      if (!clicked) throw new Error("Page size option '50' not found or not clickable")
+
+      appendLog("已点击 50 条/页，等待页面刷新...")
+      await page.waitForTimeout(1200)
+
+      if (await isPageSize50()) {
+          appendLog("已确认每页 50 条生效")
+          await page.waitForTimeout(1500)
+          return true
+      }
+
+      appendLog("未检测到 50 条/页生效，继续重试...")
     } catch (e) {
       appendLog(`设置每页条数失败，重试中: ${e}`)
-      await page.waitForTimeout(800)
+      await page.waitForTimeout(1500)
     }
   }
   return false
@@ -520,7 +625,13 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
 
     let orderElements: (import("playwright").ElementHandle<SVGElement | HTMLElement>)[] = []
 
-    if (templateSelector && templateSelector.includes("{i}")) {
+    try {
+        if (page.isClosed()) {
+            appendLog("Page is closed, cannot parse orders.")
+            return []
+        }
+        
+        if (templateSelector && templateSelector.includes("{i}")) {
         const start = site.selectors.order_row_index_start ? Number(site.selectors.order_row_index_start) : 1
         const end = site.selectors.order_row_index_end ? Number(site.selectors.order_row_index_end) : 20 
         const step = site.selectors.order_row_index_step ? Number(site.selectors.order_row_index_step) : 1
@@ -529,9 +640,11 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
         
         const firstSelector = templateSelector.replace("{i}", String(start))
         try {
+            // Use a short timeout to check for first element presence but don't crash if missing
+            // This is to allow for cases where page might be empty or loading slowly
             await page.waitForSelector(firstSelector, { timeout: 10000 })
         } catch {
-            appendLog(`Timeout waiting for first order row: ${firstSelector}`)
+            appendLog(`Timeout waiting for first order row: ${firstSelector}. Page might be empty or selector changed.`)
         }
 
         let consecutiveMisses = 0
@@ -540,7 +653,13 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
         for (let i = start; i <= end; i += step) {
             const currentSelector = templateSelector.replace("{i}", String(i))
             try {
-                const element = await page.$(currentSelector)
+                // Use page.$ which is safer than waitForSelector for optional elements
+                // and wrap in try-catch to handle potential target closed errors
+                const element = await page.$(currentSelector).catch(e => {
+                    appendLog(`Error querying selector ${currentSelector}: ${e}`)
+                    return null
+                })
+                
                 if (element) {
                     orderElements.push(element)
                     consecutiveMisses = 0
@@ -551,7 +670,9 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
                         break
                     }
                 }
-            } catch {}
+            } catch (e) {
+                appendLog(`Unexpected error scanning row ${i}: ${e}`)
+            }
         }
     } else {
         const selector = rowSelector || templateSelector || ""
@@ -656,70 +777,41 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
             }
 
             // 3. Status
-            let status = "UNKNOWN"
-            
-            const statusRules = [
-                { keywords: ["待审核", "审核中"], label: "PENDING_REVIEW" },
-                { keywords: ["待支付"], label: "WAIT_PAY" },
-                { keywords: ["待发货", "去发货"], label: "PENDING_SHIPMENT" }, // "去发货" seen in logs
-                { keywords: ["已发货"], label: "SHIPPED" },
-                { keywords: ["待收货", "已收货"], label: "PENDING_RECEIPT" }, // "已收货" seen in logs, likely means customer received, so RENTING?
-                // Wait, "已收货" usually means "Customer Received" -> "Renting" starts.
-                // Logs show "待收货 已收货" buttons? Or status text?
-                // Log 1: "展开 待收货 已收货 未结算" -> These look like buttons/actions.
-                // Log 3: "展开 待发货 取消订单 去发货" -> Status is likely "待发货"
-                
-                // Let's look for status keywords that are NOT buttons.
-                // Buttons often appear at the end or in a block.
-                // But fullText includes everything.
-                
-                // Priority: "已收货" -> RENTING (Customer has it)
-                { keywords: ["已收货", "租用中", "使用中"], label: "RENTING" },
-                
-                { keywords: ["归还中", "退租中", "已验机"], label: "RETURNING" },
-                { keywords: ["已完成", "已结清", "完结"], label: "COMPLETED" },
-                { keywords: ["已取消", "已关闭", "已拒绝", "取消订单"], label: "CLOSED" }, // "取消订单" might be button, need care
-                { keywords: ["已逾期", "逾期"], label: "OVERDUE" },
-                { keywords: ["买断", "已买断"], label: "BOUGHT_OUT" }
+            // Mapping based on actual Aolzu platform status text (left) -> internal status (right)
+            // 待付款 -> WAIT_PAY
+            // 待审核 -> PENDING_REVIEW
+            // 待发货 -> PENDING_SHIPMENT
+            // 待收货 -> PENDING_RECEIPT
+            // 租用中 / 租用中(即将逾期) / 待归还 -> RENTING
+            // 归还中 / 已归还 -> RETURNING
+            // 买断订单 -> BOUGHT_OUT
+            // 交易完成 -> COMPLETED
+            // 订单关闭 / 申请取消 / 售后订单 -> CLOSED
+            // 已逾期 -> OVERDUE
+            const statusRules: Array<{ keywords: string[]; value: string }> = [
+                { keywords: ["交易完成"],                          value: "COMPLETED" },
+                { keywords: ["买断订单"],                          value: "BOUGHT_OUT" },
+                { keywords: ["已逾期"],                            value: "OVERDUE" },
+                { keywords: ["订单关闭", "申请取消", "售后订单"],  value: "CLOSED" },
+                { keywords: ["已归还", "归还中"],                  value: "RETURNING" },
+                { keywords: ["租用中", "待归还"],                  value: "RENTING" },
+                { keywords: ["待收货"],                            value: "PENDING_RECEIPT" },
+                { keywords: ["待发货"],                            value: "PENDING_SHIPMENT" },
+                { keywords: ["待审核"],                            value: "PENDING_REVIEW" },
+                { keywords: ["待付款"],                            value: "WAIT_PAY" },
             ]
 
-            // Status detection logic needs refinement to avoid matching buttons
-            // But usually the status text is also present.
-            // "待发货" is present in Log 3.
-            // "待收货" is present in Log 1/2.
-            
-            // Special handling for "已收货" (Customer Received) vs "待收货" (Waiting for customer to receive)
-            // Order of checks matters
-            if (fullText.includes("已买断") || fullText.includes("买断订单")) {
-                status = "BOUGHT_OUT"
-            } else if (fullText.includes("已逾期")) {
-                status = "OVERDUE"
-            } else if (fullText.includes("已完成") || fullText.includes("已结清")) {
-                status = "COMPLETED"
-            } else if (fullText.includes("已取消") || fullText.includes("已关闭") || fullText.includes("审核拒绝")) {
-                status = "CLOSED"
-            } else if (fullText.includes("已收货") || fullText.includes("租用中")) {
-                status = "RENTING" 
-            } else if (fullText.includes("待收货")) {
-                status = "PENDING_RECEIPT"
-            } else if (fullText.includes("待发货") || fullText.includes("去发货")) {
-                status = "PENDING_SHIPMENT"
-            } else if (fullText.includes("待支付")) {
-                status = "WAIT_PAY"
-            } else if (fullText.includes("待审核") || fullText.includes("审核中")) {
-                status = "PENDING_REVIEW"
-            } else {
-                for (const rule of statusRules) {
-                    if (rule.keywords.some(k => fullText.includes(k))) {
-                        status = rule.label
-                        break 
-                    }
+            let status = "UNKNOWN"
+            for (const rule of statusRules) {
+                if (rule.keywords.some(k => fullText.includes(k))) {
+                    status = rule.value
+                    break
                 }
             }
-            
+
             if (status === "UNKNOWN") {
-                 const cleanText = fullText.replace(/\s+/g, ' ')
-                 appendLog(`[Warning] OrderNo: ${orderNo} has UNKNOWN status. Raw: ${cleanText}`)
+                const cleanText = fullText.replace(/\s+/g, ' ')
+                appendLog(`[Warning] OrderNo: ${orderNo} has UNKNOWN status. Raw: ${cleanText}`)
             }
             
             // 4. Money
@@ -948,6 +1040,11 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
             appendLog(`Error parsing order row: ${e}`)
         }
     }
+
+    } catch (e) {
+        appendLog(`Critical error in parseOrders: ${e}`)
+        return []
+    }
     
     return parsedOrders
 }
@@ -1011,9 +1108,8 @@ export async function startAolzuSync(siteId: string) {
         throw new Error(`Site ${siteId} not found in config`)
     }
 
-    const previousLogs = runtime.status.logs || []
     runtime.shouldStop = false;
-    updateStatus({ status: "running", message: "Starting...", logs: previousLogs, lastRunAt: new Date().toISOString() })
+    updateStatus({ status: "running", message: "Starting...", logs: [], lastRunAt: new Date().toISOString() })
     appendLog(`Starting sync for ${targetSite.name} (ID: ${targetSite.id})`)
 
     const headless = config?.headless ?? false 
@@ -1052,7 +1148,10 @@ export async function startAolzuSync(siteId: string) {
     }
     
     await handlePopup(page)
-    await setAolzuPageSizeTo50(page)
+    const pageSizeOk = await setAolzuPageSizeTo50(page)
+    if (!pageSizeOk) {
+        throw new Error("设置每页 50 条失败，停止同步。")
+    }
 
     let currentPage = 1
     const siteAny = targetSite as unknown as { max_pages?: number | string }

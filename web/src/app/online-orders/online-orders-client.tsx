@@ -40,6 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchableSelect } from "@/components/ui/searchable-select"
 import {
   Popover,
   PopoverContent,
@@ -1612,43 +1613,31 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                       <div className="space-y-3">
                                         <div className="space-y-1">
                                           <Label className="text-xs">商品</Label>
-                                          <Select
-                                            value={fallbackProductId}
+                                          <SearchableSelect
+                                            options={products.map(p => ({ value: p.id, label: p.name }))}
+                                            value={fallbackProductId || undefined}
                                             onValueChange={value => {
                                               setMatchProductId(value)
                                               setMatchSpecValue("")
                                             }}
-                                          >
-                                            <SelectTrigger className="h-8 text-xs">
-                                              <SelectValue placeholder="选择商品" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              {products.map(p => (
-                                                <SelectItem key={p.id} value={p.id}>
-                                                  {p.name}
-                                                </SelectItem>
-                                              ))}
-                                            </SelectContent>
-                                          </Select>
+                                            placeholder="选择商品"
+                                            searchPlaceholder="搜索商品..."
+                                            triggerClassName="h-8 text-xs"
+                                            className="w-64"
+                                          />
                                         </div>
                                         <div className="space-y-1">
                                           <Label className="text-xs">规格</Label>
-                                          <Select
-                                            value={matchSpecValue}
+                                          <SearchableSelect
+                                            options={matchOptions.map(v => ({ value: v.id, label: v.name }))}
+                                            value={matchSpecValue || undefined}
                                             onValueChange={setMatchSpecValue}
+                                            placeholder={fallbackProductId ? "选择规格" : "先选择商品"}
+                                            searchPlaceholder="搜索规格..."
                                             disabled={!fallbackProductId}
-                                          >
-                                            <SelectTrigger className="h-8 text-xs">
-                                              <SelectValue placeholder={fallbackProductId ? "选择规格" : "先选择商品"} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              {matchOptions.map(v => (
-                                                <SelectItem key={v.id} value={v.id}>
-                                                  {v.name}
-                                                </SelectItem>
-                                              ))}
-                                            </SelectContent>
-                                          </Select>
+                                            triggerClassName="h-8 text-xs"
+                                            className="w-64"
+                                          />
                                         </div>
                                         {matchSpecValue ? (
                                           <div className="space-y-1">

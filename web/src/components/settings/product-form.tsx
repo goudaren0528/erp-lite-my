@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Plus, Trash2 } from "lucide-react"
 import { saveProduct } from "@/app/actions"
 import { toast } from "sonner"
+import { SearchableSelect } from "@/components/ui/searchable-select"
 import {
   Select,
   SelectContent,
@@ -161,7 +162,7 @@ export function ProductForm({ initialData, onSuccess, itemTypes }: ProductFormPr
       const newVariants = [...variants]
       newVariants[vIndex].bomItems.push({
           id: Math.random().toString(36).substring(2),
-          itemTypeId: itemTypes[0]?.id || "",
+          itemTypeId: "",
           quantity: 1
       })
       setVariants(newVariants)
@@ -385,18 +386,15 @@ export function ProductForm({ initialData, onSuccess, itemTypes }: ProductFormPr
                                     )}
                                     {variant.bomItems.map((bom, bIndex) => (
                                         <div key={bom.id} className="flex items-center gap-1.5">
-                                            <Select value={bom.itemTypeId} onValueChange={(value) => handleBomChange(index, bIndex, 'itemTypeId', value)}>
-                                                <SelectTrigger className="h-7 text-xs bg-white flex-1 min-w-0">
-                                                    <SelectValue placeholder="选择物品" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {itemTypes.map(item => (
-                                                        <SelectItem key={item.id} value={item.id} className="text-xs">
-                                                            {item.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                            <SearchableSelect
+                                                options={itemTypes.map(item => ({ value: item.id, label: item.name }))}
+                                                value={bom.itemTypeId || undefined}
+                                                onValueChange={(value) => handleBomChange(index, bIndex, 'itemTypeId', value)}
+                                                placeholder="选择物品"
+                                                searchPlaceholder="搜索物品..."
+                                                triggerClassName="h-7 text-xs flex-1 min-w-0"
+                                                className="w-48"
+                                            />
                                             <div className="flex items-center gap-1 bg-white border rounded px-1 h-7">
                                                 <span className="text-[10px] text-muted-foreground">x</span>
                                                 <Input 

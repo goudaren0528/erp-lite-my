@@ -141,7 +141,6 @@ export async function syncOrderMatchSpec(orderId: string) {
             id: { not: src.id },
             productName: src.productName,
             variantName: src.variantName,
-            OR: [{ specId: null }, { productId: null }],
         },
         data: {
             specId: src.specId,

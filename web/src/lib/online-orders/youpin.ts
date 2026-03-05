@@ -706,34 +706,34 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
             }
 
             // 3. Status
+            // Mapping based on actual Youpin platform status text (left) -> internal status (right)
+            // 待审核 -> PENDING_REVIEW
+            // 待支付 -> WAIT_PAY
+            // 待发货 -> PENDING_SHIPMENT
+            // 租用中 -> RENTING
+            // 已归还 -> RETURNING
+            // 已买断 -> BOUGHT_OUT
+            // 已关闭 -> COMPLETED
+            // 取消申请 -> CLOSED
+            // 逾期订单 -> OVERDUE
+            const statusRules: Array<{ keywords: string[]; value: string }> = [
+                { keywords: ["已买断"],          value: "BOUGHT_OUT" },
+                { keywords: ["逾期订单"],         value: "OVERDUE" },
+                { keywords: ["已关闭"],           value: "COMPLETED" },
+                { keywords: ["取消申请"],         value: "CLOSED" },
+                { keywords: ["已归还"],           value: "RETURNING" },
+                { keywords: ["租用中"],           value: "RENTING" },
+                { keywords: ["待发货"],           value: "PENDING_SHIPMENT" },
+                { keywords: ["待支付"],           value: "WAIT_PAY" },
+                { keywords: ["待审核"],           value: "PENDING_REVIEW" },
+            ]
+
             let status = "UNKNOWN"
-            
-            // Log: "已签收 身份证已传 已签收"
-            // Log: "已发货"
-            // Log: "待发货"
-            
-            if (fullText.includes("已买断")) {
-                status = "BOUGHT_OUT"
-            } else if (fullText.includes("已逾期")) {
-                status = "OVERDUE"
-            } else if (fullText.includes("已完成") || fullText.includes("已结清")) {
-                status = "COMPLETED"
-            } else if (fullText.includes("已取消") || fullText.includes("已关闭") || fullText.includes("已拒绝")) {
-                status = "CLOSED"
-            } else if (fullText.includes("已签收") || fullText.includes("租用中") || fullText.includes("使用中")) {
-                status = "RENTING"
-            } else if (fullText.includes("待收货")) {
-                status = "PENDING_RECEIPT"
-            } else if (fullText.includes("已发货")) {
-                status = "SHIPPED" // Or PENDING_RECEIPT? System usually maps SHIPPED to "待收货" logic
-            } else if (fullText.includes("待发货") || fullText.includes("去发货")) {
-                status = "PENDING_SHIPMENT"
-            } else if (fullText.includes("待支付")) {
-                status = "WAIT_PAY"
-            } else if (fullText.includes("待审核") || fullText.includes("审核中")) {
-                status = "PENDING_REVIEW"
-            } else if (fullText.includes("归还中") || fullText.includes("退租中")) {
-                status = "RETURNING"
+            for (const rule of statusRules) {
+                if (rule.keywords.some(k => fullText.includes(k))) {
+                    status = rule.value
+                    break
+                }
             }
             
             // 4. Money

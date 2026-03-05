@@ -298,7 +298,6 @@ export async function syncOnlineOrderMatchSpec(orderId: string) {
             id: { not: source.id },
             itemTitle: source.itemTitle,
             itemSku: source.itemSku,
-            OR: [{ specId: null }, { productId: null }],
         },
         data: {
             specId: source.specId,
