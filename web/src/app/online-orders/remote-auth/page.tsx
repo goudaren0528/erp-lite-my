@@ -15,9 +15,16 @@ export default function RemoteAuthPage() {
   const [isInteracting, setIsInteracting] = useState(false)
   const [activeSite, setActiveSite] = useState("zanchen")
   const imgRef = useRef<HTMLImageElement>(null)
-  const lastMousePos = useRef<{ x: number; y: number } | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const lastDownPos = useRef<{ x: number; y: number } | null>(null)
+  const lastSentPos = useRef<{ x: number; y: number } | null>(null)
+  const lastFocusPos = useRef<{ x: number; y: number } | null>(null)
   const lastMoveSentAt = useRef(0)
   const actionQueue = useRef(Promise.resolve())
+  const isInteractingRef = useRef(false)
+  const pendingScreenshotRefreshRef = useRef(false)
+  const trailPointsRef = useRef<Array<{ x: number; y: number }>>([])
+  const trailClearTimerRef = useRef<number | null>(null)
 
   // Pre-defined sites list (could be fetched from API in future)
   const sites = [
@@ -53,7 +60,65 @@ export default function RemoteAuthPage() {
     return () => clearInterval(interval)
   }, [autoRefresh, isInteracting])
 
-  const sendAction = (payload: Record<string, unknown>) => {
+  useEffect(() => {
+    isInteractingRef.current = isInteracting
+    if (!isInteracting && pendingScreenshotRefreshRef.current) {
+      pendingScreenshotRefreshRef.current = false
+      setTimeout(() => setTimestamp((t) => t + 1), 200)
+    }
+  }, [isInteracting])
+
+  const ensureCanvasSize = () => {
+    const img = imgRef.current
+    const canvas = canvasRef.current
+    if (!img || !canvas) return
+    const rect = img.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
+    const w = Math.max(1, Math.round(rect.width * dpr))
+    const h = Math.max(1, Math.round(rect.height * dpr))
+    if (canvas.width !== w) canvas.width = w
+    if (canvas.height !== h) canvas.height = h
+    canvas.style.width = `${rect.width}px`
+    canvas.style.height = `${rect.height}px`
+  }
+
+  const clearTrail = () => {
+    trailPointsRef.current = []
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+  }
+
+  const drawTrail = () => {
+    ensureCanvasSize()
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    const pts = trailPointsRef.current
+    if (pts.length < 2) return
+    const dpr = window.devicePixelRatio || 1
+    ctx.lineJoin = "round"
+    ctx.lineCap = "round"
+    ctx.strokeStyle = "rgba(59, 130, 246, 0.75)"
+    ctx.lineWidth = 3 * dpr
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x * dpr, pts[0].y * dpr)
+    for (let i = 1; i < pts.length; i += 1) {
+      ctx.lineTo(pts[i].x * dpr, pts[i].y * dpr)
+    }
+    ctx.stroke()
+    const last = pts[pts.length - 1]
+    ctx.fillStyle = "rgba(59, 130, 246, 0.9)"
+    ctx.beginPath()
+    ctx.arc(last.x * dpr, last.y * dpr, 4 * dpr, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  const sendAction = (payload: Record<string, unknown>, options?: { delayAfterMs?: number }) => {
     const run = async () => {
       const res = await fetch("/api/online-orders/remote/interact", {
         method: "POST",
@@ -64,14 +129,21 @@ export default function RemoteAuthPage() {
         const text = await res.text().catch(() => "")
         throw new Error(text || `HTTP ${res.status}`)
       }
-      setTimeout(() => setTimestamp((t) => t + 1), 600)
+      if (isInteractingRef.current) {
+        pendingScreenshotRefreshRef.current = true
+      } else {
+        setTimeout(() => setTimestamp((t) => t + 1), 600)
+      }
+      if (options?.delayAfterMs && options.delayAfterMs > 0) {
+        await new Promise((r) => setTimeout(r, options.delayAfterMs))
+      }
     }
 
     actionQueue.current = actionQueue.current.then(run, run)
     return actionQueue.current
   }
 
-  const getCoords = (e: React.MouseEvent) => {
+  const getCoords = (clientX: number, clientY: number) => {
     const img = imgRef.current
     if (!img) return { x: 0, y: 0 }
     
@@ -80,64 +152,136 @@ export default function RemoteAuthPage() {
     const scaleY = img.naturalHeight / rect.height
     
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
     }
   }
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const getDisplayCoords = (clientX: number, clientY: number) => {
+    const img = imgRef.current
+    if (!img) return { x: 0, y: 0 }
+    const rect = img.getBoundingClientRect()
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    }
+  }
+
+  const handlePointerDown = (e: React.PointerEvent) => {
     e.preventDefault()
+    imgRef.current?.setPointerCapture?.(e.pointerId)
     setIsInteracting(true)
-    const { x, y } = getCoords(e)
-    lastMousePos.current = { x, y }
-    lastMoveSentAt.current = Date.now()
-    // Only move to position on mousedown, don't send mousedown yet
-    // We'll decide click vs drag on mouseup
-    sendAction({ type: "mousemove", x, y })
-  }
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isInteracting) return
-    const now = Date.now()
-    if (now - lastMoveSentAt.current < 50) return
-    lastMoveSentAt.current = now
-    const { x, y } = getCoords(e)
-    sendAction({ type: "mousemove", x, y })
-  }
-
-  const handleMouseUp = async (e: React.MouseEvent) => {
-    if (!isInteracting) return
-    setIsInteracting(false)
-    const { x, y } = getCoords(e)
-
-    const dist = lastMousePos.current
-      ? Math.sqrt(Math.pow(x - lastMousePos.current.x, 2) + Math.pow(y - lastMousePos.current.y, 2))
-      : 0
-
-    if (dist < 5) {
-      // Clean single click — move then click (Playwright mouse.click handles down+up internally)
-      await sendAction({ type: "mousemove", x, y })
-      await sendAction({ type: "click", x, y })
-    } else {
-      // Drag: send mousedown at start, move, then mouseup at end
-      if (lastMousePos.current) {
-        await sendAction({ type: "mousedown" })
-      }
-      await sendAction({ type: "mousemove", x, y })
-      await sendAction({ type: "mouseup" })
+    if (trailClearTimerRef.current) {
+      window.clearTimeout(trailClearTimerRef.current)
+      trailClearTimerRef.current = null
     }
+    trailPointsRef.current = [getDisplayCoords(e.clientX, e.clientY)]
+    drawTrail()
+    const { x, y } = getCoords(e.clientX, e.clientY)
+    lastDownPos.current = { x, y }
+    lastSentPos.current = { x, y }
+    lastMoveSentAt.current = Date.now()
+    void sendAction({ type: "mousedown", x, y }, { delayAfterMs: 16 + Math.floor(Math.random() * 20) })
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isInteracting) return
+    e.preventDefault()
+    const now = Date.now()
+    if (now - lastMoveSentAt.current < 30) return
+    lastMoveSentAt.current = now
+    const disp = getDisplayCoords(e.clientX, e.clientY)
+    const pts = trailPointsRef.current
+    const last = pts[pts.length - 1]
+    const ddx = disp.x - (last?.x ?? disp.x)
+    const ddy = disp.y - (last?.y ?? disp.y)
+    const d = Math.sqrt(ddx * ddx + ddy * ddy)
+    if (d >= 2) {
+      pts.push(disp)
+      if (pts.length > 240) pts.splice(0, pts.length - 240)
+      drawTrail()
+    }
+    const { x, y } = getCoords(e.clientX, e.clientY)
+    const prev = lastSentPos.current
+    lastSentPos.current = { x, y }
+    if (!prev) {
+      void sendAction({ type: "mousemove", x, y }, { delayAfterMs: 10 + Math.floor(Math.random() * 18) })
+      return
+    }
+    const dx = x - prev.x
+    const dy = y - prev.y
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const steps = Math.max(1, Math.min(18, Math.ceil(dist / 12)))
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+      const jitter = (Math.random() - 0.5) * 2.2
+      const ix = prev.x + dx * ease
+      const iy = prev.y + dy * ease + jitter
+      void sendAction(
+        { type: "mousemove", x: ix, y: iy },
+        { delayAfterMs: 8 + Math.floor(Math.random() * 20) }
+      )
+    }
+  }
+
+  const handlePointerUp = async (e: React.PointerEvent) => {
+    if (!isInteracting) return
+    e.preventDefault()
+    setIsInteracting(false)
+    const { x, y } = getCoords(e.clientX, e.clientY)
+    lastFocusPos.current = { x, y }
+    try {
+      imgRef.current?.releasePointerCapture?.(e.pointerId)
+    } catch {
+      // ignore
+    }
+    const disp = getDisplayCoords(e.clientX, e.clientY)
+    trailPointsRef.current.push(disp)
+    drawTrail()
+    trailClearTimerRef.current = window.setTimeout(() => {
+      clearTrail()
+      trailClearTimerRef.current = null
+    }, 1200)
+    await sendAction({ type: "mousemove", x, y }, { delayAfterMs: 12 + Math.floor(Math.random() * 24) })
+    await sendAction({ type: "mouseup", x, y }, { delayAfterMs: 30 + Math.floor(Math.random() * 60) })
+  }
+
+  const handlePointerCancel = (e: React.PointerEvent) => {
+    if (!isInteracting) return
+    e.preventDefault()
+    setIsInteracting(false)
+    trailClearTimerRef.current = window.setTimeout(() => {
+      clearTrail()
+      trailClearTimerRef.current = null
+    }, 800)
+    void sendAction({ type: "mouseup" })
   }
 
   const handleType = () => {
     if (!inputText) return
-    sendAction({ type: "type", text: inputText })
+    const focus = lastFocusPos.current
+    const run = async () => {
+      if (focus) {
+        await sendAction({ type: "click", x: focus.x, y: focus.y })
+      }
+      await sendAction({ type: "type", text: inputText })
+    }
+    run()
       .then(() => toast.success("已发送文本"))
       .catch(() => toast.error("发送失败"))
     setInputText("")
   }
 
   const handlePressKey = (key: string) => {
-    sendAction({ type: "press", key })
+    const focus = lastFocusPos.current
+    const run = async () => {
+      if (focus) {
+        await sendAction({ type: "click", x: focus.x, y: focus.y })
+      }
+      await sendAction({ type: "press", key })
+    }
+    run()
       .then(() => toast.success(`已发送按键: ${key}`))
       .catch(() => toast.error("发送失败"))
   }
@@ -201,19 +345,23 @@ export default function RemoteAuthPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="bg-gray-100 rounded-lg overflow-hidden border relative flex justify-center min-h-[400px] items-center">
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 z-10 pointer-events-none"
+            />
             <img
               key={activeSite}
               ref={imgRef}
               src={`/api/online-orders/remote/screenshot?siteId=${activeSite}&t=${timestamp}`}
               alt="Remote Screen"
-              className="max-w-full h-auto cursor-crosshair select-none active:cursor-grabbing"
+              className="max-w-full h-auto cursor-crosshair select-none active:cursor-grabbing touch-none"
               draggable={false}
               onLoad={() => { setLoading(false); setSessionActive(true) }}
               onError={() => { setSessionActive(false); setLoading(false) }}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
             />
             {!sessionActive && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-gray-100">

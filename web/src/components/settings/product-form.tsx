@@ -203,7 +203,7 @@ export function ProductForm({ initialData, onSuccess, itemTypes }: ProductFormPr
       if (specId) seenSpecIds.add(specId)
 
       if (!v.bomItems || v.bomItems.length === 0) {
-        toast.error(`第 ${i + 1} 个规格必须配置BOM`)
+        toast.error(`第 ${i + 1} 个规格必须配置规格资产`)
         return
       }
 
@@ -212,7 +212,7 @@ export function ProductForm({ initialData, onSuccess, itemTypes }: ProductFormPr
         .map(b => ({ itemTypeId: b.itemTypeId, quantity: Number(b.quantity) || 1 }))
 
       if (bomItems.length === 0) {
-        toast.error(`第 ${i + 1} 个规格必须配置BOM`)
+        toast.error(`第 ${i + 1} 个规格必须配置规格资产`)
         return
       }
 
@@ -363,7 +363,7 @@ export function ProductForm({ initialData, onSuccess, itemTypes }: ProductFormPr
                         {/* Left: BOM Items */}
                         <div className="col-span-12 md:col-span-5 space-y-2 border-r border-slate-200 pr-4 border-dashed">
                             <div className="flex justify-between items-center">
-                                <Label className="text-xs font-medium text-slate-700">BOM 物品构成</Label>
+                                <Label className="text-xs font-medium text-slate-700">规格资产 构成</Label>
                                 <Button 
                                     type="button" 
                                     variant="ghost" 
@@ -381,7 +381,7 @@ export function ProductForm({ initialData, onSuccess, itemTypes }: ProductFormPr
                             ) : (
                                 <div className="space-y-1.5">
                                     {variant.bomItems.length === 0 && (
-                                        <div className="text-[10px] text-muted-foreground italic py-1">暂无 BOM 物品</div>
+                                        <div className="text-[10px] text-muted-foreground italic py-1">暂无 规格资产</div>
                                     )}
                                     {variant.bomItems.map((bom, bIndex) => (
                                         <div key={bom.id} className="flex items-center gap-1.5">

@@ -9,7 +9,7 @@ import ReactMarkdown from 'react-markdown'
 import { getEnabledManualChapters } from "@/app/system/manual/actions"
 
 export function UserManual({ collapsed }: { collapsed?: boolean }) {
-    const [chapters, setChapters] = useState<any[]>([])
+    const [chapters, setChapters] = useState<Array<{ id: string; title: string; content: string }>>([])
     const [isLoading, setIsLoading] = useState(false)
     const [activeChapterId, setActiveChapterId] = useState<string | null>(null)
     const [open, setOpen] = useState(false)

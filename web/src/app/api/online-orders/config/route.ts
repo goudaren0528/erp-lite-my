@@ -29,7 +29,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const data = await req.json()
+    const data: unknown = await req.json()
     
     // Sanitize incoming data URLs
     const sanitizeUrl = (value: string) => {
@@ -41,17 +41,25 @@ export async function POST(req: Request) {
         u = u.replace(/^https?:\/\/(https?)\/\//, "$1://")
         return u
     }
-    if (data.sites) {
-        data.sites.forEach((site: any) => {
-             if (site.loginUrl) {
-                  site.loginUrl = sanitizeUrl(site.loginUrl)
-             }
-        });
-    }
-    if (data.webhookUrls) {
-        data.webhookUrls = data.webhookUrls.map((url: string) => {
-            return sanitizeUrl(url)
-        });
+    if (data && typeof data === "object") {
+        const obj = data as Record<string, unknown>
+
+        if (Array.isArray(obj.sites)) {
+            obj.sites.forEach((site) => {
+                if (!site || typeof site !== "object") return
+                const siteObj = site as Record<string, unknown>
+                const loginUrl = siteObj.loginUrl
+                if (typeof loginUrl === "string" && loginUrl.trim()) {
+                    siteObj.loginUrl = sanitizeUrl(loginUrl)
+                }
+            })
+        }
+
+        if (Array.isArray(obj.webhookUrls)) {
+            obj.webhookUrls = obj.webhookUrls
+                .map((url) => (typeof url === "string" ? sanitizeUrl(url) : ""))
+                .filter(Boolean)
+        }
     }
 
     // Validate or merge? For now just overwrite or merge top level
@@ -60,7 +68,11 @@ export async function POST(req: Request) {
     if (existing?.value) {
         try {
             const old = JSON.parse(existing.value)
-            newConfig = { ...old, ...data }
+            if (typeof old === 'object' && old !== null) {
+                newConfig = { ...old, ...(data as object) }
+            } else {
+                newConfig = { ...(data as object) }
+            }
         } catch {}
     }
 

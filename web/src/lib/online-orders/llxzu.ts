@@ -38,6 +38,8 @@ type LlxzuParsedOrder = {
   platform: string
   productName: string
   variantName: string
+  itemTitle: string
+  itemSku: string
   logisticsCompany?: string
   trackingNumber: string
   promotionChannel: string
@@ -1403,6 +1405,8 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                 platform: "零零享", 
                 productName,
                 variantName,
+                itemTitle: productName,
+                itemSku: variantName,
                 logisticsCompany,
                 trackingNumber,
                 promotionChannel

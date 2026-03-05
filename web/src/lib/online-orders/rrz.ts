@@ -110,6 +110,8 @@ type RrzParsedOrder = {
   merchantName?: string
   productName: string
   variantName: string
+  itemTitle: string
+  itemSku: string
   logisticsCompany: string
   trackingNumber: string
   latestLogisticsInfo?: string
@@ -1381,7 +1383,9 @@ async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expected
             latestLogisticsInfo: "",
             returnLogisticsCompany: base.return_logistic_shipper_code || "",
             returnTrackingNumber: base.return_logistic_number || "",
-            returnLatestLogisticsInfo: ""
+            returnLatestLogisticsInfo: "",
+            itemTitle: spu.spu_name || "",
+            itemSku: spu.sku_name || ""
         }
     })
 
@@ -2499,6 +2503,8 @@ async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expected
                 })(),
                 productName,
                 variantName,
+                itemTitle: productName,
+                itemSku: variantName,
                 logisticsCompany,
                 trackingNumber,
                 latestLogisticsInfo,

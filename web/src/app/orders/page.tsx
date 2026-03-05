@@ -28,7 +28,7 @@ type ProductRaw = {
     name: string;
     accessories: string;
     insurancePrice: number;
-    priceRules: any;
+    priceRules: unknown;
     productId: string;
     bomItems: { itemTypeId: string; quantity: number; itemType: { name: string } }[];
   }[];

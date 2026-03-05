@@ -14,6 +14,7 @@ export async function fetchOnlineOrders(params: {
     searchOrderNo?: string;
     searchRecipient?: string;
     searchProduct?: string;
+    searchSn?: string;
     filterPlatform?: string;
     matchFilter?: 'ALL' | 'MATCHED' | 'UNMATCHED';
 }) {
@@ -26,6 +27,7 @@ export async function fetchOnlineOrders(params: {
         searchOrderNo,
         searchRecipient,
         searchProduct,
+        searchSn,
         filterPlatform,
         matchFilter,
     } = params;
@@ -54,11 +56,22 @@ export async function fetchOnlineOrders(params: {
         where.customerName = { contains: searchRecipient };
     }
 
+    const and: Prisma.OnlineOrderWhereInput[] = []
     if (searchProduct) {
-        where.OR = [
-            { productName: { contains: searchProduct } },
-            { itemTitle: { contains: searchProduct } },
-        ];
+        and.push({
+            OR: [
+                { productName: { contains: searchProduct } },
+                { itemTitle: { contains: searchProduct } },
+            ]
+        })
+    }
+    if (searchSn) {
+        const q = searchSn.trim()
+        const rows = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id FROM OnlineOrder WHERE manualSn LIKE ${`%${q}%`}`
+        and.push({ id: { in: rows.map(r => r.id) } })
+    }
+    if (and.length > 0) {
+        where.AND = and
     }
 
     const orders = await prisma.onlineOrder.findMany({
@@ -117,6 +130,7 @@ export async function getOnlineOrderCounts(params: {
     searchOrderNo?: string;
     searchRecipient?: string;
     searchProduct?: string;
+    searchSn?: string;
     filterPlatform?: string;
 }) {
     const where: Prisma.OnlineOrderWhereInput = {};
@@ -133,11 +147,22 @@ export async function getOnlineOrderCounts(params: {
         where.customerName = { contains: params.searchRecipient };
     }
 
+    const and: Prisma.OnlineOrderWhereInput[] = []
     if (params.searchProduct) {
-        where.OR = [
-            { productName: { contains: params.searchProduct } },
-            { itemTitle: { contains: params.searchProduct } },
-        ];
+        and.push({
+            OR: [
+                { productName: { contains: params.searchProduct } },
+                { itemTitle: { contains: params.searchProduct } },
+            ]
+        })
+    }
+    if (params.searchSn) {
+        const q = params.searchSn.trim()
+        const rows = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id FROM OnlineOrder WHERE manualSn LIKE ${`%${q}%`}`
+        and.push({ id: { in: rows.map(r => r.id) } })
+    }
+    if (and.length > 0) {
+        where.AND = and
     }
 
     const grouped = await prisma.onlineOrder.groupBy({
@@ -194,6 +219,27 @@ export async function getMatchProducts() {
             })) || []
         }))
     }))
+}
+
+export async function updateOnlineOrderManualSn(orderId: string, manualSn: string) {
+    const value = manualSn.trim()
+    try {
+        await prisma.onlineOrder.update({
+            where: { id: orderId },
+            data: { manualSn: value }
+        })
+        revalidatePath("/online-orders")
+        return { success: true }
+    } catch {
+        try {
+            await prisma.$executeRaw`UPDATE OnlineOrder SET manualSn = ${value} WHERE id = ${orderId}`
+            revalidatePath("/online-orders")
+            return { success: true }
+        } catch (rawError) {
+            const message = rawError instanceof Error ? rawError.message : "保存失败"
+            return { success: false, message }
+        }
+    }
 }
 
 export async function updateOnlineOrderMatchSpec(orderId: string, productId: string | null, specValue: string | null) {

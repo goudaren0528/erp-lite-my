@@ -115,6 +115,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
   const [filterCustomer, setFilterCustomer] = useState('')
   const [filterPromoter, setFilterPromoter] = useState('')
   const [filterProduct, setFilterProduct] = useState('')
+  const [filterSn, setFilterSn] = useState('')
   const [filterCreator, setFilterCreator] = useState('')
   const [filterDuration, setFilterDuration] = useState('')
   const [filterRecipientName, setFilterRecipientName] = useState('')
@@ -203,7 +204,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, startDate, endDate, pageSize])
+  }, [filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterSn, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, startDate, endDate, pageSize])
 
   useEffect(() => {
     setIsLoading(true)
@@ -219,6 +220,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
           filterCustomer: filterCustomer || undefined,
           filterPromoter: filterPromoter || undefined,
           filterProduct: filterProduct || undefined,
+          filterSn: filterSn || undefined,
           filterCreator: filterCreator || undefined,
           filterDuration: filterDuration || undefined,
           filterRecipientName: filterRecipientName || undefined,
@@ -242,7 +244,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
         setIsLoading(false)
       }
     })
-  }, [currentPage, pageSize, sortBy, sortDirection, filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, startDate, endDate, refreshKey])
+  }, [currentPage, pageSize, sortBy, sortDirection, filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterSn, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, startDate, endDate, refreshKey])
 
   const resetFilters = () => {
     setFilterOrderNo('')
@@ -250,6 +252,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
     setFilterCustomer('')
     setFilterPromoter('')
     setFilterProduct('')
+    setFilterSn('')
     setFilterCreator('')
     setFilterDuration('')
     setFilterRecipientName('')
@@ -341,6 +344,12 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
                   placeholder="商品名称" 
                   value={filterProduct}
                   onChange={e => setFilterProduct(e.target.value)}
+                  className="h-8 text-xs"
+              />
+              <Input
+                  placeholder="设备SN"
+                  value={filterSn}
+                  onChange={e => setFilterSn(e.target.value)}
                   className="h-8 text-xs"
               />
               <Select value={matchFilter} onValueChange={(v) => setMatchFilter(v as 'ALL' | 'MATCHED' | 'UNMATCHED')}>
@@ -1494,7 +1503,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                             }
                         }}
                     >
-                        同步匹配规格
+                        规格同步
                     </Button>
                 ) : null}
             </div>
@@ -1538,7 +1547,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                     </div>
                     {matchSpecValue ? (
                         <div className="space-y-1">
-                            <Label className="text-xs">BOM</Label>
+                            <Label className="text-xs">规格资产</Label>
                             <div className="text-xs text-muted-foreground space-y-1">
                                 {selectedBomItems.length > 0 ? (
                                     selectedBomItems.map((b, idx) => (
@@ -1548,7 +1557,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                                         </div>
                                     ))
                                 ) : (
-                                    <div className="text-gray-400 italic text-[10px]">无BOM</div>
+                                    <div className="text-gray-400 italic text-[10px]">无规格资产</div>
                                 )}
                             </div>
                         </div>

@@ -47,8 +47,8 @@ import {
 } from "@/components/ui/popover"
 import { setAppConfigValue } from "@/app/actions"
 import { fetchOrders } from "@/app/actions"
-import { fetchOnlineOrders, getOnlineOrderCounts, getMatchProducts, syncOnlineOrderMatchSpec, updateOnlineOrderMatchSpec } from "./actions"
-import { ArrowUpDown, Plus, Settings2, Trash2, Truck, Play, Square, FileText, RefreshCw, Search, MonitorPlay } from "lucide-react"
+import { fetchOnlineOrders, getOnlineOrderCounts, getMatchProducts, syncOnlineOrderMatchSpec, updateOnlineOrderMatchSpec, updateOnlineOrderManualSn } from "./actions"
+import { ArrowUpDown, Plus, Settings2, Trash2, Truck, Play, Square, FileText, RefreshCw, Search, MonitorPlay, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { Product, ProductVariant } from "@/types"
 import { Badge } from "@/components/ui/badge"
@@ -154,6 +154,7 @@ type OnlineOrderRow = {
   variantName?: string | null
   itemTitle?: string | null
   itemSku?: string | null
+  manualSn?: string | null
   totalAmount?: number | null
   rentStartDate?: string | null
   returnDeadline?: string | null
@@ -275,11 +276,15 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   const [matchProductId, setMatchProductId] = useState("")
   const [matchSpecValue, setMatchSpecValue] = useState("")
 
+  const [editSnOrderId, setEditSnOrderId] = useState<string | null>(null)
+  const [editSnValue, setEditSnValue] = useState("")
+
   // Filters
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
   const [filterOrderNo, setFilterOrderNo] = useState(initialQuery)
   const [filterRecipientName, setFilterRecipientName] = useState('')
   const [filterProduct, setFilterProduct] = useState('')
+  const [filterSn, setFilterSn] = useState('')
   const [matchFilter, setMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
   
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
@@ -425,6 +430,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
           searchOrderNo: filterOrderNo,
           searchRecipient: filterRecipientName,
           searchProduct: filterProduct,
+          searchSn: filterSn,
           filterPlatform: platformFilter,
           matchFilter
         })
@@ -437,7 +443,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
         setDbLoading(false)
       }
     })()
-  }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct, matchFilter, genericStatus?.status]) // Add genericStatus.status to dependency
+  }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct, filterSn, matchFilter, genericStatus?.status]) // Add genericStatus.status to dependency
 
   useEffect(() => {
     // Same logic for counts
@@ -466,12 +472,13 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
       searchOrderNo: filterOrderNo,
       searchRecipient: filterRecipientName,
       searchProduct: filterProduct,
+      searchSn: filterSn,
       filterPlatform: platformFilter
     }).then(res => {
       setStatusCounts(res.counts)
       setStatusTotal(res.total)
     }).catch(console.error)
-  }, [activeTab, dbRefreshKey, zanchenStatus?.lastRunAt, filterOrderNo, filterRecipientName, filterProduct])
+  }, [activeTab, dbRefreshKey, zanchenStatus?.lastRunAt, filterOrderNo, filterRecipientName, filterProduct, filterSn])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
@@ -695,6 +702,21 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
     } catch (error) {
       console.error(error)
       toast.error("保存失败")
+    }
+  }
+
+  const handleSaveManualSn = async (orderId: string) => {
+    try {
+        const res = await updateOnlineOrderManualSn(orderId, editSnValue)
+        if (res?.success) {
+          toast.success("SN 已保存")
+          setEditSnOrderId(null)
+          setDbRefreshKey(key => key + 1)
+        } else {
+          toast.error(res?.message || "保存失败")
+        }
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : "保存失败")
     }
   }
 
@@ -1311,6 +1333,12 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                   onChange={e => { setFilterProduct(e.target.value); setOnlineOrderPage(1); }} 
                                   className="h-8 w-[120px]" 
                                />
+                               <Input
+                                  placeholder="设备SN"
+                                  value={filterSn}
+                                  onChange={e => { setFilterSn(e.target.value); setOnlineOrderPage(1); }}
+                                  className="h-8 w-[120px]"
+                               />
                                <Select value={matchFilter} onValueChange={(v) => { setMatchFilter(v as 'ALL' | 'MATCHED' | 'UNMATCHED'); setOnlineOrderPage(1); }}>
                                   <SelectTrigger className="h-8 w-[140px]">
                                     <SelectValue placeholder="匹配规格" />
@@ -1355,6 +1383,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                 </Button>
                               </TableHead>
                               <TableHead className="w-[300px]">物流信息</TableHead>
+                              <TableHead className="w-[120px]">设备SN</TableHead>
                               <TableHead className="w-[200px]">设备信息</TableHead>
                               <TableHead className="w-[200px]">匹配规格</TableHead>
                               <TableHead className="w-[100px]">匹配状态</TableHead>
@@ -1475,6 +1504,43 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                   ) : null}
                                 </TableCell>
                                 <TableCell>
+                                    <Popover
+                                        open={editSnOrderId === order.id}
+                                        onOpenChange={(open) => {
+                                            if (open) {
+                                                setEditSnOrderId(order.id)
+                                                setEditSnValue(order.manualSn || "")
+                                            } else {
+                                                setEditSnOrderId(null)
+                                            }
+                                        }}
+                                    >
+                                        <PopoverTrigger asChild>
+                                            <div className="flex items-center gap-1 cursor-pointer group">
+                                                <div className={cn("text-xs truncate max-w-[100px]", !order.manualSn && "text-muted-foreground italic")}>
+                                                    {order.manualSn || "点击输入"}
+                                                </div>
+                                                <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50" />
+                                            </div>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-60 p-3">
+                                             <div className="space-y-2">
+                                                 <h4 className="font-medium leading-none text-sm">设备 SN</h4>
+                                                 <Input
+                                                     value={editSnValue}
+                                                     onChange={(e) => setEditSnValue(e.target.value)}
+                                                     placeholder="输入设备 SN"
+                                                     className="h-8 text-xs"
+                                                 />
+                                                <div className="flex justify-end gap-2 pt-1">
+                                                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditSnOrderId(null)}>取消</Button>
+                                                    <Button size="sm" className="h-7 text-xs" onClick={() => handleSaveManualSn(order.id)}>保存</Button>
+                                                </div>
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
+                                </TableCell>
+                                <TableCell>
                                   <div className="font-semibold truncate" title={deviceProductName || ""}>{deviceProductName}</div>
                                   {order.itemTitle && !isSameDeviceText(order.itemTitle, deviceProductName) && !isSameDeviceText(order.itemTitle, deviceVariantName) ? (
                                     <div className="text-[10px] text-muted-foreground truncate" title={order.itemTitle}>{order.itemTitle}</div>
@@ -1505,8 +1571,11 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                   >
                                     <div className="flex items-center gap-2">
                                       <PopoverTrigger asChild>
-                                        <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700">
-                                          {displayText || <span className="text-gray-300 italic text-[10px]">点击选择</span>}
+                                        <div className="flex items-center gap-1 cursor-pointer group">
+                                            <div className="text-xs hover:underline decoration-dashed underline-offset-4 text-gray-700 truncate max-w-[150px]">
+                                            {displayText || <span className="text-gray-300 italic text-[10px]">点击选择</span>}
+                                            </div>
+                                            <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50" />
                                         </div>
                                       </PopoverTrigger>
                                       {order.specId ? (
@@ -1535,7 +1604,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                             }
                                           }}
                                         >
-                                          同步匹配规格
+                                          规格同步
                                         </Button>
                                       ) : null}
                                     </div>
@@ -1583,7 +1652,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                         </div>
                                         {matchSpecValue ? (
                                           <div className="space-y-1">
-                                            <Label className="text-xs">BOM</Label>
+                                            <Label className="text-xs">规格资产</Label>
                                             <div className="text-xs text-muted-foreground space-y-1">
                                               {getMatchBomItems(fallbackProductId, matchSpecValue).length > 0 ? (
                                                 getMatchBomItems(fallbackProductId, matchSpecValue).map((b, idx) => (
@@ -1593,7 +1662,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                                                   </div>
                                                 ))
                                               ) : (
-                                                <div className="text-gray-400 italic text-[10px]">无BOM</div>
+                                                <div className="text-gray-400 italic text-[10px]">无规格资产</div>
                                               )}
                                             </div>
                                           </div>

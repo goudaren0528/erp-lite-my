@@ -175,7 +175,13 @@ export default async function OnlineOrdersPage() {
       const parsed = JSON.parse(rawConfig)
       if (parsed && Array.isArray(parsed.sites)) {
         const defaultSiteMap = new Map(defaultConfig.sites.map(site => [site.id, site]))
-        const parsedSiteIds = new Set(parsed.sites.map((s: any) => s.id))
+        const parsedSiteIds = new Set(
+          (parsed.sites as unknown[]).flatMap((s) => {
+            if (!s || typeof s !== "object") return []
+            const id = (s as { id?: unknown }).id
+            return typeof id === "string" && id ? [id] : []
+          })
+        )
         const missingDefaultSites = defaultConfig.sites.filter(site => !parsedSiteIds.has(site.id))
         
         initialConfig = {

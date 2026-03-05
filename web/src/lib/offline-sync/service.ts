@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db"
+import { Prisma } from "@prisma/client"
 import fs from "fs"
 import path from "path"
 
@@ -135,7 +136,7 @@ export async function getSyncConfig(siteId: string): Promise<OfflineSyncConfig> 
   // So for Zanchen we want to preserve the existing config if possible.
   
   const key = `${CONFIG_KEY_PREFIX}${siteId}`
-  let config = await prisma.appConfig.findUnique({ where: { key } })
+  const config = await prisma.appConfig.findUnique({ where: { key } })
   
   if (!config && siteId === "zanchen") {
     // Try legacy key
@@ -279,7 +280,7 @@ async function runSync(siteId: string) {
       const onlineOrder = systemOrderMap.get(offlineOrder.miniProgramOrderNo)
       if (!onlineOrder) continue
 
-      const updates: any = {}
+      const updates: Prisma.OrderUpdateInput = {}
       let needsUpdate = false
 
       if (onlineOrder.status && onlineOrder.status !== offlineOrder.status) {

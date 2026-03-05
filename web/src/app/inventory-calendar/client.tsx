@@ -667,7 +667,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             if (pName) {
                 try {
                     const items = await getInventoryItems(pName, vName)
-                    setInventoryItems(items)
+                    setInventoryItems(items as InventoryItem[])
                 } catch (e) {
                     toast.error("Failed to load inventory details")
                 } finally {
@@ -1160,7 +1160,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                             onClick={() => window.open(`../products?edit=${encodeURIComponent(variant.productId)}`, '_blank')}
                                         >
                                             <Edit className="h-3 w-3 mr-1" />
-                                            未配置BOM (点击配置)
+                                            未配置规格资产 (点击配置)
                                         </Button>
                                     )
                                 }

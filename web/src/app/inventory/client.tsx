@@ -119,7 +119,7 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
         return itemTypes.map(type => {
             let total = 0;
             // Map warehouseId -> quantity/count
-            let breakdown: Record<string, number> = {};
+            const breakdown: Record<string, number> = {};
             
             if (type.isSerialized) {
                 const typeItems = items.filter(i => i.itemTypeId === type.id && i.status !== "DELETED");
@@ -1074,7 +1074,7 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                     </DialogHeader>
                     <div className="py-4">
                         <p className="text-sm text-muted-foreground">
-                            确定要删除这个物品吗？此操作将把物品标记为"已删除"状态。
+                            确定要删除这个物品吗？此操作将把物品标记为&quot;已删除&quot;状态。
                             <br/><br/>
                             注意：这不会影响历史订单记录，但该物品将无法再被分配或出租。
                         </p>

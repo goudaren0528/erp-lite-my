@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const buffer = await page.screenshot({ type: "jpeg", quality: 60 })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return new NextResponse(buffer as any, {
       headers: {
         "Content-Type": "image/jpeg",

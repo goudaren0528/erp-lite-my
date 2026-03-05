@@ -42,12 +42,18 @@ export async function POST(req: NextRequest) {
       }
       await page.mouse.move(px, py)
     } else if (type === "mousedown") {
+      if (Number.isFinite(px) && Number.isFinite(py)) {
+        await page.mouse.move(px, py)
+      }
       await page.mouse.down()
     } else if (type === "mouseup") {
+      if (Number.isFinite(px) && Number.isFinite(py)) {
+        await page.mouse.move(px, py)
+      }
       await page.mouse.up()
     } else if (type === "type") {
       if (typeof text === "string" && text.length > 0) {
-        await page.keyboard.type(text, { delay: 90 })
+        await page.keyboard.type(text, { delay: 25 })
       }
     } else if (type === "press") {
       if (key) await page.keyboard.press(key)

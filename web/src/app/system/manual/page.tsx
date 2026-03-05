@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+// import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import { getManualChapters, upsertManualChapter, deleteManualChapter, ManualChapterInput } from './actions';
 
 export default function ManualManagementPage() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [chapters, setChapters] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -42,7 +43,7 @@ export default function ManualManagementPage() {
         fetchChapters();
     }, []);
 
-    const handleOpenSheet = (chapter?: any) => {
+    const handleOpenSheet = (chapter?: { id: string; title: string; content: string; order: number; isEnabled: boolean }) => {
         if (chapter) {
             setEditingChapter(chapter);
             setFormData({
@@ -79,6 +80,7 @@ export default function ManualManagementPage() {
             } else {
                 toast.error(res.error || "Failed to save");
             }
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         } catch (error) {
             toast.error("An error occurred");
         }
@@ -161,57 +163,42 @@ export default function ManualManagementPage() {
                 </SheetContent>
             </Sheet>
 
-            <div className="rounded-md border">
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead className="w-[80px]">排序</TableHead>
-                            <TableHead>标题</TableHead>
-                            <TableHead>状态</TableHead>
-                            <TableHead>最后更新</TableHead>
-                            <TableHead className="text-right">操作</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {isLoading ? (
-                            <TableRow>
-                                <TableCell colSpan={5} className="text-center py-8">
-                                    <Loader2 className="h-6 w-6 animate-spin mx-auto" />
-                                </TableCell>
-                            </TableRow>
-                        ) : chapters.map((chapter) => (
-                            <TableRow key={chapter.id}>
-                                <TableCell>{chapter.order}</TableCell>
-                                <TableCell className="font-medium">{chapter.title}</TableCell>
-                                <TableCell>
-                                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                        chapter.isEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                                    }`}>
-                                        {chapter.isEnabled ? '启用' : '禁用'}
-                                    </span>
-                                </TableCell>
-                                <TableCell className="text-muted-foreground text-xs">
-                                    {new Date(chapter.updatedAt).toLocaleString()}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                    <Button variant="ghost" size="icon" onClick={() => handleOpenSheet(chapter)}>
-                                        <Edit className="h-4 w-4" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDelete(chapter.id)}>
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                        {!isLoading && chapters.length === 0 && (
-                            <TableRow>
-                                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                                    暂无操作指南内容
-                                </TableCell>
-                            </TableRow>
-                        )}
-                    </TableBody>
-                </Table>
+            <div className="space-y-4">
+                {isLoading ? (
+                    <div className="text-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                    </div>
+                ) : chapters.map((chapter) => (
+                    <div key={chapter.id} className="flex items-center justify-between p-4 border rounded-lg">
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <span className="font-medium">{chapter.title}</span>
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                    chapter.isEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                }`}>
+                                    {chapter.isEnabled ? '启用' : '禁用'}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+                                <span>Sort: {chapter.order}</span>
+                                <span>Updated: {chapter.updatedAt ? new Date(chapter.updatedAt).toLocaleString() : '-'}</span>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="icon" onClick={() => handleOpenSheet(chapter)}>
+                                <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDelete(chapter.id)}>
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </div>
+                ))}
+                {!isLoading && chapters.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground border rounded-lg border-dashed">
+                        暂无操作指南内容
+                    </div>
+                )}
             </div>
         </div>
     );

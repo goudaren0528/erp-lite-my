@@ -27,6 +27,8 @@ type ChenglinParsedOrder = {
   platform: string
   productName: string
   variantName: string
+  itemTitle: string
+  itemSku: string
   logisticsCompany: string
   trackingNumber: string
   returnLogisticsCompany: string
@@ -789,6 +791,8 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<ChenglinParsed
                 platform: "诚赁", 
                 productName,
                 variantName,
+                itemTitle: productName,
+                itemSku: variantName,
                 logisticsCompany,
                 trackingNumber,
                 returnLogisticsCompany,

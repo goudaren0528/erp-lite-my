@@ -300,7 +300,7 @@ export async function getInventoryItems(productName: string, variantName?: strin
     // If variantName is present, we first look for the Spec to get BOM.
     // If no variantName, we look for ItemType with productName.
 
-    let items: any[] = []
+    let items: Array<Record<string, unknown>> = []
 
     if (variantName) {
         // Spec View: Find Product -> Spec -> BOM
@@ -330,16 +330,16 @@ export async function getInventoryItems(productName: string, variantName?: strin
 
         if (product?.specs[0]?.bomItems) {
             // Flatten BOM items
-            items = product.specs[0].bomItems.flatMap(bom => 
+            items = product.specs[0].bomItems.flatMap(bom =>
                 bom.itemType.items.map(item => ({
-                    ...item,
-                    componentName: bom.itemType.name // Add component name for display
+                    ...(item as unknown as Record<string, unknown>),
+                    componentName: bom.itemType.name
                 }))
             )
         }
     } else {
         // Item View: Find ItemType by name
-        let itemType = await prisma.inventoryItemType.findFirst({
+        const itemType = await prisma.inventoryItemType.findFirst({
             where: { name: productName },
             include: {
                 items: {
@@ -378,15 +378,15 @@ export async function getInventoryItems(productName: string, variantName?: strin
 
             if (product) {
                 // Collect all unique items from all BOMs
-                const itemMap = new Map<string, any>()
+                const itemMap = new Map<string, Record<string, unknown>>()
                 
                 product.specs.forEach(spec => {
                     spec.bomItems.forEach(bom => {
                         bom.itemType.items.forEach(item => {
                             if (!itemMap.has(item.id)) {
                                 itemMap.set(item.id, {
-                                    ...item,
-                                    componentName: bom.itemType.name // Add component name
+                                    ...(item as unknown as Record<string, unknown>),
+                                    componentName: bom.itemType.name
                                 })
                             }
                         })

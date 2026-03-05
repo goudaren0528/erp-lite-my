@@ -110,14 +110,14 @@ export function MainNav({ user }: MainNavProps) {
       children: [
         {
           href: "/products",
-          label: "商品库管理",
+          label: "商品规格管理",
           icon: List,
           active: pathname === "/products",
           permission: "products",
         },
         {
           href: "/inventory",
-          label: "资产库存管理",
+          label: "库存数量管理",
           icon: Database,
           active: pathname === "/inventory",
           permission: "inventory_manage",

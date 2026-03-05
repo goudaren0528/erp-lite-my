@@ -462,6 +462,7 @@ export async function fetchOrders(params: {
     filterCustomer?: string;
     filterPromoter?: string;
     filterProduct?: string;
+    filterSn?: string;
     filterCreator?: string;
     filterDuration?: string;
     filterRecipientName?: string;
@@ -489,6 +490,7 @@ export async function fetchOrders(params: {
         filterCustomer: rawFilterCustomer,
         filterPromoter: rawFilterPromoter,
         filterProduct: rawFilterProduct,
+        filterSn: rawFilterSn,
         filterCreator: rawFilterCreator,
         filterDuration,
         filterRecipientName: rawFilterRecipientName,
@@ -505,6 +507,7 @@ export async function fetchOrders(params: {
     const filterCustomer = rawFilterCustomer?.trim();
     const filterPromoter = rawFilterPromoter?.trim();
     const filterProduct = rawFilterProduct?.trim();
+    const filterSn = rawFilterSn?.trim();
     const filterCreator = rawFilterCreator?.trim();
     const filterRecipientName = rawFilterRecipientName?.trim();
     const filterRecipientPhone = rawFilterRecipientPhone?.trim();
@@ -543,6 +546,10 @@ export async function fetchOrders(params: {
 
     if (filterProduct) {
         baseWhere.productName = containsFilter(filterProduct);
+    }
+
+    if (filterSn) {
+        baseWhere.sn = containsFilter(filterSn);
     }
 
     if (filterDuration) {

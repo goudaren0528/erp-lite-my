@@ -21,7 +21,7 @@ type Props = {
         concurrencyLimit?: number
     }
     onConfigChange: (updates: Partial<{ autoSyncEnabled: boolean; interval: number; concurrencyLimit: number }>) => void
-    status?: any
+    status?: unknown
 }
 
 export function ZanchenSyncCard({ config, onConfigChange }: Props) {

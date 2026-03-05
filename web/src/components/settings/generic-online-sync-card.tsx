@@ -14,7 +14,7 @@ type Props = {
     interval: number
     concurrencyLimit?: number
   }
-  status?: any
+  status?: { status?: string; message?: string; lastRunAt?: string; needsAttention?: boolean }
   onConfigChange: (config: { enabled: boolean; interval: number; concurrencyLimit?: number }) => void
 }
 

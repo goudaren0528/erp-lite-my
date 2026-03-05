@@ -29,6 +29,8 @@ type AolzuParsedOrder = {
   platform: string
   productName: string
   variantName: string
+  itemTitle: string
+  itemSku: string
   logisticsCompany: string
   trackingNumber: string
 }
@@ -936,6 +938,8 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
                 platform: "奥租", 
                 productName,
                 variantName,
+                itemTitle: productName,
+                itemSku: variantName,
                 logisticsCompany,
                 trackingNumber
             })

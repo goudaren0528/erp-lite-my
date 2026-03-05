@@ -201,7 +201,7 @@ export default async function StatsPage(props: PageProps) {
             highTicketBase: number
         }>
       }>,
-      orders: any[]
+      orders: [] // Empty by default (Server Side Pagination)
     }>
   }>();
 
@@ -355,6 +355,7 @@ export default async function StatsPage(props: PageProps) {
         highTicketCommission: number;
       }>;
     }>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     orders: any[];
   }[] = [];
   const accountGroups: { id: string; name: string }[] = [];

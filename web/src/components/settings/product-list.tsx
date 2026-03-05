@@ -236,7 +236,7 @@ export function ProductList({ products, itemTypes }: ProductListProps) {
                                         )}
                                         {v.bomItems && v.bomItems.length > 0 && (
                                             <div>
-                                                <div className="text-muted-foreground mb-1">BOM 构成:</div>
+                                                <div className="text-muted-foreground mb-1">规格资产 构成:</div>
                                                 <ul className="list-disc pl-4 space-y-0.5">
                                                     {v.bomItems.map((bom, bIdx) => {
                                                         const typeName = itemTypes.find(t => t.id === bom.itemTypeId)?.name || "未知物品";
@@ -439,7 +439,7 @@ export function ProductList({ products, itemTypes }: ProductListProps) {
                                         )}
                                     </div>
                                     <Badge variant={variant.bomItems && variant.bomItems.length > 0 ? "secondary" : "outline"} className="font-normal">
-                                         {variant.bomItems && variant.bomItems.length > 0 ? "BOM已配置" : "无BOM"}
+                                         {variant.bomItems && variant.bomItems.length > 0 ? "规格资产已配置" : "无规格资产"}
                                     </Badge>
                                 </div>
 
@@ -453,7 +453,7 @@ export function ProductList({ products, itemTypes }: ProductListProps) {
                                 {/* BOM Items */}
                                 {variant.bomItems && variant.bomItems.length > 0 && (
                                     <div className="space-y-1">
-                                         <span className="text-xs font-medium text-muted-foreground">BOM 构成</span>
+                                         <span className="text-xs font-medium text-muted-foreground">规格资产 构成</span>
                                          <div className="bg-white rounded border p-2 space-y-1">
                                             {variant.bomItems.map((bom, idx) => {
                                                 const itemType = itemTypes.find(t => t.id === bom.itemTypeId);

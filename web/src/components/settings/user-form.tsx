@@ -50,9 +50,9 @@ const PERMISSION_GROUPS = [
     {
         label: '商品管理',
         permissions: [
-            { key: 'products', label: '商品库管理' },
+            { key: 'products', label: '商品规格管理' },
             { key: 'inventory_calendar', label: '库存日历' },
-            { key: 'inventory_manage', label: '资产库存管理' },
+            { key: 'inventory_manage', label: '库存数量管理' },
         ]
     },
     {

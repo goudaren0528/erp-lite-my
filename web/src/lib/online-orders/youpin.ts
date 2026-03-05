@@ -30,6 +30,8 @@ type YoupinParsedOrder = {
   platform: string
   productName: string
   variantName: string
+  itemTitle: string
+  itemSku: string
   logisticsCompany: string
   trackingNumber: string
   promotionChannel: string
@@ -911,6 +913,8 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
                 platform: "优品租", 
                 productName,
                 variantName,
+                itemTitle: productName,
+                itemSku: variantName,
                 logisticsCompany,
                 trackingNumber,
                 promotionChannel
