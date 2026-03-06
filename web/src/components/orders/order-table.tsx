@@ -110,13 +110,15 @@ import { toast } from "sonner"
 export function OrderTable({ orders, products, promoters = [], initialTotal, initialBaseTotal, initialStatusCounts, initialTodayCount, initialTodayAmount }: OrderTableProps) {
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
+  const initialSn = searchParams.get('sn') || ''
+  const initialPlatform = searchParams.get('platform') || ''
   
   const [filterOrderNo, setFilterOrderNo] = useState(initialQuery)
   const [filterXianyuOrderNo, setFilterXianyuOrderNo] = useState('')
   const [filterCustomer, setFilterCustomer] = useState('')
   const [filterPromoter, setFilterPromoter] = useState('')
   const [filterProduct, setFilterProduct] = useState('')
-  const [filterSn, setFilterSn] = useState('')
+  const [filterSn, setFilterSn] = useState(initialSn)
   const [filterCreator, setFilterCreator] = useState('')
   const [filterDuration, setFilterDuration] = useState('')
   const [filterRecipientName, setFilterRecipientName] = useState('')
@@ -126,7 +128,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
   
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
   const [filterSource, setFilterSource] = useState<string>('ALL')
-  const [filterPlatform, setFilterPlatform] = useState<string>('ALL')
+  const [filterPlatform, setFilterPlatform] = useState<string>(initialPlatform || 'ALL')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc') // Default asc for status order

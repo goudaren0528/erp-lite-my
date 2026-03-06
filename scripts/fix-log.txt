@@ -1,0 +1,5 @@
+1053: "                { keywords: [\"租用中\", \"使用中\", \"已签收\"], value: \"RENTING\" },"
+1054: "                { keywords: [\"明日到期\"], value: \"RENTING\" },"
+1055: "                { keywords: [\"待结算\"], value: \"RETURNING\" },"
+1056: "                { keywords: [\"今日未还款\", \"今日未还\"], value: \"RENTING\" },"
+1057: "                { keywords: [\"今日已还款\", \"今日已还\"], value: \"RETURNING\" },"

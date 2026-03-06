@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useMemo, useState, useTransition, useCallback } from "react"
 import { InventoryItemType, Warehouse, InventoryStock, InventoryItem } from "@prisma/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,7 +30,9 @@ import {
     createInventoryItemType, 
     updateInventoryItemType, 
     deleteInventoryItemType,
-    deleteInventoryItem
+    deleteInventoryItem,
+    getOrdersByItemTypeId,
+    getOrdersBySn
 } from "@/app/actions"
 import { WarehouseManager } from "@/components/inventory/warehouse-manager"
 import { Search, Plus, ArrowLeftRight, Package, Box, Filter, Edit2, Trash2, Settings2, Upload, AlertTriangle, ArrowDown, ArrowUp, Check } from "lucide-react"
@@ -55,6 +57,57 @@ interface InventoryClientProps {
     warehouses: Warehouse[]
     stocks: StockRow[]
     items: ItemRow[]
+}
+
+type NonSerialOrder = {
+    id: string
+    orderNo: string
+    status: string
+    customerName: string | null
+    platform?: string | null
+    rentStartDate: Date | string | null
+    returnDeadline: Date | string | null
+    manualSn?: string | null
+    spec: { name: string } | null
+}
+
+const ORDER_STATUS_LABELS: Record<string, string> = {
+    WAIT_PAY: '待支付',
+    PENDING_REVIEW: '待审核',
+    PENDING_SHIPMENT: '待发货',
+    PENDING_RECEIPT: '待收货',
+    RENTING: '租用中',
+    RETURNING: '归还中',
+    RETURNED: '已归还',
+    BOUGHT_OUT: '已买断',
+    COMPLETED: '已完成',
+    CLOSED: '已关闭',
+    OVERDUE: '已逾期',
+}
+const statusLabel = (s: string) => ORDER_STATUS_LABELS[s] ?? s
+
+// Map platform name to online-orders tab siteId
+const PLATFORM_TO_SITE_ID: Record<string, string> = {
+    '奥租': 'aolzu',
+    '零零享': 'llxzu',
+    '优品租': 'youpin',
+    '诚赁': 'chenglin',
+    '赞晨': 'zanchen',
+    '人人租': 'rrz',
+    'ZANCHEN': 'zanchen',
+}
+
+function onlineOrderUrl(orderNo: string, platform?: string | null) {
+    const siteId = platform ? PLATFORM_TO_SITE_ID[platform] : undefined
+    const params = new URLSearchParams({ q: orderNo })
+    if (siteId) params.set('tab', siteId)
+    return `/online-orders?${params.toString()}`
+}
+
+function offlineOrderUrl(orderNo: string, platform?: string | null) {
+    const params = new URLSearchParams({ q: orderNo })
+    if (platform) params.set('platform', platform)
+    return `/orders?${params.toString()}`
 }
 
 export function InventoryClient({ itemTypes, warehouses, stocks, items }: InventoryClientProps) {
@@ -109,6 +162,21 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
     // Serialized Item Details Sheet
     const [detailsSheetOpen, setDetailsSheetOpen] = useState(false)
     const [detailsItemTypeId, setDetailsItemTypeId] = useState<string | null>(null)
+
+    // Non-serialized item orders sheet
+    const [nonSerialOrdersSheetOpen, setNonSerialOrdersSheetOpen] = useState(false)
+    const [nonSerialOrdersItemTypeId, setNonSerialOrdersItemTypeId] = useState<string | null>(null)
+    const [nonSerialOrders, setNonSerialOrders] = useState<{ orders: NonSerialOrder[], onlineOrders: NonSerialOrder[] } | null>(null)
+    const [nonSerialOfflinePage, setNonSerialOfflinePage] = useState(1)
+    const [nonSerialOnlinePage, setNonSerialOnlinePage] = useState(1)
+    const nonSerialOrdersPageSize = 20
+
+    // SN detail dialog (for serialized items)
+    const [snDetailOpen, setSnDetailOpen] = useState(false)
+    const [snDetailSn, setSnDetailSn] = useState<string | null>(null)
+    const [snDetailData, setSnDetailData] = useState<{ orders: NonSerialOrder[], onlineOrders: NonSerialOrder[] } | null>(null)
+    const [snDetailPage, setSnDetailPage] = useState(1)
+    const snDetailPageSize = 10
 
     // Delete Confirmation (Item Type)
     const [deleteTypeConfirmOpen, setDeleteTypeConfirmOpen] = useState(false)
@@ -370,6 +438,27 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
         setDetailsSheetOpen(true)
     }
 
+    // -- Handlers: Non-serialized Orders Sheet --
+    const openNonSerialOrdersSheet = useCallback(async (itemTypeId: string) => {
+        setNonSerialOrdersItemTypeId(itemTypeId)
+        setNonSerialOrders(null)
+        setNonSerialOfflinePage(1)
+        setNonSerialOnlinePage(1)
+        setNonSerialOrdersSheetOpen(true)
+        const result = await getOrdersByItemTypeId(itemTypeId)
+        setNonSerialOrders(result)
+    }, [])
+
+    // -- Handlers: SN Detail Dialog --
+    const openSnDetail = useCallback(async (sn: string) => {
+        setSnDetailSn(sn)
+        setSnDetailData(null)
+        setSnDetailPage(1)
+        setSnDetailOpen(true)
+        const result = await getOrdersBySn(sn)
+        setSnDetailData(result)
+    }, [])
+
 
     // -- Render --
 
@@ -503,7 +592,14 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                                                         <span className="text-xs font-normal text-muted-foreground ml-1">(查看)</span>
                                                     </div>
                                                 ) : (
-                                                    item.totalStock
+                                                    <div
+                                                        className="cursor-pointer text-primary hover:underline decoration-dashed underline-offset-4 flex items-center gap-1 w-fit"
+                                                        onClick={() => openNonSerialOrdersSheet(item.id)}
+                                                        title="点击查看占用订单"
+                                                    >
+                                                        {item.totalStock}
+                                                        <span className="text-xs font-normal text-muted-foreground ml-1">(查看)</span>
+                                                    </div>
                                                 )}
                                             </TableCell>
                                             <TableCell className="py-2 text-xs text-muted-foreground max-w-[200px]">
@@ -1129,7 +1225,9 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                                 <TableBody>
                                     {paginatedSheetItems.map(item => (
                                         <TableRow key={item.id}>
-                                            <TableCell className="font-mono">{item.sn}</TableCell>
+                                            <TableCell className="font-mono text-sm">
+                                                {item.sn || "-"}
+                                            </TableCell>
                                             <TableCell>
                                                 <Badge variant="outline">{item.warehouse.name}</Badge>
                                             </TableCell>
@@ -1143,15 +1241,28 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                                                 </Badge>
                                             </TableCell>
                                             <TableCell className="text-right">
-                                                <Button 
-                                                    size="icon" 
-                                                    variant="ghost" 
-                                                    className="text-red-500 hover:text-red-600 h-8 w-8"
-                                                    onClick={() => handleDeleteClick(item.id)}
-                                                    title="删除"
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
+                                                <div className="flex justify-end gap-1">
+                                                    {item.sn && (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className="h-7 text-xs px-2"
+                                                            onClick={() => openSnDetail(item.sn!)}
+                                                            title="查看订单占用"
+                                                        >
+                                                            查看占用
+                                                        </Button>
+                                                    )}
+                                                    <Button 
+                                                        size="icon" 
+                                                        variant="ghost" 
+                                                        className="text-red-500 hover:text-red-600 h-8 w-8"
+                                                        onClick={() => handleDeleteClick(item.id)}
+                                                        title="删除"
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </TableCell>
                                         </TableRow>
                                     ))}
@@ -1260,6 +1371,254 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                     </div>
                 </SheetContent>
             </Sheet>
+
+            {/* Sheet: Non-serialized item orders */}
+            <Sheet open={nonSerialOrdersSheetOpen} onOpenChange={setNonSerialOrdersSheetOpen}>
+                <SheetContent className="overflow-y-auto" style={{ width: 960, maxWidth: 960, minWidth: 960 }}>
+                    <SheetHeader>
+                        <SheetTitle>占用订单: {itemTypes.find(t => t.id === nonSerialOrdersItemTypeId)?.name}</SheetTitle>
+                    </SheetHeader>
+                    <div className="mt-6 space-y-4">
+                        {nonSerialOrders === null ? (
+                            <div className="text-center py-12 text-muted-foreground text-sm">加载中...</div>
+                        ) : (
+                            <Tabs defaultValue="offline">
+                                <TabsList>
+                                    <TabsTrigger value="offline">线下订单 ({nonSerialOrders.orders.length})</TabsTrigger>
+                                    <TabsTrigger value="online">线上订单 ({nonSerialOrders.onlineOrders.length})</TabsTrigger>
+                                </TabsList>
+
+                                <TabsContent value="offline" className="space-y-3 mt-3">
+                                    <div className="rounded-md border">
+                                        <Table className="text-sm">
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>订单号</TableHead>
+                                                    <TableHead>平台</TableHead>
+                                                    <TableHead>规格</TableHead>
+                                                    <TableHead>客户</TableHead>
+                                                    <TableHead>状态</TableHead>
+                                                    <TableHead>租期</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {nonSerialOrders.orders.slice((nonSerialOfflinePage - 1) * nonSerialOrdersPageSize, nonSerialOfflinePage * nonSerialOrdersPageSize).map(o => (
+                                                    <TableRow key={o.id}>
+                                                        <TableCell className="font-mono text-xs">
+                                                            <a href={offlineOrderUrl(o.orderNo, o.platform)} target="_blank" rel="noreferrer" className="text-blue-600 underline underline-offset-2 hover:text-blue-800">{o.orderNo}</a>
+                                                        </TableCell>
+                                                        <TableCell className="text-xs">{o.platform || "-"}</TableCell>
+                                                        <TableCell className="text-xs">{o.spec?.name || "-"}</TableCell>
+                                                        <TableCell className="text-xs">{o.customerName || "-"}</TableCell>
+                                                        <TableCell><Badge variant="outline" className="text-xs">{statusLabel(o.status)}</Badge></TableCell>
+                                                        <TableCell className="text-xs text-muted-foreground">
+                                                            {o.rentStartDate ? new Date(o.rentStartDate).toLocaleDateString() : "-"}
+                                                            {o.returnDeadline ? ` ~ ${new Date(o.returnDeadline).toLocaleDateString()}` : ""}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                                {nonSerialOrders.orders.length === 0 && (
+                                                    <TableRow><TableCell colSpan={6} className="text-center h-16 text-muted-foreground text-xs">暂无线下订单</TableCell></TableRow>
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                    {Math.ceil(nonSerialOrders.orders.length / nonSerialOrdersPageSize) > 1 && (
+                                        <div className="flex items-center justify-between px-1">
+                                            <span className="text-xs text-muted-foreground">共 {nonSerialOrders.orders.length} 条</span>
+                                            <Pagination className="justify-end w-auto mx-0">
+                                                <PaginationContent>
+                                                    <PaginationItem>
+                                                        <PaginationPrevious onClick={() => setNonSerialOfflinePage(p => Math.max(1, p - 1))} className={nonSerialOfflinePage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"} />
+                                                    </PaginationItem>
+                                                    {Array.from({ length: Math.ceil(nonSerialOrders.orders.length / nonSerialOrdersPageSize) }, (_, i) => i + 1).map(p => (
+                                                        <PaginationItem key={p}>
+                                                            <PaginationLink isActive={nonSerialOfflinePage === p} onClick={() => setNonSerialOfflinePage(p)} className="cursor-pointer">{p}</PaginationLink>
+                                                        </PaginationItem>
+                                                    ))}
+                                                    <PaginationItem>
+                                                        <PaginationNext onClick={() => setNonSerialOfflinePage(p => Math.min(Math.ceil(nonSerialOrders.orders.length / nonSerialOrdersPageSize), p + 1))} className={nonSerialOfflinePage === Math.ceil(nonSerialOrders.orders.length / nonSerialOrdersPageSize) ? "pointer-events-none opacity-50" : "cursor-pointer"} />
+                                                    </PaginationItem>
+                                                </PaginationContent>
+                                            </Pagination>
+                                        </div>
+                                    )}
+                                </TabsContent>
+
+                                <TabsContent value="online" className="space-y-3 mt-3">
+                                    <div className="rounded-md border">
+                                        <Table className="text-sm">
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>订单号</TableHead>
+                                                    <TableHead>平台</TableHead>
+                                                    <TableHead>规格</TableHead>
+                                                    <TableHead>客户</TableHead>
+                                                    <TableHead>状态</TableHead>
+                                                    <TableHead>租期</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {nonSerialOrders.onlineOrders.slice((nonSerialOnlinePage - 1) * nonSerialOrdersPageSize, nonSerialOnlinePage * nonSerialOrdersPageSize).map(o => (
+                                                    <TableRow key={o.id}>
+                                                        <TableCell className="font-mono text-xs">
+                                                            <a href={onlineOrderUrl(o.orderNo, o.platform)} target="_blank" rel="noreferrer" className="text-blue-600 underline underline-offset-2 hover:text-blue-800">{o.orderNo}</a>
+                                                        </TableCell>
+                                                        <TableCell className="text-xs">{o.platform || "-"}</TableCell>
+                                                        <TableCell className="text-xs">{o.spec?.name || "-"}</TableCell>
+                                                        <TableCell className="text-xs">{o.customerName || "-"}</TableCell>
+                                                        <TableCell><Badge variant="outline" className="text-xs">{statusLabel(o.status)}</Badge></TableCell>
+                                                        <TableCell className="text-xs text-muted-foreground">
+                                                            {o.rentStartDate ? new Date(o.rentStartDate).toLocaleDateString() : "-"}
+                                                            {o.returnDeadline ? ` ~ ${new Date(o.returnDeadline).toLocaleDateString()}` : ""}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                                {nonSerialOrders.onlineOrders.length === 0 && (
+                                                    <TableRow><TableCell colSpan={6} className="text-center h-16 text-muted-foreground text-xs">暂无线上订单</TableCell></TableRow>
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                    {Math.ceil(nonSerialOrders.onlineOrders.length / nonSerialOrdersPageSize) > 1 && (
+                                        <div className="flex items-center justify-between px-1">
+                                            <span className="text-xs text-muted-foreground">共 {nonSerialOrders.onlineOrders.length} 条</span>
+                                            <Pagination className="justify-end w-auto mx-0">
+                                                <PaginationContent>
+                                                    <PaginationItem>
+                                                        <PaginationPrevious onClick={() => setNonSerialOnlinePage(p => Math.max(1, p - 1))} className={nonSerialOnlinePage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"} />
+                                                    </PaginationItem>
+                                                    {Array.from({ length: Math.ceil(nonSerialOrders.onlineOrders.length / nonSerialOrdersPageSize) }, (_, i) => i + 1).map(p => (
+                                                        <PaginationItem key={p}>
+                                                            <PaginationLink isActive={nonSerialOnlinePage === p} onClick={() => setNonSerialOnlinePage(p)} className="cursor-pointer">{p}</PaginationLink>
+                                                        </PaginationItem>
+                                                    ))}
+                                                    <PaginationItem>
+                                                        <PaginationNext onClick={() => setNonSerialOnlinePage(p => Math.min(Math.ceil(nonSerialOrders.onlineOrders.length / nonSerialOrdersPageSize), p + 1))} className={nonSerialOnlinePage === Math.ceil(nonSerialOrders.onlineOrders.length / nonSerialOrdersPageSize) ? "pointer-events-none opacity-50" : "cursor-pointer"} />
+                                                    </PaginationItem>
+                                                </PaginationContent>
+                                            </Pagination>
+                                        </div>
+                                    )}
+                                </TabsContent>
+                            </Tabs>
+                        )}
+                    </div>
+                </SheetContent>
+            </Sheet>
+
+            {/* Dialog: SN order detail */}
+            <Dialog open={snDetailOpen} onOpenChange={setSnDetailOpen}>
+                <DialogContent style={{ maxWidth: 640 }}>
+                    <DialogHeader>
+                        <DialogTitle>SN 占用详情: {snDetailSn}</DialogTitle>
+                    </DialogHeader>
+                    <div className="py-2 space-y-4">
+                        {snDetailData === null ? (
+                            <div className="text-center py-8 text-muted-foreground text-sm">加载中...</div>
+                        ) : (
+                            <>
+                                <div className="flex gap-6">
+                                    <div className="flex flex-col items-center gap-1">
+                                        <span className="text-xs text-muted-foreground">线下订单占用</span>
+                                        {snDetailData.orders.length > 0 ? (
+                                            <a href={`/orders?sn=${encodeURIComponent(snDetailSn || '')}`} target="_blank" rel="noreferrer" className="text-2xl font-bold text-primary underline underline-offset-2">
+                                                {snDetailData.orders.length}
+                                            </a>
+                                        ) : (
+                                            <span className="text-2xl font-bold text-muted-foreground">0</span>
+                                        )}
+                                    </div>
+                                    <div className="flex flex-col items-center gap-1">
+                                        <span className="text-xs text-muted-foreground">线上订单占用</span>
+                                        {snDetailData.onlineOrders.length > 0 ? (
+                                            <a href={`/online-orders?sn=${encodeURIComponent(snDetailSn || '')}`} target="_blank" rel="noreferrer" className="text-2xl font-bold text-primary underline underline-offset-2">
+                                                {snDetailData.onlineOrders.length}
+                                            </a>
+                                        ) : (
+                                            <span className="text-2xl font-bold text-muted-foreground">0</span>
+                                        )}
+                                    </div>
+                                </div>
+                                {(snDetailData.orders.length > 0 || snDetailData.onlineOrders.length > 0) && (() => {
+                                    const allRows = [
+                                        ...snDetailData.orders.map(o => ({ ...o, _src: 'offline' as const })),
+                                        ...snDetailData.onlineOrders.map(o => ({ ...o, _src: 'online' as const })),
+                                    ]
+                                    const totalPages = Math.ceil(allRows.length / snDetailPageSize)
+                                    const paged = allRows.slice((snDetailPage - 1) * snDetailPageSize, snDetailPage * snDetailPageSize)
+                                    return (
+                                        <div className="space-y-2">
+                                            <div className="rounded-md border">
+                                                <Table className="text-sm">
+                                                    <TableHeader>
+                                                        <TableRow>
+                                                            <TableHead>来源</TableHead>
+                                                            <TableHead>订单号</TableHead>
+                                                            <TableHead>平台</TableHead>
+                                                            <TableHead>客户</TableHead>
+                                                            <TableHead>状态</TableHead>
+                                                            <TableHead>租期</TableHead>
+                                                        </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                        {paged.map(o => (
+                                                            <TableRow key={o.id}>
+                                                                <TableCell>
+                                                                    {o._src === 'offline'
+                                                                        ? <Badge variant="outline" className="text-xs">线下</Badge>
+                                                                        : <Badge variant="secondary" className="text-xs">线上</Badge>}
+                                                                </TableCell>
+                                                                <TableCell className="font-mono text-xs">
+                                                                    <a
+                                                                        href={o._src === 'offline' ? offlineOrderUrl(o.orderNo, o.platform) : onlineOrderUrl(o.orderNo, o.platform)}
+                                                                        target="_blank" rel="noreferrer"
+                                                                        className="text-blue-600 underline underline-offset-2 hover:text-blue-800"
+                                                                    >{o.orderNo}</a>
+                                                                </TableCell>
+                                                                <TableCell className="text-xs">{o.platform || "-"}</TableCell>
+                                                                <TableCell className="text-xs">{o.customerName || "-"}</TableCell>
+                                                                <TableCell><Badge variant="outline" className="text-xs">{statusLabel(o.status)}</Badge></TableCell>
+                                                                <TableCell className="text-xs text-muted-foreground">
+                                                                    {o.rentStartDate ? new Date(o.rentStartDate).toLocaleDateString() : "-"}
+                                                                    {o.returnDeadline ? ` ~ ${new Date(o.returnDeadline).toLocaleDateString()}` : ""}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))}
+                                                    </TableBody>
+                                                </Table>
+                                            </div>
+                                            {totalPages > 1 && (
+                                                <div className="flex items-center justify-between px-1">
+                                                    <span className="text-xs text-muted-foreground">共 {allRows.length} 条</span>
+                                                    <Pagination className="justify-end w-auto mx-0">
+                                                        <PaginationContent>
+                                                            <PaginationItem>
+                                                                <PaginationPrevious onClick={() => setSnDetailPage(p => Math.max(1, p - 1))} className={snDetailPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"} />
+                                                            </PaginationItem>
+                                                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                                                                <PaginationItem key={p}>
+                                                                    <PaginationLink isActive={snDetailPage === p} onClick={() => setSnDetailPage(p)} className="cursor-pointer">{p}</PaginationLink>
+                                                                </PaginationItem>
+                                                            ))}
+                                                            <PaginationItem>
+                                                                <PaginationNext onClick={() => setSnDetailPage(p => Math.min(totalPages, p + 1))} className={snDetailPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"} />
+                                                            </PaginationItem>
+                                                        </PaginationContent>
+                                                    </Pagination>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                })()}
+                                {snDetailData.orders.length === 0 && snDetailData.onlineOrders.length === 0 && (
+                                    <p className="text-center text-sm text-muted-foreground py-4">该 SN 暂无活跃订单占用</p>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

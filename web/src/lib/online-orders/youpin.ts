@@ -1013,7 +1013,16 @@ export async function startYoupinSync(siteId: string) {
     await simulateHumanScroll(page, 1, 3)
 
     appendLog("Opening order list via menu clicks...")
-    const clickOk = await openYoupinOrderListByClicks(page)
+    const currentUrl = page.url()
+    const alreadyOnOrderList = currentUrl.includes("qnvipmall.com/order/order-list")
+
+    let clickOk = alreadyOnOrderList
+    if (alreadyOnOrderList) {
+        appendLog("Already on order list page, skipping menu navigation.")
+    } else {
+        clickOk = await openYoupinOrderListByClicks(page)
+    }
+
     if (!clickOk) {
         appendLog("Menu click navigation failed, falling back to configured order_menu_link if available.")
         if (targetSite.selectors.order_menu_link) {
@@ -1025,6 +1034,14 @@ export async function startYoupinSync(siteId: string) {
                 await clickNav(page, "#main > div > div.single-page-con > div > div > div > div > ul > li:nth-child(1)")
             } catch (err) {
                 appendLog(`Navigation failed: ${err}`)
+            }
+        } else {
+            // Fallback: navigate directly to order list URL
+            try {
+                await page.goto("https://merchant.qnvipmall.com/order/order-list", { waitUntil: "domcontentloaded", timeout: 30000 })
+                await waitRandom(page, 1200, 3000)
+            } catch (err) {
+                appendLog(`Direct navigation to order list failed: ${err}`)
             }
         }
     }

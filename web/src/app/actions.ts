@@ -1955,3 +1955,84 @@ export async function setAppConfigValue(key: string, value: string) {
         return { success: false, message: message || "配置更新失败" };
     }
 }
+
+// Non-completed order statuses
+const ACTIVE_ORDER_STATUSES = ['WAIT_PAY', 'PENDING_REVIEW', 'PENDING_SHIPMENT', 'PENDING_RECEIPT', 'RENTING', 'RETURNING', 'OVERDUE']
+
+/**
+ * Get non-completed orders linked to a non-serialized inventory item type (via SpecBom).
+ * Used for the inventory overview "查看" detail for non-serialized items.
+ */
+export async function getOrdersByItemTypeId(itemTypeId: string) {
+    // Find all specs that have this itemType in their BOM
+    const bomItems = await prisma.specBom.findMany({
+        where: { itemTypeId },
+        select: { specId: true }
+    })
+    const specIds = bomItems.map(b => b.specId)
+    if (specIds.length === 0) return { orders: [], onlineOrders: [] }
+
+    const [orders, onlineOrders] = await Promise.all([
+        prisma.order.findMany({
+            where: {
+                specId: { in: specIds },
+                status: { in: ACTIVE_ORDER_STATUSES }
+            },
+            select: {
+                id: true, orderNo: true, status: true, sourceContact: true, platform: true,
+                rentStartDate: true, returnDeadline: true, sn: true,
+                spec: { select: { name: true } }
+            },
+            orderBy: { rentStartDate: 'asc' }
+        }),
+        prisma.onlineOrder.findMany({
+            where: {
+                specId: { in: specIds },
+                status: { in: ACTIVE_ORDER_STATUSES }
+            },
+            select: {
+                id: true, orderNo: true, status: true, customerName: true, platform: true,
+                rentStartDate: true, returnDeadline: true, manualSn: true,
+                spec: { select: { name: true } }
+            },
+            orderBy: { rentStartDate: 'asc' }
+        })
+    ])
+
+    return {
+        orders: orders.map(o => ({ ...o, customerName: o.sourceContact, manualSn: o.sn })),
+        onlineOrders
+    }
+}
+
+/**
+ * Get orders (online + offline) that reference a specific SN (manualSn field).
+ * Used for the serialized item SN detail view.
+ */
+export async function getOrdersBySn(sn: string) {
+    const [orders, onlineOrders] = await Promise.all([
+        prisma.order.findMany({
+            where: { sn: sn, status: { in: ACTIVE_ORDER_STATUSES } },
+            select: {
+                id: true, orderNo: true, status: true, sourceContact: true, platform: true,
+                rentStartDate: true, returnDeadline: true,
+                spec: { select: { name: true } }
+            },
+            orderBy: { rentStartDate: 'asc' }
+        }),
+        prisma.onlineOrder.findMany({
+            where: { manualSn: sn, status: { in: ACTIVE_ORDER_STATUSES } },
+            select: {
+                id: true, orderNo: true, status: true, customerName: true, platform: true,
+                rentStartDate: true, returnDeadline: true,
+                spec: { select: { name: true } }
+            },
+            orderBy: { rentStartDate: 'asc' }
+        })
+    ])
+
+    return {
+        orders: orders.map(o => ({ ...o, customerName: o.sourceContact, manualSn: undefined })),
+        onlineOrders
+    }
+}

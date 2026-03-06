@@ -98,6 +98,29 @@ const platformMap: Record<string, string> = {
     OTHER: "其他"
 }
 
+// Map platform name to online-orders tab siteId
+const PLATFORM_TO_SITE_ID: Record<string, string> = {
+    '奥租': 'aolzu',
+    '零零享': 'llxzu',
+    '优品租': 'youpin',
+    '诚赁': 'chenglin',
+    '赞晨': 'zanchen',
+    '人人租': 'rrz',
+    'ZANCHEN': 'zanchen',
+    'CHENGLIN': 'chenglin',
+    'AOLZU': 'aolzu',
+    'YOUPIN': 'youpin',
+    'LLXZU': 'llxzu',
+    'RRZ': 'rrz',
+}
+
+const buildOnlineOrderUrl = (orderNo: string, platform?: string | null) => {
+    const params = new URLSearchParams({ q: orderNo })
+    const siteId = platform ? PLATFORM_TO_SITE_ID[platform] : undefined
+    if (siteId) params.set('tab', siteId)
+    return `/online-orders?${params.toString()}`
+}
+
 // Helper to get status display
 const getStatusDisplay = (status: string) => {
     return statusMap[status] || { label: status, color: 'bg-gray-100 text-gray-800' }
@@ -110,7 +133,7 @@ const getPlatformDisplay = (platform?: string | null) => {
 
 const getDisplayOrderNo = (order: OrderSimple) => {
     if (order.isOnline) return order.orderNo
-    return order.xianyuOrderNo || order.miniProgramOrderNo || order.orderNo
+    return order.orderNo
 }
 
 const extractSignedAt = (raw?: string | null) => {
@@ -240,6 +263,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const [selectedDayType, setSelectedDayType] = useState<'occupy' | 'in' | 'out' | 'stock'>('occupy')
     const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
     const [loadingItems, setLoadingItems] = useState(false)
+    const [selectedDayStats, setSelectedDayStats] = useState<{ occupied: number; available: number; totalStock: number } | null>(null)
     const [currentPage, setCurrentPage] = useState(1)
     const pageSize = 10
 
@@ -641,12 +665,26 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1))
     const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1))
 
-    const handleDayClick = async (day: Date, orders: OrderSimple[], type: 'occupy' | 'in' | 'out' | 'stock') => {
+    const handleDayClick = async (day: Date, orders: OrderSimple[], type: 'occupy' | 'in' | 'out' | 'stock', stats?: { occupied: number; available: number; totalStock: number }) => {
         setSelectedDate(day)
         setSelectedDayType(type)
         setSelectedDayOrders(orders)
+        setSelectedDayStats(stats || null)
         
         if (type === 'stock') {
+            // For non-serialized items, we don't need to fetch inventory items
+            // We'll show the summary + occupying orders directly
+            const isSerializedView = (() => {
+                if (activeTab === 'item') {
+                    const p = products.find(p => p.id === selectedProductId)
+                    // Check if the product maps to a serialized item type
+                    // We determine this by checking if getInventoryItems would return items
+                    // We'll fetch and check
+                    return true // fetch and let the display logic handle it
+                }
+                return true
+            })()
+
             setLoadingItems(true)
             setInventoryItems([])
             
@@ -767,7 +805,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                 compact={isMobile}
                                                 onInClick={() => handleDayClick(day, dayInOrders, 'in')}
                                                 onOutClick={() => handleDayClick(day, dayOutOrders, 'out')}
-                                                onStockClick={() => handleDayClick(day, dayOccupancy, 'stock')}
+                                                onStockClick={() => handleDayClick(day, dayOccupancy, 'stock', { occupied: stats.occupied, available: stats.available, totalStock: currentStock })}
                                             />
                                         </div>
                                     </div>
@@ -978,7 +1016,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                                     compact={true}
                                                                     onInClick={() => handleDayClick(day, dayInOrders, 'in')}
                                                                     onOutClick={() => handleDayClick(day, dayOutOrders, 'out')}
-                                                                    onStockClick={() => handleDayClick(day, dayOccupancy, 'stock')}
+                                                                    onStockClick={() => handleDayClick(day, dayOccupancy, 'stock', { occupied: stats.occupied, available: stats.available, totalStock: row.stock })}
                                                                 />
                                                             </div>
                                                         </td>
@@ -1206,74 +1244,185 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                 <div className="flex justify-center py-8">
                                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                                 </div>
-                            ) : (
-                                <div className="overflow-x-auto">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>序列号</TableHead>
-                                            <TableHead>状态</TableHead>
-                                            <TableHead>仓库</TableHead>
-                                            {activeTab === 'spec' && <TableHead>组件</TableHead>}
-                                            <TableHead>占用情况</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {inventoryItems.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={activeTab === 'spec' ? 5 : 4} className="text-center text-muted-foreground h-24">
-                                                    无库存记录
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            inventoryItems.map((item) => {
-                                                // Check occupancy
-                                                // An item is occupied if there is an active order on selectedDate that matches its SN
-                                                // selectedDayOrders contains orders that occupy stock on this day (as passed from render logic)
-                                                // But we need to check if SN matches.
-                                                // If order has no SN, it occupies 'some' item, but we can't link it.
-                                                
-                                                const occupyingOrder = selectedDayOrders.find(o => o.sn === item.sn && item.sn)
-                                                
-                                                return (
-                                                    <TableRow key={item.id}>
-                                                        <TableCell className="font-mono text-xs font-medium">
-                                                            {item.sn || '-'}
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            <Badge variant="outline" className={`${getStatusDisplay(item.status).color} border-0`}>
-                                                                {getStatusDisplay(item.status).label}
-                                                            </Badge>
-                                                        </TableCell>
-                                                        <TableCell>{item.warehouse?.name || '-'}</TableCell>
-                                                        {activeTab === 'spec' && (
-                                                            <TableCell className="text-xs text-muted-foreground">
-                                                                {item.componentName}
-                                                            </TableCell>
-                                                        )}
-                                                        <TableCell>
-                                                            {occupyingOrder ? (
-                                                                <div className="flex flex-col gap-1">
-                                                                    <Badge variant="secondary" className="bg-red-50 text-red-700 border-red-200 w-fit">
-                                                                        已占用
-                                                                    </Badge>
-                                                                    <span className="text-[10px] text-muted-foreground">
-                                                                        订单: {getDisplayOrderNo(occupyingOrder)}
-                                                                    </span>
-                                                                </div>
-                                                            ) : (
-                                                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                                                    可用
-                                                                </Badge>
-                                                            )}
-                                                        </TableCell>
+                            ) : inventoryItems.length === 0 ? (
+                                // Non-serialized item: show summary + occupying orders
+                                <div className="space-y-4">
+                                    {selectedDayStats && (
+                                        <div className="flex gap-4 p-3 rounded-md bg-muted/40 border text-sm">
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="text-xs text-muted-foreground">总库存</span>
+                                                <span className="text-xl font-bold">{selectedDayStats.totalStock}</span>
+                                            </div>
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="text-xs text-muted-foreground">当日占用</span>
+                                                <span className="text-xl font-bold text-red-600">{selectedDayStats.occupied}</span>
+                                            </div>
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="text-xs text-muted-foreground">当日在库</span>
+                                                <span className="text-xl font-bold text-green-600">{selectedDayStats.available}</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {selectedDayOrders.length > 0 && (
+                                        <div className="space-y-2">
+                                            <p className="text-xs text-muted-foreground font-medium">当日占用订单 ({selectedDayOrders.length} 条)</p>
+                                            <div className="overflow-x-auto">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>来源</TableHead>
+                                                        <TableHead>订单号</TableHead>
+                                                        <TableHead>规格</TableHead>
+                                                        <TableHead>状态</TableHead>
+                                                        <TableHead>租期</TableHead>
+                                                        <TableHead className="text-right">操作</TableHead>
                                                     </TableRow>
-                                                )
-                                            })
-                                        )}
-                                    </TableBody>
-                                </Table>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {selectedDayOrders.map(o => {
+                                                        const statusInfo = getStatusDisplay(o.status)
+                                                        return (
+                                                            <TableRow key={o.id}>
+                                                                <TableCell>
+                                                                    <Badge variant={o.isOnline ? "secondary" : "outline"}>
+                                                                        {o.isOnline ? "线上" : "线下"}
+                                                                    </Badge>
+                                                                </TableCell>
+                                                                <TableCell className="font-mono text-xs">{getDisplayOrderNo(o)}</TableCell>
+                                                                <TableCell className="text-xs">{o.variantName || o.productName || '-'}</TableCell>
+                                                                <TableCell>
+                                                                    <Badge variant="outline" className={`${statusInfo.color} border-0`}>{statusInfo.label}</Badge>
+                                                                </TableCell>
+                                                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                                                                    {o.rentStartDate ? format(new Date(o.rentStartDate), 'MM-dd') : '-'}
+                                                                    {o.returnDeadline ? ` ~ ${format(new Date(o.returnDeadline), 'MM-dd')}` : ''}
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openOrder(o)}>
+                                                                        <ExternalLink className="h-4 w-4" />
+                                                                    </Button>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        )
+                                                    })}
+                                                </TableBody>
+                                            </Table>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {selectedDayOrders.length === 0 && (
+                                        <p className="text-center text-sm text-muted-foreground py-8">当日无占用订单，全部在库</p>
+                                    )}
                                 </div>
+                            ) : (
+                                // Serialized item: show item list with occupancy
+                                (() => {
+                                    // Step 1: SN-exact match (order.sn === item.sn)
+                                    const snOrderMap = new Map<string, OrderSimple>()
+                                    const unsnOrders: OrderSimple[] = []
+                                    selectedDayOrders.forEach(o => {
+                                        if (o.sn) snOrderMap.set(o.sn, o)
+                                        else unsnOrders.push(o)
+                                    })
+
+                                    // Step 2: For items not matched by SN, assign unsnOrders in order
+                                    const unmatchedItems = inventoryItems.filter(item => !item.sn || !snOrderMap.has(item.sn))
+                                    // Build item -> order map for count-based assignment
+                                    const itemOrderMap = new Map<string, OrderSimple>()
+                                    unmatchedItems.forEach((item, i) => {
+                                        if (i < unsnOrders.length) itemOrderMap.set(item.id, unsnOrders[i])
+                                    })
+
+                                    return (
+                                        <div className="space-y-3">
+                                            {selectedDayStats && (
+                                                <div className="flex gap-4 p-3 rounded-md bg-muted/40 border text-sm">
+                                                    <div className="flex flex-col items-center gap-0.5">
+                                                        <span className="text-xs text-muted-foreground">总库存</span>
+                                                        <span className="text-xl font-bold">{selectedDayStats.totalStock}</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-center gap-0.5">
+                                                        <span className="text-xs text-muted-foreground">当日占用</span>
+                                                        <span className="text-xl font-bold text-red-600">{selectedDayStats.occupied}</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-center gap-0.5">
+                                                        <span className="text-xs text-muted-foreground">当日在库</span>
+                                                        <span className="text-xl font-bold text-green-600">{selectedDayStats.available}</span>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            <div className="overflow-x-auto">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>序列号</TableHead>
+                                                        <TableHead>仓库</TableHead>
+                                                        {activeTab === 'spec' && <TableHead>组件</TableHead>}
+                                                        <TableHead>占用情况</TableHead>
+                                                        <TableHead>平台</TableHead>
+                                                        <TableHead>订单号</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {inventoryItems.map((item) => {
+                                                        // Exact SN match first, then count-based assignment
+                                                        const occupyingOrder = (item.sn ? snOrderMap.get(item.sn) : undefined)
+                                                            ?? itemOrderMap.get(item.id)
+                                                        const orderNo = occupyingOrder ? getDisplayOrderNo(occupyingOrder) : null
+
+                                                        return (
+                                                            <TableRow key={item.id}>
+                                                                <TableCell className="font-mono text-xs font-medium">
+                                                                    {item.sn || '-'}
+                                                                </TableCell>
+                                                                <TableCell>{item.warehouse?.name || '-'}</TableCell>
+                                                                {activeTab === 'spec' && (
+                                                                    <TableCell className="text-xs text-muted-foreground">
+                                                                        {item.componentName}
+                                                                    </TableCell>
+                                                                )}
+                                                                <TableCell>
+                                                                    {occupyingOrder ? (
+                                                                        <Badge variant="secondary" className="bg-red-50 text-red-700 border-red-200">
+                                                                            占用中
+                                                                        </Badge>
+                                                                    ) : (
+                                                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                                                            可用
+                                                                        </Badge>
+                                                                    )}
+                                                                </TableCell>
+                                                                <TableCell className="text-xs">
+                                                                    {occupyingOrder
+                                                                        ? occupyingOrder.isOnline
+                                                                            ? (platformMap[occupyingOrder.platform || ''] || occupyingOrder.platform || '-')
+                                                                            : '线下'
+                                                                        : '-'}
+                                                                </TableCell>
+                                                                <TableCell className="font-mono text-xs">
+                                                                    {orderNo ? (
+                                                                        <a
+                                                                            href={occupyingOrder!.isOnline
+                                                                                ? buildOnlineOrderUrl(orderNo, occupyingOrder!.platform)
+                                                                                : `/orders?q=${encodeURIComponent(orderNo)}`
+                                                                            }
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            className="text-blue-600 underline underline-offset-2 hover:text-blue-800"
+                                                                        >
+                                                                            {orderNo}
+                                                                        </a>
+                                                                    ) : '-'}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        )
+                                                    })}
+                                                </TableBody>
+                                            </Table>
+                                            </div>
+                                        </div>
+                                    )
+                                })()
                             )
                         ) : (
                         <>

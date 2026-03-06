@@ -148,129 +148,78 @@ async function openAolzuOrderListByClicks(page: Page) {
   if (!ok2) return false
   const ok3 = await clickNav(page, allOrdersTab)
   if (!ok3) return false
-  await simulateHumanScroll(page, 1, 3)
-  await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => void 0)
+  // Wait for page to fully load including pagination controls
+  await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => void 0)
+  await waitRandom(page, 1500, 2500)
   return true
 }
 
 async function setAolzuPageSizeTo50(page: Page) {
-  // Use user-provided exact selector for the sizer
-  const sizer = "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > div > div.ivu-page-options-sizer > div > div.ivu-select-selection > div > span"
-  const sizerSelection = "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > div > div.ivu-page-options-sizer > div > div.ivu-select-selection"
-  // Use user-provided exact selector for the 50/page option
-  const option50 = "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > div > div.ivu-page-options-sizer > div > div.ivu-select-dropdown > ul.ivu-select-dropdown-list > li:nth-child(3)"
-  
-  // Also keep generic selectors as fallback
-  // If default is 10/page, we can also look for that text
-  const genericSizer = ".ivu-page-options-sizer .ivu-select-selection"
-  
+  // Generic selectors that work regardless of page structure
+  const sizerSelectors = [
+    ".ivu-page-options-sizer .ivu-select-selection",
+    ".ivu-page-options-sizer",
+  ]
+
   const isPageSize50 = async () => {
-      const valueTexts = [
-          "10 条/页",
-          "10条/页",
-          "20 条/页",
-          "20条/页",
-          "50 条/页",
-          "50条/页",
-          "100 条/页",
-          "100条/页"
-      ]
-      for (const text of valueTexts) {
-          const locator = page.locator(`text=${text}`).first()
-          try {
-              const visible = await locator.isVisible().catch(() => false)
-              if (!visible) continue
-              const actual = await locator.textContent()
-              if ((actual || "").includes("50")) return true
-          } catch {
-              continue
-          }
-      }
-      return false
+    try {
+      const text = await page.locator(".ivu-page-options-sizer .ivu-select-selection").textContent({ timeout: 2000 }).catch(() => "")
+      return (text || "").includes("50")
+    } catch { return false }
   }
 
   for (let i = 0; i < 5; i += 1) {
     try {
-      await simulateHumanScroll(page, 1, 2)
-      
-      // 1. Find and click the sizer
-      let sizerEl = await page.waitForSelector(sizer, { timeout: 3000 }).catch(() => null)
-      if (!sizerEl) {
-           sizerEl = await page.waitForSelector(sizerSelection, { timeout: 3000 }).catch(() => null)
+      await page.waitForLoadState("domcontentloaded").catch(() => void 0)
+      await waitRandom(page, 800, 1200)
+
+      // Already set to 50?
+      if (await isPageSize50()) {
+        appendLog("每页已是 50 条，跳过设置")
+        return true
       }
-      
-      if (!sizerEl) {
-           // Try generic sizer
-           sizerEl = await page.waitForSelector(genericSizer, { timeout: 3000 }).catch(() => null)
+
+      // Find the sizer
+      let sizerEl = null
+      for (const sel of sizerSelectors) {
+        sizerEl = await page.waitForSelector(sel, { timeout: 3000 }).catch(() => null)
+        if (sizerEl) break
       }
-      
-      // Try to find by text content if selector fails
-      if (!sizerEl) {
-           sizerEl = await page.waitForSelector("span:has-text('10 条/页')", { timeout: 2000 }).catch(() => null) ||
-                     await page.waitForSelector("span:has-text('10条/页')", { timeout: 2000 }).catch(() => null)
-      }
-      
+
       if (!sizerEl) throw new Error("Page size sizer not found")
-      
-      // Try to click the center of the element to ensure dropdown opens
-      const box = await sizerEl.boundingBox()
-      if (box) {
-          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
-      } else {
-          await sizerEl.click({ force: true })
-      }
-      await waitRandom(page, 500, 1200)
-      
-      // 2. Click the 50/page option
+
+      // Scroll sizer into view and click it
+      await sizerEl.scrollIntoViewIfNeeded().catch(() => void 0)
+      await waitRandom(page, 300, 600)
+      await sizerEl.click({ force: true })
+      await waitRandom(page, 600, 1000)
+
+      // Click the 50/page option from the dropdown
       let clicked = false
-      
-      // Try specific option first
-      const optSpecific = await page.waitForSelector(option50, { state: 'visible', timeout: 2000 }).catch(() => null)
-      if (optSpecific) {
-          await optSpecific.click({ force: true })
+      const optionSelectors = [
+        "body .ivu-select-dropdown .ivu-select-item:has-text('50 条/页')",
+        "body .ivu-select-dropdown .ivu-select-item:has-text('50条/页')",
+        "body .ivu-select-dropdown .ivu-select-item:has-text('50')",
+        "body .ivu-select-dropdown-list li:nth-child(3)",
+      ]
+
+      for (const sel of optionSelectors) {
+        const opt = await page.waitForSelector(sel, { state: "visible", timeout: 2000 }).catch(() => null)
+        if (opt) {
+          await opt.click({ force: true })
           clicked = true
+          break
+        }
       }
-      
-      if (!clicked) {
-          // Dropdown might render in body; search globally for visible dropdown items
-          const optionInBody = await page.waitForSelector("body .ivu-select-dropdown .ivu-select-item:has-text('50')", { state: 'visible', timeout: 2000 }).catch(() => null)
-          if (optionInBody) {
-              await optionInBody.click({ force: true })
-              clicked = true
-          }
-      }
-      
-      if (!clicked) {
-          // Fallback options
-          const optionSelectors = [
-              "li.ivu-select-item:has-text('50 条/页')",
-              "li.ivu-select-item:has-text('50条/页')",
-              "li.ivu-select-item:has-text('50')",
-              ".ivu-select-dropdown-list li:nth-child(3)",
-              "body .ivu-select-dropdown .ivu-select-item:nth-child(3)"
-          ]
-          
-          for (const sel of optionSelectors) {
-              try {
-                  const opt = await page.waitForSelector(sel, { state: 'visible', timeout: 2000 })
-                  if (opt) {
-                      await opt.click({ force: true })
-                      clicked = true
-                      break
-                  }
-              } catch { continue }
-          }
-      }
-      
+
       if (!clicked) throw new Error("Page size option '50' not found or not clickable")
 
       appendLog("已点击 50 条/页，等待页面刷新...")
-      await page.waitForTimeout(1200)
+      await page.waitForTimeout(1500)
 
       if (await isPageSize50()) {
-          appendLog("已确认每页 50 条生效")
-          await page.waitForTimeout(1500)
-          return true
+        appendLog("已确认每页 50 条生效")
+        return true
       }
 
       appendLog("未检测到 50 条/页生效，继续重试...")
@@ -691,12 +640,6 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
         try {
             const fullText = await element.innerText()
             
-            // Debug: Log first few orders content to understand structure
-            if (index < 3) {
-                 const cleanText = fullText.replace(/\s+/g, ' ').substring(0, 500)
-                 appendLog(`[Debug] Order ${index + 1} Raw: ${cleanText}`)
-            }
-            
             // NOTE: This parsing logic is based on Chenglin and needs to be adapted for Aolzu
             // once we have sample data or page structure.
             // Assuming similar structure for now or relying on generic extraction.
@@ -728,52 +671,74 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
             }
 
             // 2. Product Name & Variant
-            // Based on logs: "【出游租】三星 Galaxy S23 Ultra 套餐：租完可归还/买断 三星 S23 Ultra 8GB+256GB95新"
-            // Or "DJI/大疆 Osmo pocket 3 套餐：租完可归还/买断 特惠档期 标准版+128G内存卡99新"
-            // The structure seems to be: [Image] [Title/Product Name] [Variant/Package info]
-            
-            // Try to split by newlines first
-            const lines = fullText.split('\n').map(l => l.trim()).filter(l => l)
-            
+            // Raw text structure:
+            // "...商品编号：1997918053520920578 【出游租】三星 Galaxy S23 Ultra套餐：租完可归还/买断 三星 S23 Ultra 8GB+256GB95新 修改价格..."
+            // productName = text between 商品编号：\d+ and 套餐：
+            // variantName = text after 套餐： until price/quantity marker
+
             let productName = ""
             let variantName = ""
-            
-            // Heuristic: Look for lines that look like product names (after order no line?)
-            // Or try to parse specific keywords "套餐："
-            const packageIndex = lines.findIndex(l => l.includes("套餐：") || l.startsWith("套餐"))
-            if (packageIndex > 0) {
-                // The line before "套餐" might be product name
-                // But in raw log: "【出游租】三星 Galaxy S23 Ultra 套餐：..." it's on same line or close
-                
-                // Let's try to find the line containing "套餐："
-                const packageLine = lines[packageIndex]
-                const parts = packageLine.split(/套餐[:：]/)
-                if (parts.length > 1) {
-                    // product name might be before "套餐" or on previous line
-                    if (parts[0].trim().length > 2) {
-                        productName = parts[0].trim()
-                    } else if (packageIndex > 0) {
-                        productName = lines[packageIndex - 1]
-                    }
-                    
-                    // variant is after
-                    variantName = parts[1].trim()
-                    variantName = variantName.replace(/^(套餐|标配|套装)[:：]?\s*/, "").trim()
-                    
-                    // If next line doesn't start with price/status keywords, append it to variant?
-                    // "三星 S23 Ultra 8GB+256GB95新" is often on next line
-                    if (lines[packageIndex + 1] && !lines[packageIndex + 1].includes("￥") && !lines[packageIndex + 1].includes("订单")) {
-                        variantName += " " + lines[packageIndex + 1]
+
+            // Extract productName: after 商品编号：<digits><space> up to 套餐：
+            const titleMatch = fullText.match(/商品编号[：:]\s*\d+\s+([\s\S]+?)套餐[：:]/)
+            if (titleMatch) {
+                // Strip known noise fields that appear between 商品编号 and the actual product name
+                let raw = titleMatch[1]
+                    .replace(/发货时间[：:]\s*[\d\-: ]+/g, "")
+                    .replace(/快递单号[：:]\s*\S+/g, "")
+                    .replace(/【[^】]*(速运|快递|物流)[^】]*】/g, "")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                productName = raw
+            }
+
+            // Fallback: if no 商品编号, try to find product name before 套餐：
+            // Some orders have: "发货时间：... 快递单号：... 【顺丰速运】 商品名 套餐：..."
+            // Strip known prefixes and take the last segment before 套餐：
+            if (!productName) {
+                const beforeSku = fullText.match(/([\s\S]+?)套餐[：:]/)
+                if (beforeSku) {
+                    // Remove known noise: 发货时间, 快递单号, 物流公司 brackets, 商品编号
+                    let cleaned = beforeSku[1]
+                        .replace(/发货时间[：:][^\n]+/g, "")
+                        .replace(/快递单号[：:][^\n]+/g, "")
+                        .replace(/【[^】]*速运[^】]*】/g, "")
+                        .replace(/【[^】]*快递[^】]*】/g, "")
+                        .replace(/商品编号[：:]\s*\d+/g, "")
+                        .replace(/店铺名称[：:][^\n]+/g, "")
+                        .replace(/下单时间[：:][^\n]+/g, "")
+                        .replace(/订单号[：:][^\n]+/g, "")
+                        .replace(/支付宝[^\n]+/g, "")
+                        .trim()
+                    // Take the last non-empty segment
+                    const segments = cleaned.split(/\s+/).filter(s => s.length > 0)
+                    if (segments.length > 0) {
+                        // Find the last meaningful chunk (product names often start with 【 or are multi-char)
+                        // Join trailing segments that look like a product name
+                        let nameStart = segments.length - 1
+                        for (let j = segments.length - 1; j >= 0; j--) {
+                            if (segments[j].startsWith("【") || /[\u4e00-\u9fa5A-Za-z]/.test(segments[j])) {
+                                nameStart = j
+                                if (segments[j].startsWith("【")) break
+                            } else {
+                                break
+                            }
+                        }
+                        productName = segments.slice(nameStart).join(" ").trim()
                     }
                 }
             }
-            
-            // Fallback if structure is different
-            if (!productName) {
-                // Try finding common brand names or structure
-                // "DJI/大疆 Osmo pocket 3"
-                const productLine = lines.find(l => l.includes("三星") || l.includes("DJI") || l.includes("大疆") || l.includes("Apple") || l.includes("iPhone"))
-                if (productLine) productName = productLine
+
+            // Extract variantName: after 套餐： up to first price (￥) or quantity (数量) or 修改
+            const skuMatch = fullText.match(/套餐[：:]([\s\S]+?)(?:修改价格|数量\s*x|￥[\d.]+|$)/)
+            if (skuMatch) {
+                variantName = skuMatch[1].trim()
+            }
+
+            // Log raw text for orders where parsing may be uncertain
+            if (!productName || !variantName) {
+                const cleanText = fullText.replace(/\s+/g, ' ').substring(0, 600)
+                appendLog(`[Debug] OrderNo: ${orderNo} parse issue - productName="${productName}" variantName="${variantName}" Raw: ${cleanText}`)
             }
 
             // 3. Status
@@ -810,8 +775,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
             }
 
             if (status === "UNKNOWN") {
-                const cleanText = fullText.replace(/\s+/g, ' ')
-                appendLog(`[Warning] OrderNo: ${orderNo} has UNKNOWN status. Raw: ${cleanText}`)
+                // silently skip logging for unknown status
             }
             
             // 4. Money
@@ -1143,6 +1107,14 @@ export async function startAolzuSync(siteId: string) {
                 await waitRandom(page, 1200, 3000)
             } catch (err) {
                 appendLog(`Navigation failed: ${err}`)
+                // Page may have crashed — reset context so next retry starts fresh
+                if (String(err).includes("crashed") || String(err).includes("Target page") || String(err).includes("Session closed")) {
+                    appendLog("Page crash detected, resetting browser context...")
+                    try { await runtime.context?.close() } catch {}
+                    runtime.context = undefined
+                    runtime.page = undefined
+                    throw new Error(`Page crashed during navigation: ${err}`)
+                }
             }
         }
     }
@@ -1150,7 +1122,7 @@ export async function startAolzuSync(siteId: string) {
     await handlePopup(page)
     const pageSizeOk = await setAolzuPageSizeTo50(page)
     if (!pageSizeOk) {
-        throw new Error("设置每页 50 条失败，停止同步。")
+        appendLog("设置每页 50 条失败，继续尝试抓取（页面可能已是正确状态）...")
     }
 
     let currentPage = 1
@@ -1303,13 +1275,17 @@ export async function startAolzuSync(siteId: string) {
 
 export function stopAolzuSync() {
     appendLog("Stop command received.")
-    
     runtime.shouldStop = true;
-    
-    updateStatus({ status: "error", message: "User stopped manually" })
-   
-    appendLog("Browser session preserved for next run.");
-    
+    updateStatus({ status: "idle", message: "已停止" })
+
+    // Close browser so next run starts with a clean session
+    if (runtime.context) {
+        runtime.context.close().catch(() => {})
+        runtime.context = undefined
+        runtime.page = undefined
+        appendLog("Browser session closed.")
+    }
+
     return runtime.status
 }
 

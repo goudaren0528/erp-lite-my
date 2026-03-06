@@ -246,17 +246,42 @@ const platformMap: Record<string, string> = {
 export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrdersConfig }) {
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
+  const initialSn = searchParams.get('sn') || ''
+  const initialTab = searchParams.get('tab') || ''
+
+  const zanchenSite = initialConfig.sites.find(s => s.id === "zanchen")
+
+  // Resolve initialTab to an actual site id (exact match first, then fuzzy by name/id)
+  const resolveTabToSiteId = (tab: string) => {
+    if (!tab) return null
+    const exact = initialConfig.sites.find(s => s.id === tab)
+    if (exact) return exact.id
+    const tabLower = tab.toLowerCase()
+    const fuzzy = initialConfig.sites.find(s =>
+      s.id.toLowerCase().includes(tabLower) ||
+      tabLower.includes(s.id.toLowerCase()) ||
+      s.name.includes(tab) ||
+      (tabLower === "chenglin" && (s.name.includes("诚赁") || s.id.toLowerCase().includes("chenglin"))) ||
+      (tabLower === "aolzu" && (s.name.includes("奥租") || s.id.toLowerCase().includes("aolzu"))) ||
+      (tabLower === "zanchen" && (s.name.includes("赞晨") || s.id.toLowerCase().includes("zanchen"))) ||
+      (tabLower === "llxzu" && (s.name.includes("零零享") || s.id.toLowerCase().includes("llxzu"))) ||
+      (tabLower === "youpin" && (s.name.includes("优品") || s.id.toLowerCase().includes("youpin"))) ||
+      (tabLower === "rrz" && (s.name.includes("人人租") || s.id.toLowerCase().includes("rrz")))
+    )
+    return fuzzy?.id || null
+  }
+
+  const defaultSiteId = initialTab
+    ? (resolveTabToSiteId(initialTab) ?? initialTab)
+    : (zanchenSite ? zanchenSite.id : (initialConfig.sites[0]?.id || ""))
+
+  const [activeSiteId, setActiveSiteId] = useState(defaultSiteId)
 
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [config, setConfig] = useState<OnlineOrdersConfig>(initialConfig)
   const [draft, setDraft] = useState<OnlineOrdersConfig>(initialConfig)
-  
-  // Prioritize Zanchen for initial selection
-  const zanchenSite = initialConfig.sites.find(s => s.id === "zanchen")
-  const defaultSiteId = zanchenSite ? zanchenSite.id : (initialConfig.sites[0]?.id || "")
-  
-  const [activeSiteId, setActiveSiteId] = useState(defaultSiteId)
+
   const [selectorMode, setSelectorMode] = useState<"form" | "json">("form")
   const [selectorsJson, setSelectorsJson] = useState("")
   const [activeTab, setActiveTab] = useState(defaultSiteId)
@@ -285,7 +310,7 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
   const [filterOrderNo, setFilterOrderNo] = useState(initialQuery)
   const [filterRecipientName, setFilterRecipientName] = useState('')
   const [filterProduct, setFilterProduct] = useState('')
-  const [filterSn, setFilterSn] = useState('')
+  const [filterSn, setFilterSn] = useState(initialSn)
   const [matchFilter, setMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
   
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
