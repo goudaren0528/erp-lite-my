@@ -2766,3 +2766,18 @@ async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
         }
     }
 }
+
+export async function restartZanchenBrowser() {
+  runtime.shouldStop = true
+  addLog("Browser restart requested.")
+  try {
+    if (runtime.context) {
+      await runtime.context.close().catch(() => void 0)
+      runtime.context = undefined
+      runtime.page = undefined
+      addLog("Browser context closed.")
+    }
+  } catch { void 0 }
+  runtime.status = { ...runtime.status, status: "idle", message: "浏览器已重启，可重新开始同步" }
+  return { success: true }
+}

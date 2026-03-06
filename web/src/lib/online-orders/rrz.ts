@@ -426,6 +426,21 @@ export function stopRrzSync() {
     })
 }
 
+export async function restartRrzBrowser() {
+    appendLog("Browser restart requested.")
+    runtime.shouldStop = true
+    try {
+        if (runtime.context) {
+            await runtime.context.close().catch(() => void 0)
+            runtime.context = undefined
+            runtime.page = undefined
+            appendLog("Browser context closed.")
+        }
+    } catch { void 0 }
+    updateStatus({ status: "idle", message: "浏览器已重启，可重新开始同步" })
+    return { success: true }
+}
+
 function updateStatus(updates: Partial<RrzStatus>) {
     const currentStatus = runtime.status
     const newLogs = updates.logs !== undefined ? updates.logs : currentStatus.logs

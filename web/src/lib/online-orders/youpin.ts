@@ -176,6 +176,37 @@ export function stopYoupinSync() {
     updateStatus({ status: "idle", message: "Stopping..." })
 }
 
+export async function restartYoupinBrowser() {
+    appendLog("Browser restart requested.")
+    runtime.shouldStop = true
+    if (runtime.context) {
+        await runtime.context.close().catch(() => void 0)
+        runtime.context = undefined
+        runtime.page = undefined
+        appendLog("Browser context closed.")
+    }
+    updateStatus({ status: "idle", message: "浏览器已重启，可重新开始同步", needsAttention: false })
+    return { success: true }
+}
+
+export async function clearYoupinSession() {
+    appendLog("Manual clear session requested.")
+    try {
+        // Close the existing context entirely so next launch picks up the stealth init script
+        if (runtime.context) {
+            await runtime.context.close().catch(() => void 0)
+            runtime.context = undefined
+            runtime.page = undefined
+            appendLog("Browser context closed. Will relaunch with stealth on next sync start.")
+        }
+        updateStatus({ status: "awaiting_user", message: "已清除登录状态，请重新点击「开始同步」以重新打开浏览器登录", needsAttention: true })
+        return { success: true }
+    } catch (e) {
+        appendLog(`Clear session error: ${e}`)
+        return { success: false, error: String(e) }
+    }
+}
+
 function updateStatus(updates: Partial<YoupinStatus>) {
     const currentLogs = runtime.status.logs || []
     let newLogs = currentLogs
@@ -273,9 +304,16 @@ async function ensureContext(headless: boolean): Promise<BrowserContext> {
             '--disable-gpu',
             '--disable-dev-shm-usage',
         ],
-        ignoreDefaultArgs: ['--enable-automation'] 
+        ignoreDefaultArgs: ['--enable-automation']
       })
       runtime.headless = finalHeadless
+
+      await runtime.context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+        ;(window as unknown as Record<string, unknown>).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}), app: {} }
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] })
+        Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] })
+      })
   } catch (e) {
       appendLog(`Failed to launch browser: ${e}`)
       throw e
@@ -361,75 +399,17 @@ async function login(page: Page, site: SiteConfig) {
      appendLog(`Navigating to login: ${site.loginUrl}`)
      const origin = getOriginFromUrl(site.loginUrl)
      await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
+     // 等页面完全稳定，不做任何填写操作，避免触发验证码刷新
+     await waitRandom(page, 1000, 1500)
   }
 
-  const { username_input, password_input, login_button } = site.selectors
-  if (username_input && site.username) {
-     try {
-        if (await page.isVisible(username_input, { timeout: 2000 })) {
-            appendLog("Filling username...")
-            await page.fill(username_input, site.username)
-        }
-     } catch {}
-  }
-  if (password_input && site.password) {
-     try {
-        if (await page.isVisible(password_input, { timeout: 2000 })) {
-            appendLog("Filling password...")
-            await page.fill(password_input, site.password)
-        }
-     } catch {}
-  }
-  const captchaSelectors = [
-    (site.selectors as unknown as { captcha_input?: string }).captcha_input,
-    "input[placeholder*='验证码']",
-    "input[aria-label*='验证码']",
-    "input[name*='captcha' i]",
-    "input[id*='captcha' i]",
-    "input[placeholder*='校验码']",
-  ].filter(Boolean) as string[]
-
-  let hasCaptcha = false
-  for (const sel of captchaSelectors) {
-    try {
-      if (await page.isVisible(sel, { timeout: 300 })) {
-        hasCaptcha = true
-        break
-      }
-    } catch {
-      void 0
-    }
-  }
-
-  if (hasCaptcha) {
-    updateStatus({ status: "awaiting_user", message: "需要人工介入: 优品租登录含验证码，请输入验证码后再点击登录", needsAttention: true })
-    appendLog("Captcha detected on login page; waiting for user to complete captcha + login.")
-    const config = await loadConfig()
-    if (config?.webhookUrls && config.webhookUrls.length > 0) {
-      sendWebhookSimple(config, "优品租登录需要输入验证码")
-    }
-  } else if (login_button) {
-    try {
-      if (await page.isVisible(login_button, { timeout: 2000 })) {
-        appendLog("Clicking login button...")
-        await page.click(login_button)
-        await waitRandom(page, 1200, 2600)
-      }
-    } catch {
-      void 0
-    }
-  }
-
-  appendLog("Waiting for login to complete (check url change or manual intervention)...")
-  
-  if (await isOnLoginPage(page, site)) {
-      updateStatus({ status: "awaiting_user", message: "需要人工介入: 请在弹出的窗口完成登录", needsAttention: true })
-      appendLog("需要人工介入: 检测到处于登录页")
-      
-      const config = await loadConfig()
-      if (config?.webhookUrls && config.webhookUrls.length > 0) {
-          sendWebhookSimple(config, "优品租平台需要登录验证")
-      }
+  // 优品租：不自动填账密，不点登录，不做任何操作
+  // 任何自动操作都可能导致 uuid 和验证码图片不一致
+  appendLog("已打开登录页，等待人工完成登录（填账密+验证码+点登录）...")
+  updateStatus({ status: "awaiting_user", message: "需要人工介入: 请在浏览器中填写账号、密码、验证码后点击登录", needsAttention: true })
+  const config = await loadConfig()
+  if (config?.webhookUrls && config.webhookUrls.length > 0) {
+    sendWebhookSimple(config, "优品租登录需要人工介入")
   }
 
   const start = Date.now()

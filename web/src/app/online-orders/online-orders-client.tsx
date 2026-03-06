@@ -1250,6 +1250,19 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
             <Button
               size="sm"
               variant="outline"
+              onClick={async () => {
+                await fetch("/api/online-orders/zanchen/restart-browser", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ siteId: activeTab })
+                })
+              }}
+            >
+              重启浏览器
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               onClick={() => setLogsOpen(true)}
             >
               <FileText className="h-4 w-4 mr-1" />
@@ -1300,20 +1313,34 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
                   </div>
                   <div className="space-y-2">
                     {currentStatus?.status === "awaiting_user" && (
-                      <div className="rounded-md border border-blue-200 bg-blue-50 p-4 text-blue-700 flex justify-between items-center">
+                      <div className="rounded-md border border-blue-200 bg-blue-50 p-4 text-blue-700 flex justify-between items-center gap-2">
                         <div>
                             <p className="font-medium">需要人工介入</p>
                             <p className="text-sm">请在弹出的浏览器完成验证码或短信验证后等待系统继续。</p>
                         </div>
-                        <Button 
-                            size="sm" 
-                            variant="secondary" 
-                            className="bg-white border hover:bg-blue-100"
-                            onClick={() => window.open("/online-orders/remote-auth", "_blank")}
-                        >
-                            <MonitorPlay className="w-4 h-4 mr-2" />
-                            打开远程操作
-                        </Button>
+                        <div className="flex gap-2 shrink-0">
+                            {(activeTab === "youpin" || config.sites.find(s => s.id === activeTab)?.name.includes("优品")) && (
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="bg-white border hover:bg-blue-100"
+                                    onClick={async () => {
+                                        await fetch("/api/online-orders/youpin/clear-session", { method: "POST" })
+                                    }}
+                                >
+                                    清除登录状态
+                                </Button>
+                            )}
+                            <Button 
+                                size="sm" 
+                                variant="secondary" 
+                                className="bg-white border hover:bg-blue-100"
+                                onClick={() => window.open("/online-orders/remote-auth", "_blank")}
+                            >
+                                <MonitorPlay className="w-4 h-4 mr-2" />
+                                打开远程操作
+                            </Button>
+                        </div>
                       </div>
                     )}
                     

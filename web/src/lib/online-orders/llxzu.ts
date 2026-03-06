@@ -230,6 +230,21 @@ export function stopLlxzuSync() {
     updateStatus({ status: "idle", message: "Stopping..." })
 }
 
+export async function restartLlxzuBrowser() {
+    appendLog("Browser restart requested.")
+    runtime.shouldStop = true
+    try {
+        if (runtime.context) {
+            await runtime.context.close().catch(() => void 0)
+            runtime.context = undefined
+            runtime.page = undefined
+            appendLog("Browser context closed.")
+        }
+    } catch { void 0 }
+    updateStatus({ status: "idle", message: "\u6d4f\u89c8\u5668\u5df2\u91cd\u542f\uff0c\u53ef\u91cd\u65b0\u5f00\u59cb\u540c\u6b65" })
+    return { success: true }
+}
+
 function updateStatus(updates: Partial<LlxzuStatus>) {
     const currentLogs = runtime.status.logs || []
     let newLogs = currentLogs

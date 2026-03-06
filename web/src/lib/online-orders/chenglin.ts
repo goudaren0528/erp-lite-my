@@ -1146,6 +1146,21 @@ export function stopChenglinSync() {
     return runtime.status
 }
 
+export async function restartChenglinBrowser() {
+    appendLog("Browser restart requested.")
+    runtime.shouldStop = true
+    try {
+        if (runtime.context) {
+            await runtime.context.close().catch(() => void 0)
+            runtime.context = undefined
+            runtime.page = undefined
+            appendLog("Browser context closed.")
+        }
+    } catch { void 0 }
+    updateStatus({ status: "idle", message: "浏览器已重启，可重新开始同步" })
+    return { success: true }
+}
+
 export function getRunningPage(): Page | undefined {
   if (runtime.page && !runtime.page.isClosed()) {
       return runtime.page
