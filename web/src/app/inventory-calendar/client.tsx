@@ -21,6 +21,15 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import { Check, ChevronsUpDown } from "lucide-react"
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -722,7 +731,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
     const openOrder = (order: OrderSimple) => {
         if (order.isOnline) {
-            window.open(`/online-orders?q=${encodeURIComponent(order.orderNo)}`, '_blank')
+            window.open(buildOnlineOrderUrl(order.orderNo, order.platform), '_blank')
         } else {
             window.open(`/orders?q=${encodeURIComponent(order.orderNo)}`, '_blank')
         }
@@ -1067,44 +1076,84 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                     </Tabs>
                     
                     {activeTab === "item" ? (
-                        <Select value={selectedProductId} onValueChange={setSelectedProductId}>
-                            <SelectTrigger className="w-full sm:w-[250px]">
-                                <SelectValue placeholder="选择商品" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {viewMode === 'table' && <SelectItem value="ALL">全部商品</SelectItem>}
-                                {products.map(p => (
-                                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant="outline" role="combobox" className="w-full sm:w-[250px] justify-between font-normal">
+                                    <span className="truncate">
+                                        {selectedProductId && selectedProductId !== 'ALL'
+                                            ? (products.find(p => p.id === selectedProductId)?.name ?? '选择商品')
+                                            : (viewMode === 'table' ? '全部商品' : '选择商品')}
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[250px] p-0">
+                                <Command>
+                                    <CommandInput placeholder="搜索商品..." />
+                                    <CommandList className="max-h-[200px]">
+                                        <CommandEmpty>未找到商品</CommandEmpty>
+                                        <CommandGroup>
+                                            {viewMode === 'table' && (
+                                                <CommandItem value="ALL" onSelect={() => setSelectedProductId('ALL')}>
+                                                    <Check className={`mr-2 h-4 w-4 ${selectedProductId === 'ALL' ? 'opacity-100' : 'opacity-0'}`} />
+                                                    全部商品
+                                                </CommandItem>
+                                            )}
+                                            {products.map(p => (
+                                                <CommandItem key={p.id} value={p.name} onSelect={() => setSelectedProductId(p.id)}>
+                                                    <Check className={`mr-2 h-4 w-4 ${selectedProductId === p.id ? 'opacity-100' : 'opacity-0'}`} />
+                                                    {p.name}
+                                                </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
                     ) : (
-                        <Select value={selectedVariantId} onValueChange={setSelectedVariantId}>
-                            <SelectTrigger className="w-full sm:w-[300px]">
-                                <SelectValue placeholder="选择规格" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {viewMode === 'table' && <SelectItem value="ALL">全部规格</SelectItem>}
-                                {allVariants.map(v => {
-                                    // Check if this variant has BOM
-                                    const specInfo = specLookup.byId.get(v.id) || specLookup.byName.get(`${v.productId}:${v.name}`)
-                                    const hasBom = specInfo?.spec?.bomItems && specInfo.spec.bomItems.length > 0
-                                    
-                                    return (
-                                        <SelectItem key={v.id} value={v.id}>
-                                            <div className="flex items-center gap-2">
-                                                <span>{v.fullName}</span>
-                                                {!hasBom && (
-                                                    <Badge variant="outline" className="text-[10px] px-1 h-4 text-red-600 border-red-200 bg-red-50">
-                                                        无BOM
-                                                    </Badge>
-                                                )}
-                                            </div>
-                                        </SelectItem>
-                                    )
-                                })}
-                            </SelectContent>
-                        </Select>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant="outline" role="combobox" className="w-full sm:w-[300px] justify-between font-normal">
+                                    <span className="truncate">
+                                        {selectedVariantId && selectedVariantId !== 'ALL'
+                                            ? (allVariants.find(v => v.id === selectedVariantId)?.fullName ?? '选择规格')
+                                            : (viewMode === 'table' ? '全部规格' : '选择规格')}
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[300px] p-0">
+                                <Command>
+                                    <CommandInput placeholder="搜索规格..." />
+                                    <CommandList className="max-h-[200px]">
+                                        <CommandEmpty>未找到规格</CommandEmpty>
+                                        <CommandGroup>
+                                            {viewMode === 'table' && (
+                                                <CommandItem value="ALL" onSelect={() => setSelectedVariantId('ALL')}>
+                                                    <Check className={`mr-2 h-4 w-4 ${selectedVariantId === 'ALL' ? 'opacity-100' : 'opacity-0'}`} />
+                                                    全部规格
+                                                </CommandItem>
+                                            )}
+                                            {allVariants.map(v => {
+                                                const specInfo = specLookup.byId.get(v.id) || specLookup.byName.get(`${v.productId}:${v.name}`)
+                                                const hasBom = specInfo?.spec?.bomItems && specInfo.spec.bomItems.length > 0
+                                                return (
+                                                    <CommandItem key={v.id} value={v.fullName} onSelect={() => setSelectedVariantId(v.id)}>
+                                                        <Check className={`mr-2 h-4 w-4 ${selectedVariantId === v.id ? 'opacity-100' : 'opacity-0'}`} />
+                                                        <span className="truncate">{v.fullName}</span>
+                                                        {!hasBom && (
+                                                            <Badge variant="outline" className="ml-1 text-[10px] px-1 h-4 text-red-600 border-red-200 bg-red-50 shrink-0">
+                                                                无BOM
+                                                            </Badge>
+                                                        )}
+                                                    </CommandItem>
+                                                )
+                                            })}
+                                        </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
                     )}
                 </div>
 
@@ -1225,7 +1274,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             </Card>
 
             <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-                <SheetContent className="w-full sm:w-[600px] sm:max-w-[600px] overflow-y-auto">
+                <SheetContent className="w-full sm:w-[720px] sm:max-w-[720px] overflow-y-auto">
                     <SheetHeader>
                         <SheetTitle>
                             {selectedDate && format(selectedDate, 'yyyy年MM月dd日', { locale: zhCN })} {dayTypeLabel}详情

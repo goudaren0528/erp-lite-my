@@ -3,6 +3,7 @@ import fs from "fs"
 import { chromium, type BrowserContext, type Frame, type Page, type ElementHandle } from "playwright"
 import { prisma } from "@/lib/db"
 import { normalizeText, parseVariantNames, matchProductByTitle, matchDeviceMapping } from "@/lib/product-matching"
+import { autoMatchSpecId } from "@/lib/spec-auto-match"
 
 export const CONFIG_KEY = "online_orders_sync_config"
 
@@ -25,8 +26,9 @@ export type SiteConfig = {
   selectors: SelectorMap
   autoSync?: {
     enabled: boolean
-    interval: number
+    interval?: number
     concurrencyLimit?: number
+    scheduledTimes?: string[] // e.g. ["08:00", "14:00"] — HH:mm, triggers once per day at each time
   }
 }
 
@@ -34,6 +36,7 @@ export type OnlineOrdersConfig = {
   autoSyncEnabled?: boolean
   interval?: number
   concurrencyLimit?: number
+  scheduledTimes?: string[] // HH:mm list for zanchen scheduled sync
   headless: boolean
   nightMode: boolean
   nightPeriod: NightPeriod
@@ -378,8 +381,6 @@ async function detectRiskHint(page: Page) {
       "暂时无法访问",
       "风险提示",
       "存在风险",
-      "需要验证",
-      "需要校验",
       "检测到异常"
     ]
     const hitStrong = strongKeywords.find(key => text.includes(key))
@@ -431,14 +432,13 @@ async function ensureNoRisk(page: Page, site: SiteConfig, timeoutMs = 5 * 60_000
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     if (await isOnLoginPage(page, site)) {
+      addLog("[风控] 检测到登录页，等待人工介入...")
       setStatus({
         status: "awaiting_user",
         message: "登录需要人工验证或短信验证码",
         needsAttention: true
       })
-      // Trigger webhook for manual intervention
       void loadConfig().then(cfg => sendWebhook(cfg, "登录检测到需要人工验证"))
-      
       await page.waitForTimeout(1200)
       continue
     }
@@ -447,6 +447,7 @@ async function ensureNoRisk(page: Page, site: SiteConfig, timeoutMs = 5 * 60_000
     if (riskHint.level === "weak") {
       const cooldownMs = 15000 + Math.floor(Math.random() * 15000)
       const cooldownSec = Math.ceil(cooldownMs / 1000)
+      addLog(`[风控] 检测到疑似风控提示（${riskHint.reason}），冷却 ${cooldownSec}s`)
       setStatus({
         status: "running",
         message: `检测到疑似风控提示，自动冷却 ${cooldownSec}s（${riskHint.reason}）`
@@ -454,6 +455,7 @@ async function ensureNoRisk(page: Page, site: SiteConfig, timeoutMs = 5 * 60_000
       await page.waitForTimeout(cooldownMs)
       continue
     }
+    addLog(`[风控] 触发平台风控（${riskHint.reason}），等待人工介入...`)
     setStatus({
       status: "awaiting_user",
       message: `触发平台风控，请在浏览器完成验证（检测到${riskHint.reason}）`,
@@ -585,6 +587,7 @@ async function buildTemplateSelectors(page: PageOrFrame, selectors: SelectorMap)
       for (let i = 0; i < 10; i++) {
         end = await page.$$eval(`${container} > *`, elements => elements.length)
         if (end > 0) break
+        addLog(`[System] buildTemplateSelectors: container "${container}" has 0 children, retry ${i+1}/10...`)
         await page.waitForTimeout(1000)
       }
       console.log(`[Zanchen] Container ${container} has ${end} children`)
@@ -2018,6 +2021,15 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
 
       const mappedStatus = mapStatus(o.status || "")
 
+      // Auto-match specId if not already set
+      const existingOnlineOrder = await prisma.onlineOrder.findUnique({
+        where: { orderNo: o.orderNo },
+        select: { specId: true }
+      })
+      const autoSpecId = existingOnlineOrder?.specId
+        ? null // already has specId, don't overwrite
+        : await autoMatchSpecId(o.itemTitle || null, o.itemSku || null)
+
       await prisma.onlineOrder.upsert({
         where: { orderNo: o.orderNo },
         update: {
@@ -2048,7 +2060,8 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
           returnTrackingNumber: o.returnTrackingNumber || undefined,
           returnLatestLogisticsInfo: o.returnLatestLogisticsInfo || undefined,
           rentStartDate: rentStartDateValue || undefined,
-          returnDeadline: returnDeadlineValue || undefined
+          returnDeadline: returnDeadlineValue || undefined,
+          ...(autoSpecId ? { specId: autoSpecId } : {})
         },
         create: {
           orderNo: o.orderNo,
@@ -2079,7 +2092,8 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
           returnTrackingNumber: o.returnTrackingNumber || undefined,
           returnLatestLogisticsInfo: o.returnLatestLogisticsInfo || undefined,
           rentStartDate: rentStartDateValue || undefined,
-          returnDeadline: returnDeadlineValue || undefined
+          returnDeadline: returnDeadlineValue || undefined,
+          ...(autoSpecId ? { specId: autoSpecId } : {})
         }
       })
 
@@ -2230,7 +2244,7 @@ async function runZanchenSync(siteId: string) {
 
   const headlessConfig = config?.headless ?? true
   addLog(`[System] Initializing browser. Config headless: ${config?.headless}, using: ${headlessConfig}`)
-  const page = await ensurePage(headlessConfig)
+  let page = await ensurePage(headlessConfig)
   setStatus({ status: "running", message: "已连接浏览器，准备登录" })
   const currentUrl = page.url()
   const isBlank =
@@ -2307,20 +2321,28 @@ async function runZanchenSync(siteId: string) {
   // Smart Navigation: Only open order list if not already there
   const orderUrl = site.selectors.order_menu_link
   const currentOrderUrl = page.url()
+  addLog(`[System] Smart nav check: orderUrl="${orderUrl || "(none)"}", currentUrl="${currentOrderUrl}"`)
   if (orderUrl && (currentOrderUrl.includes(orderUrl) || (orderUrl.startsWith("http") && currentOrderUrl.startsWith(orderUrl)))) {
       addLog("Already on order list page, skipping navigation.")
   } else {
+      addLog("[System] Opening order list by clicks...")
       const ok = await openZanchenOrderListByClicks(page)
+      addLog(`[System] openZanchenOrderListByClicks result: ${ok}`)
       if (!ok) {
+        addLog("[System] Click nav failed, trying openOrderList fallback...")
         await openOrderList(page, site.selectors)
       }
   }
   
   await waitRandom(page, 1200, 3000)
+  addLog("[System] ensureAllOrdersTab...")
   await ensureAllOrdersTab(page)
+  addLog("[System] ensureAllOrdersTab done")
   await waitRandom(page, 600, 1800)
 
-  const scope = await resolveOrderFrame(page, site.selectors)
+  addLog("[System] resolveOrderFrame...")
+  let scope = await resolveOrderFrame(page, site.selectors)
+  addLog(`[System] scope resolved: ${scope === page ? "main page" : "iframe"}`)
 
   // Explicitly ensure we are on the first page (using scope, as pagination is likely inside the frame)
   try {
@@ -2328,13 +2350,11 @@ async function runZanchenSync(siteId: string) {
     // check if visible in scope
     if (await scope.isVisible(pageOneSelector)) {
         addLog("Ensuring start from Page 1...")
-        // If it has class 'disabled' or 'active', we might skip, but clicking is usually safe to reset
-        // We can check if parent li has class 'active' to avoid reload if already there
         const isActive = await scope.$eval("#foreach_page > li:nth-child(1)", el => el.classList.contains("active")).catch(() => false)
         
         if (!isActive) {
             await scope.click(pageOneSelector)
-            await waitRandom(page, 1500, 2500) // wait for reload
+            await waitRandom(page, 1500, 2500)
         } else {
             addLog("Already on Page 1.")
         }
@@ -2343,30 +2363,32 @@ async function runZanchenSync(siteId: string) {
       addLog("Optional Page 1 reset skipped: " + (e as Error).message)
   }
 
+  addLog("[System] ensureNoRisk (pre-loop)...")
   const riskCleared = await ensureNoRisk(page, site)
   if (!riskCleared) {
     setStatus({ status: "error", message: "风控验证超时" })
     return
   }
+  addLog("[System] risk cleared, waiting for container...")
 
   const container = getContainerSelector(site.selectors)
+  addLog(`[System] container selector: ${container || "(none)"}`)
   if (container) {
     setStatus({ status: "running", message: "等待订单列表加载..." })
     try {
-      // Wait for the container itself
       await scope.waitForSelector(container, { state: "visible", timeout: 10000 })
-      // Try to wait for at least one child row if template is used
+      addLog("[System] container visible")
       if (site.selectors.order_row_selector_template) {
         const start = site.selectors.order_row_index_start || 1
-        // Try to wait for the first row specifically
         const firstRowSelector = site.selectors.order_row_selector_template.replace(/\{i\}/g, String(start))
         const normalized = normalizeRowSelector(firstRowSelector, container)
         if (normalized) {
           await scope.waitForSelector(normalized, { state: "attached", timeout: 10000 }).catch(() => void 0)
+          addLog(`[System] first row selector checked: ${normalized}`)
         }
       }
     } catch {
-      console.log("Wait for order list container timed out, proceeding anyway...")
+      addLog("Wait for order list container timed out, proceeding anyway...")
     }
   }
   await revealReceiverInfo(scope, site.selectors)
@@ -2381,12 +2403,18 @@ async function runZanchenSync(siteId: string) {
   const stopThreshold = config?.stopThreshold ?? 20
   let consecutiveFinalStateCount = 0
   runtime.shouldStop = false
+
+  const PAGE_CRASH_ERRORS = ["Target page", "Session closed", "crashed", "Target closed", "Connection closed"]
+  const isCrashError = (e: unknown) => PAGE_CRASH_ERRORS.some(s => String(e).includes(s))
+  let pageRetryCount = 0
+  const MAX_PAGE_RETRIES = 3
   while (true) {
    try {
     if (runtime.shouldStop) {
       addLog("用户手动停止同步")
       break
     }
+    addLog(`[System] while loop iteration, page ${pagesVisited + 1}, ensureNoRisk...`)
     const ok = await ensureNoRisk(page, site)
     if (!ok) {
       setStatus({ status: "error", message: "风控验证超时" })
@@ -2625,10 +2653,29 @@ async function runZanchenSync(siteId: string) {
     await waitRandom(page, 800, 1600)
    } catch (e) {
      addLog(`[System] Error in sync loop: ${e}`)
-     if (String(e).includes("Target page, context or browser has been closed")) {
+     if (isCrashError(e) && pageRetryCount < MAX_PAGE_RETRIES) {
+         pageRetryCount++
+         addLog(`[System] Browser crashed on page ${pagesVisited + 1} (retry ${pageRetryCount}/${MAX_PAGE_RETRIES}). Rebuilding context...`)
+         setStatus({ status: "running", message: `页面崩溃，正在重试 (${pageRetryCount}/${MAX_PAGE_RETRIES})...` })
+         try { await runtime.context?.close() } catch {}
+         runtime.context = undefined
+         runtime.page = undefined
+         await new Promise(r => setTimeout(r, 3000))
+         page = await ensurePage(headlessConfig)
+         await ensureOnLogin(page, site)
+         await tryLogin(page, site)
+         await waitUntilLoggedIn(page, site, 10000)
+         const okRetry = await openZanchenOrderListByClicks(page)
+         if (!okRetry) await openOrderList(page, site.selectors)
+         await waitRandom(page, 1200, 3000)
+         await ensureAllOrdersTab(page)
+         scope = await resolveOrderFrame(page, site.selectors)
+         addLog(`[System] Crash recovery complete, retrying page ${pagesVisited + 1}...`)
+         pagesVisited-- // undo the increment so we re-process the same page
+     } else {
          addLog(`[System] Browser crashed. Stopping sync to save data.`)
+         break
      }
-     break
    }
   }
 
@@ -2651,6 +2698,12 @@ async function runZanchenSync(siteId: string) {
     await saveOrdersToDB(pendingSaveOrders)
   }
   startHeartbeat(page)
+
+  if (runtime.shouldStop) {
+    addLog("[System] 用户手动停止，跳过设置 success 状态")
+    return
+  }
+
   setStatus({
     status: "success",
     lastRunAt: new Date().toISOString(),
@@ -2672,6 +2725,9 @@ export async function startZanchenSync(siteId: string) {
       setStatus({ status: "error", message: message || "同步失败" })
     })
     .finally(() => {
+      if (runtime.shouldStop) {
+        setStatus({ status: "idle", message: "已停止" })
+      }
       runtime.running = false
       runtime.shouldStop = false
       runtime.currentSite = undefined

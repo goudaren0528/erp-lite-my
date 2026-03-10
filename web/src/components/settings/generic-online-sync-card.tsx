@@ -4,31 +4,41 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { RefreshCw, Play, Square } from "lucide-react"
+import { RefreshCw, Plus, X, Clock } from "lucide-react"
 import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 
+type AutoSyncConfig = {
+  enabled: boolean
+  interval?: number
+  concurrencyLimit?: number
+  scheduledTimes?: string[]
+}
+
 type Props = {
-  config?: {
-    enabled: boolean
-    interval: number
-    concurrencyLimit?: number
-  }
+  config?: AutoSyncConfig
   status?: { status?: string; message?: string; lastRunAt?: string; needsAttention?: boolean }
-  onConfigChange: (config: { enabled: boolean; interval: number; concurrencyLimit?: number }) => void
+  onConfigChange: (config: AutoSyncConfig) => void
 }
 
 export function GenericOnlineSyncCard({ config, status, onConfigChange }: Props) {
   const enabled = config?.enabled ?? false
-  const intervalMinutes = Math.floor((config?.interval || 60) / 60) || 1
-  const [isSyncing, setIsSyncing] = useState(false)
+  const scheduledTimes = config?.scheduledTimes ?? []
+  const [newTime, setNewTime] = useState("08:00")
   const isRunning = status?.status === "running" || status?.status === "awaiting_user"
 
-  const handleStartSync = async () => {
-    // This is a placeholder, real sync should be handled by parent or a global action
-    // But we need the button to reflect state.
-    // Parent online-orders-client.tsx has the real sync logic in its render.
-    // Actually the parent has a "Start Sync" button too? Let's check.
+  const update = (partial: Partial<AutoSyncConfig>) =>
+    onConfigChange({ enabled, interval: config?.interval, concurrencyLimit: config?.concurrencyLimit, scheduledTimes, ...config, ...partial })
+
+  const addTime = () => {
+    if (!newTime) return
+    if (scheduledTimes.includes(newTime)) return
+    const sorted = [...scheduledTimes, newTime].sort()
+    update({ scheduledTimes: sorted })
+  }
+
+  const removeTime = (t: string) => {
+    update({ scheduledTimes: scheduledTimes.filter(x => x !== t) })
   }
 
   return (
@@ -41,13 +51,13 @@ export function GenericOnlineSyncCard({ config, status, onConfigChange }: Props)
               线上订单自动抓取
             </CardTitle>
             <CardDescription>
-              定期自动运行爬虫，抓取最新订单数据并保存到数据库。
+              设置每天定时自动抓取订单，需同时开启自动抓取开关才生效。
             </CardDescription>
           </div>
           {status && (
-             <Badge variant={isRunning ? "default" : "outline"} className={isRunning ? "bg-blue-500 animate-pulse" : ""}>
-                {isRunning ? "运行中" : "空闲"}
-             </Badge>
+            <Badge variant={isRunning ? "default" : "outline"} className={isRunning ? "bg-blue-500 animate-pulse" : ""}>
+              {isRunning ? "运行中" : "空闲"}
+            </Badge>
           )}
         </div>
       </CardHeader>
@@ -55,69 +65,49 @@ export function GenericOnlineSyncCard({ config, status, onConfigChange }: Props)
         <div className="flex items-center justify-between space-x-4">
           <div className="space-y-1">
             <Label>启用自动抓取</Label>
-            <p className="text-sm text-muted-foreground">
-              开启后将定期扫描该站点
-            </p>
+            <p className="text-sm text-muted-foreground">开启后将按设定时间自动抓取</p>
           </div>
           <Switch
             checked={enabled}
-            onCheckedChange={(checked) => onConfigChange({ 
-              enabled: checked, 
-              interval: (config?.interval || 3600) 
-            })}
+            onCheckedChange={(checked) => update({ enabled: checked })}
           />
         </div>
 
         {enabled && (
           <div className="space-y-4 pt-4 border-t">
-            <div className="grid gap-2">
-              <Label>抓取间隔（分钟）</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  min={1}
-                  value={intervalMinutes}
-                  onChange={(e) => {
-                      const mins = parseInt(e.target.value) || 1
-                      onConfigChange({ 
-                        enabled: true, 
-                        interval: mins * 60 
-                      })
-                  }}
-                  className="max-w-[120px]"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                建议间隔不低于 10 分钟
-              </p>
-            </div>
-            
-            <div className="grid gap-2">
-              <Label>并发详情页抓取（页）</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={config?.concurrencyLimit || 3}
-                  onChange={(e) => {
-                      const val = parseInt(e.target.value) || 3
-                      onConfigChange({ 
-                        enabled: true, 
-                        interval: (config?.interval || 3600),
-                        concurrencyLimit: val
-                      })
-                  }}
-                  className="max-w-[120px]"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                同时打开的详情页数量，建议 3-5
-              </p>
-            </div>
+            <div className="space-y-3">
+              <Label className="flex items-center gap-1.5">
+                <Clock className="w-4 h-4" />
+                定时抓取时间点
+              </Label>
+              <p className="text-xs text-muted-foreground">每天到达以下时间时自动触发一次抓取</p>
 
-            <div className="rounded-md border p-4 bg-muted/50 text-sm text-muted-foreground">
-              注意：该站点的自动抓取功能尚未部署或处于开发中。
+              <div className="flex flex-wrap gap-2 min-h-[32px]">
+                {scheduledTimes.length === 0 && (
+                  <span className="text-xs text-muted-foreground italic">暂无定时，请添加时间点</span>
+                )}
+                {scheduledTimes.map(t => (
+                  <Badge key={t} variant="secondary" className="flex items-center gap-1 text-sm px-2 py-1">
+                    {t}
+                    <button onClick={() => removeTime(t)} className="ml-1 hover:text-destructive">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Input
+                  type="time"
+                  value={newTime}
+                  onChange={e => setNewTime(e.target.value)}
+                  className="w-[130px] h-8"
+                />
+                <Button size="sm" variant="outline" onClick={addTime} className="h-8">
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  添加
+                </Button>
+              </div>
             </div>
           </div>
         )}

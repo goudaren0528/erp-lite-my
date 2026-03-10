@@ -4,7 +4,8 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { OrderStatus, User, Promoter, ProductVariant } from "@/types";
 import { revalidatePath } from "next/cache";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth"
+import { autoMatchSpecId } from "@/lib/spec-auto-match";
 
 // Helper to determine query mode based on database type
 // SQLite does not support 'insensitive' mode, but Postgres does.
@@ -380,7 +381,13 @@ export async function createOrder(formData: FormData) {
           (productId && variantName
               ? await prisma.productSpec.findFirst({ where: { productId, name: variantName } })
               : null)
-      const resolvedSpecDbId = spec?.id || ""
+      const itemTitle = (rawData.itemTitle as string) || ""
+      const itemSku = (rawData.itemSku as string) || ""
+      // Auto-match specId from existing orders if not already resolved
+      let resolvedSpecDbId = spec?.id || ""
+      if (!resolvedSpecDbId && (itemTitle || itemSku)) {
+          resolvedSpecDbId = (await autoMatchSpecId(itemTitle || null, itemSku || null)) || ""
+      }
       const duration = Number(rawData.duration);
 
       if (duration > 0) {
@@ -406,6 +413,8 @@ export async function createOrder(formData: FormData) {
             variantName: (rawData.variantName as string) || '',
             specId: resolvedSpecDbId || null,
             sn: (rawData.sn as string) || null,
+            itemTitle: itemTitle || null,
+            itemSku: itemSku || null,
             
             duration: Number(rawData.duration) || 0,
             rentPrice: Number(rawData.rentPrice) || 0,

@@ -1,10 +1,11 @@
-import path from "path"
+﻿import path from "path"
 import fs from "fs"
 import net from "net"
 import { chromium, type BrowserContext, type Page } from "playwright"
 import { loadConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
 import { schedulerLogger } from "./scheduler"
 import { prisma } from "@/lib/db"
+import { autoMatchSpecId } from "@/lib/spec-auto-match"
 
 // Re-use types or define specific ones
 export type LlxzuStatus = {
@@ -43,6 +44,7 @@ type LlxzuParsedOrder = {
   logisticsCompany?: string
   trackingNumber: string
   promotionChannel: string
+  specId?: string
 }
 
 const globalForLlxzu = globalThis as unknown as { llxzuRuntime?: LlxzuRuntime }
@@ -227,7 +229,7 @@ export function getRunningPage() {
 export function stopLlxzuSync() {
     runtime.shouldStop = true
     appendLog("User requested stop.")
-    updateStatus({ status: "idle", message: "Stopping..." })
+    updateStatus({ status: "running", message: "正在停止..." })
 }
 
 export async function restartLlxzuBrowser() {
@@ -1450,6 +1452,14 @@ async function saveOrdersBatch(orders: LlxzuParsedOrder[]) {
     try {
         appendLog(`[Database] Preparing to save ${orders.length} orders. Sample: ${JSON.stringify(orders[0] || {}, null, 2)}`)
         
+        // Auto-match specId for orders that don't have one yet
+        for (const order of orders) {
+            if (!order.specId && (order.itemTitle || order.itemSku)) {
+                const matched = await autoMatchSpecId(order.itemTitle, order.itemSku)
+                if (matched) (order as Record<string, unknown>).specId = matched
+            }
+        }
+        
         const operations = orders.map(order => 
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
@@ -1512,7 +1522,7 @@ export async function startLlxzuSync(siteId: string) {
     const headless = config?.headless ?? false 
     appendLog(`Using headless mode: ${headless}`)
     
-    const page = await ensurePage(headless)
+    let page = await ensurePage(headless)
     
     try {
         await page.bringToFront()
@@ -1583,6 +1593,42 @@ export async function startLlxzuSync(siteId: string) {
     let pendingSaveOrders: LlxzuParsedOrder[] = []
     const BATCH_SIZE = 200
 
+    const PAGE_CRASH_ERRORS = ["Target page", "Session closed", "crashed", "Target closed", "Connection closed"]
+    const isCrashError = (e: unknown) => PAGE_CRASH_ERRORS.some(s => String(e).includes(s))
+    let pageRetryCount = 0
+    const MAX_PAGE_RETRIES = 3
+
+    const rebuildAndNavigate = async () => {
+        try { await runtime.context?.close() } catch {}
+        runtime.context = undefined
+        runtime.page = undefined
+        await new Promise(r => setTimeout(r, 3000))
+        page = await ensurePage(headless)
+        await login(page, targetSite)
+        await page.waitForLoadState("domcontentloaded")
+        await waitRandom(page, 1200, 3000)
+        await handlePopup(page)
+        const ok = await openLlxzuOrderListByClicks(page)
+        if (!ok && targetSite.selectors.order_menu_link) {
+            const origin = getOriginFromUrl(targetSite.selectors.order_menu_link)
+            await page.goto(targetSite.selectors.order_menu_link, { waitUntil: "domcontentloaded", timeout: 30000, referer: origin ? `${origin}/` : undefined })
+            await waitRandom(page, 1200, 3000)
+        }
+        await handlePopup(page)
+        if (targetSite.selectors.all_orders_tab_selector) {
+            await switchToAllOrdersTab(page, targetSite.selectors.all_orders_tab_selector)
+        }
+        if (currentPage > 1) {
+            appendLog(`Re-navigating to page ${currentPage} after crash recovery...`)
+            for (let p = 1; p < currentPage; p++) {
+                if (targetSite.selectors.pagination_next_selector) {
+                    const nb = await page.$(targetSite.selectors.pagination_next_selector)
+                    if (nb) { await nb.click({ force: true }); await waitRandom(page, 2000, 3500) }
+                }
+            }
+        }
+    }
+
     while (hasMore && currentPage <= MAX_PAGES) {
         if (runtime.shouldStop) {
             appendLog("User stopped the sync process.");
@@ -1590,11 +1636,30 @@ export async function startLlxzuSync(siteId: string) {
             break;
         }
 
+        try {
         appendLog(`正在解析第 ${currentPage} 页订单...`)
-        await simulateHumanMouse(page)
-        await simulateHumanScroll(page, 1, 3)
-        await waitRandom(page, 800, 1600)
-        const pageOrders = await parseOrders(page, targetSite)
+
+        if (page.isClosed()) throw new Error("Target page, context or browser has been closed")
+
+        const PAGE_TIMEOUT_MS = 5 * 60 * 1000
+        let pageTimeoutHandle: ReturnType<typeof setTimeout> | undefined
+        const pageTimeoutPromise = new Promise<never>((_, reject) => {
+            pageTimeoutHandle = setTimeout(() => reject(new Error("Target page, context or browser has been closed")), PAGE_TIMEOUT_MS)
+        })
+        const pageWorkPromise = (async () => {
+            await simulateHumanMouse(page)
+            await simulateHumanScroll(page, 1, 3)
+            await waitRandom(page, 800, 1600)
+            return await parseOrders(page, targetSite)
+        })()
+        let pageOrders: LlxzuParsedOrder[]
+        try {
+            pageOrders = await Promise.race([pageWorkPromise, pageTimeoutPromise])
+        } finally {
+            clearTimeout(pageTimeoutHandle)
+        }
+
+        pageRetryCount = 0
 
         if (stopThreshold > 0 && pageOrders.length > 0) {
             const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean)
@@ -1679,8 +1744,16 @@ export async function startLlxzuSync(siteId: string) {
                      await nextBtn.scrollIntoViewIfNeeded().catch(() => void 0)
                      await simulateHumanScroll(page, 1, 2)
                      await waitRandom(page, 600, 1400)
-                     await nextBtn.click({ force: true })
-                     await waitRandom(page, 3000, 5000) 
+                     const clickTimeout = new Promise<never>((_, reject) =>
+                         setTimeout(() => reject(new Error("Target page, context or browser has been closed")), 60000)
+                     )
+                     await Promise.race([
+                         (async () => {
+                             await nextBtn.click({ force: true })
+                             await waitRandom(page, 3000, 5000)
+                         })(),
+                         clickTimeout
+                     ])
                      currentPage++
                  } else {
                      appendLog("Next page button is disabled. Reached end of list.")
@@ -1692,11 +1765,29 @@ export async function startLlxzuSync(siteId: string) {
         } else {
             hasMore = false
         }
+        } catch (pageErr) {
+            if (isCrashError(pageErr) && pageRetryCount < MAX_PAGE_RETRIES) {
+                pageRetryCount++
+                appendLog(`[Crash] Page crash on page ${currentPage} (retry ${pageRetryCount}/${MAX_PAGE_RETRIES}): ${pageErr}`)
+                updateStatus({ message: `页面崩溃，正在重试第 ${currentPage} 页 (${pageRetryCount}/${MAX_PAGE_RETRIES})...` })
+                await rebuildAndNavigate()
+                appendLog(`Crash recovery complete, retrying page ${currentPage}...`)
+            } else {
+                appendLog(`Fatal error on page ${currentPage}: ${pageErr}`)
+                throw pageErr
+            }
+        }
     }
     
     if (pendingSaveOrders.length > 0) {
         appendLog(`Saving remaining ${pendingSaveOrders.length} orders...`)
         await saveOrdersBatch(pendingSaveOrders)
+    }
+
+    if (runtime.shouldStop) {
+        appendLog("Sync stopped by user.")
+        updateStatus({ status: "idle", message: "已停止" })
+        return
     }
 
     updateStatus({ 

@@ -4,6 +4,7 @@ import { chromium, type BrowserContext, type Page } from "playwright"
 import { loadConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
 import { schedulerLogger } from "./scheduler"
 import { prisma } from "@/lib/db"
+import { autoMatchSpecId } from "@/lib/spec-auto-match"
 
 // Re-use types or define specific ones
 export type ChenglinStatus = {
@@ -33,6 +34,7 @@ type ChenglinParsedOrder = {
   trackingNumber: string
   returnLogisticsCompany: string
   returnTrackingNumber: string
+  specId?: string | null
 }
 
 type ChenglinRuntime = {
@@ -815,6 +817,14 @@ async function saveOrdersBatch(orders: ChenglinParsedOrder[]) {
     
     // Using transaction for better performance
     try {
+        // Auto-match specId for orders that don't have one yet
+        for (const order of orders) {
+            if (!order.specId && (order.itemTitle || order.itemSku)) {
+                const matched = await autoMatchSpecId(order.itemTitle, order.itemSku)
+                if (matched) (order as Record<string, unknown>).specId = matched
+            }
+        }
+        
         const operations = orders.map(order =>
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
@@ -885,7 +895,7 @@ export async function startChenglinSync(siteId: string) {
     const headless = config?.headless ?? false 
     appendLog(`Using headless mode: ${headless}`)
     
-    const page = await ensurePage(headless)
+    let page = await ensurePage(headless)
     
     // Bring to front
     try {
@@ -954,6 +964,48 @@ export async function startChenglinSync(siteId: string) {
     let pendingSaveOrders: ChenglinParsedOrder[] = []
     const BATCH_SIZE = 200
 
+    const PAGE_CRASH_ERRORS = ["Target page", "Session closed", "crashed", "Target closed", "Connection closed"]
+    const isCrashError = (e: unknown) => PAGE_CRASH_ERRORS.some(s => String(e).includes(s))
+    let pageRetryCount = 0
+    const MAX_PAGE_RETRIES = 3
+
+    // Helper: rebuild browser context and navigate back to order list
+    const rebuildAndNavigate = async () => {
+        try { await runtime.context?.close() } catch {}
+        runtime.context = undefined
+        runtime.page = undefined
+        await new Promise(r => setTimeout(r, 3000))
+        page = await ensurePage(headless)
+        await login(page, targetSite)
+        await page.waitForLoadState("domcontentloaded")
+        await waitRandom(page, 1200, 3000)
+        await handlePopup(page)
+        const ok = await openChenglinOrderListByClicks(page)
+        if (!ok && targetSite.selectors.order_menu_link) {
+            const origin = getOriginFromUrl(targetSite.selectors.order_menu_link)
+            await page.goto(targetSite.selectors.order_menu_link, { waitUntil: "domcontentloaded", timeout: 30000, referer: origin ? `${origin}/` : undefined })
+            await waitRandom(page, 1200, 3000)
+        }
+        await handlePopup(page)
+        if (targetSite.selectors.all_orders_tab_selector) {
+            await switchToAllOrdersTab(page, targetSite.selectors.all_orders_tab_selector)
+            await setChenglinPageSize(page)
+        }
+        // Re-navigate to the correct page by clicking next N-1 times
+        if (currentPage > 1) {
+            appendLog(`Re-navigating to page ${currentPage} after crash recovery...`)
+            for (let p = 1; p < currentPage; p++) {
+                if (targetSite.selectors.pagination_next_selector) {
+                    const nb = await page.$(targetSite.selectors.pagination_next_selector)
+                    if (nb) {
+                        await nb.click({ force: true })
+                        await waitRandom(page, 2000, 3500)
+                    }
+                }
+            }
+        }
+    }
+
     while (hasMore && currentPage <= MAX_PAGES) {
         if (runtime.shouldStop) {
             appendLog("User stopped the sync process.");
@@ -961,10 +1013,36 @@ export async function startChenglinSync(siteId: string) {
             break;
         }
 
+        try {
         appendLog(`Processing page ${currentPage}...`)
-        await simulateHumanMouse(page)
-        await waitRandom(page, 800, 1600)
-        const pageOrders = await parseOrders(page, targetSite)
+
+        // Guard: detect already-closed page before doing any work
+        if (page.isClosed()) {
+            throw new Error("Target page, context or browser has been closed")
+        }
+
+        // Wrap page processing in a per-page timeout so a hung page doesn't block forever
+        const PAGE_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes max per page
+        let pageTimeoutHandle: ReturnType<typeof setTimeout> | undefined
+        const pageTimeoutPromise = new Promise<never>((_, reject) => {
+            pageTimeoutHandle = setTimeout(() => {
+                reject(new Error("Target page, context or browser has been closed"))
+            }, PAGE_TIMEOUT_MS)
+        })
+        const pageWorkPromise = (async () => {
+            await simulateHumanMouse(page)
+            await waitRandom(page, 800, 1600)
+            return await parseOrders(page, targetSite)
+        })()
+        let pageOrders: ChenglinParsedOrder[]
+        try {
+            pageOrders = await Promise.race([pageWorkPromise, pageTimeoutPromise])
+        } finally {
+            clearTimeout(pageTimeoutHandle)
+        }
+
+        // Reset retry counter on successful parse
+        pageRetryCount = 0
 
         if (stopThreshold > 0 && pageOrders.length > 0) {
             const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean)
@@ -1061,9 +1139,17 @@ export async function startChenglinSync(siteId: string) {
                      appendLog(`Navigating to next page (Page ${currentPage + 1})...`)
                      await nextBtn.scrollIntoViewIfNeeded().catch(() => void 0)
                      await waitRandom(page, 600, 1400)
-                     await nextBtn.click({ force: true })
-                     // Wait for table to update. 
-                     await waitRandom(page, 6000, 8000) 
+                     // Timeout guard on click + post-click wait
+                     const clickTimeout = new Promise<never>((_, reject) =>
+                         setTimeout(() => reject(new Error("Target page, context or browser has been closed")), 60000)
+                     )
+                     await Promise.race([
+                         (async () => {
+                             await nextBtn.click({ force: true })
+                             await waitRandom(page, 6000, 8000)
+                         })(),
+                         clickTimeout
+                     ])
                      currentPage++
                  } else {
                      appendLog("Next page button is disabled. Reached end of list.")
@@ -1076,6 +1162,19 @@ export async function startChenglinSync(siteId: string) {
              }
         } else {
             hasMore = false // No pagination configured, stop after first page
+        }
+        } catch (pageErr) {
+            if (isCrashError(pageErr) && pageRetryCount < MAX_PAGE_RETRIES) {
+                pageRetryCount++
+                appendLog(`[Crash] Page crash detected on page ${currentPage} (retry ${pageRetryCount}/${MAX_PAGE_RETRIES}): ${pageErr}`)
+                updateStatus({ message: `页面崩溃，正在重试第 ${currentPage} 页 (${pageRetryCount}/${MAX_PAGE_RETRIES})...` })
+                await rebuildAndNavigate()
+                appendLog(`Crash recovery complete, retrying page ${currentPage}...`)
+                // Loop continues, retrying same currentPage
+            } else {
+                appendLog(`Fatal error on page ${currentPage} (retries exhausted or non-crash): ${pageErr}`)
+                throw pageErr
+            }
         }
     }
     

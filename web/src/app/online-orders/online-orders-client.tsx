@@ -79,14 +79,17 @@ type SiteConfig = {
   selectors: SelectorMap
   autoSync?: {
     enabled: boolean
-    interval: number
+    interval?: number
     concurrencyLimit?: number
+    scheduledTimes?: string[]
   }
 }
 
 type OnlineOrdersConfig = {
   autoSyncEnabled?: boolean
-  interval: number
+  interval?: number
+  concurrencyLimit?: number
+  scheduledTimes?: string[]
   stopThreshold?: number
   headless: boolean
   nightMode: boolean
@@ -243,7 +246,7 @@ const platformMap: Record<string, string> = {
   OFFLINE: "线下"
 }
 
-export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrdersConfig }) {
+export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { initialConfig: OnlineOrdersConfig; canClearOrders?: boolean }) {
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
   const initialSn = searchParams.get('sn') || ''
@@ -304,6 +307,9 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
 
   const [editSnOrderId, setEditSnOrderId] = useState<string | null>(null)
   const [editSnValue, setEditSnValue] = useState("")
+  const [importing, setImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState<{ processed: number; total: number } | null>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
@@ -1260,6 +1266,143 @@ export function OnlineOrdersClient({ initialConfig }: { initialConfig: OnlineOrd
             >
               重启浏览器
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                // Determine platform filter for current tab
+                const targetSite = config.sites.find(s => s.id === activeTab)
+                const tabLower = (activeTab || "").toLowerCase()
+                const siteName = targetSite?.name || ""
+                let platform = ""
+                if (siteName.includes("零零享") || tabLower.includes("llxzu")) platform = "零零享"
+                else if (siteName.includes("人人租") || tabLower.includes("rrz")) platform = "人人租"
+                else if (siteName.includes("优品") || tabLower.includes("youpin")) platform = "优品租"
+                else if (siteName.includes("奥租") || tabLower.includes("aolzu")) platform = "奥租"
+                else if (siteName.includes("诚赁") || tabLower.includes("chenglin")) platform = "诚赁"
+                else if (tabLower === "zanchen" || siteName.includes("赞晨")) platform = "ZANCHEN"
+                const url = `/api/online-orders/export${platform ? `?platform=${encodeURIComponent(platform)}` : ""}`
+                window.open(url, "_blank")
+              }}
+            >
+              导出 CSV
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={importing}
+              onClick={() => importInputRef.current?.click()}
+            >
+              {importing
+                ? importProgress
+                  ? `导入中 ${importProgress.processed}/${importProgress.total}...`
+                  : "导入中..."
+                : "导入 CSV"}
+            </Button>
+            {importing && importProgress && (
+              <div className="flex items-center gap-1.5 min-w-[120px]">
+                <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${Math.round((importProgress.processed / importProgress.total) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  {Math.round((importProgress.processed / importProgress.total) * 100)}%
+                </span>
+              </div>
+            )}
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                setImporting(true)
+                setImportProgress(null)
+                try {
+                  const fd = new FormData()
+                  fd.append("file", file)
+                  const res = await fetch("/api/online-orders/import", { method: "POST", body: fd })
+                  if (!res.ok || !res.body) {
+                    toast.error("导入失败")
+                    return
+                  }
+                  const reader = res.body.getReader()
+                  const decoder = new TextDecoder()
+                  let buf = ""
+                  let lastUpserted = 0, lastFailed = 0
+                  while (true) {
+                    const { done, value } = await reader.read()
+                    if (done) break
+                    buf += decoder.decode(value, { stream: true })
+                    const lines = buf.split("\n")
+                    buf = lines.pop() ?? ""
+                    for (const line of lines) {
+                      if (!line.trim()) continue
+                      try {
+                        const msg = JSON.parse(line)
+                        if (msg.type === "progress" || msg.type === "done") {
+                          setImportProgress({ processed: msg.processed ?? msg.total, total: msg.total })
+                          lastUpserted = msg.upserted
+                          lastFailed = msg.failed
+                        }
+                        if (msg.type === "done") {
+                          toast.success(`导入完成：${lastUpserted} 条成功${lastFailed ? `，${lastFailed} 条失败` : ""}`)
+                          setDbRefreshKey(k => k + 1)
+                        }
+                        if (msg.type === "start") {
+                          setImportProgress({ processed: 0, total: msg.total })
+                        }
+                      } catch { /* ignore parse errors */ }
+                    }
+                  }
+                } catch {
+                  toast.error("导入失败")
+                } finally {
+                  setImporting(false)
+                  setImportProgress(null)
+                  e.target.value = ""
+                }
+              }}
+            />
+            {canClearOrders && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={async () => {
+                const targetSite = config.sites.find(s => s.id === activeTab)
+                const tabLower = (activeTab || "").toLowerCase()
+                const siteName = targetSite?.name || ""
+                let platform = ""
+                if (siteName.includes("零零享") || tabLower.includes("llxzu")) platform = "零零享"
+                else if (siteName.includes("人人租") || tabLower.includes("rrz")) platform = "人人租"
+                else if (siteName.includes("优品") || tabLower.includes("youpin")) platform = "优品租"
+                else if (siteName.includes("奥租") || tabLower.includes("aolzu")) platform = "奥租"
+                else if (siteName.includes("诚赁") || tabLower.includes("chenglin")) platform = "诚赁"
+                else if (tabLower === "zanchen" || siteName.includes("赞晨")) platform = "ZANCHEN"
+                if (!platform) return
+                if (!confirm(`确定要清空 ${siteName || platform} 的所有订单吗？此操作不可撤销。`)) return
+                const res = await fetch("/api/online-orders/clear", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ platform })
+                })
+                const data = await res.json()
+                if (data.success) {
+                  toast.success(`已清空 ${data.deleted} 条订单`)
+                  setDbRefreshKey(k => k + 1)
+                } else {
+                  toast.error(data.error || "清空失败")
+                }
+              }}
+            >
+              清空订单
+            </Button>
+            )}
             <Button
               size="sm"
               variant="outline"

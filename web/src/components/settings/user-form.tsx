@@ -29,6 +29,7 @@ const PERMISSION_GROUPS = [
         permissions: [
             { key: 'offline_orders', label: '线下订单管理' },
             { key: 'online_orders', label: '线上订单管理' },
+            { key: 'online_orders_clear', label: '线上订单清空（危险操作）' },
             { key: 'view_all_orders', label: '查看所有订单(管理员)' },
         ]
     },

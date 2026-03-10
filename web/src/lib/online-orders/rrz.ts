@@ -4,6 +4,7 @@ import { chromium, type BrowserContext, type Frame, type Page } from "playwright
 import { loadConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
 import { schedulerLogger } from "./scheduler"
 import { prisma } from "@/lib/db"
+import { autoMatchSpecId } from "@/lib/spec-auto-match"
 
 // Re-use types or define specific ones
 export type RrzStatus = {
@@ -119,6 +120,7 @@ type RrzParsedOrder = {
   returnTrackingNumber?: string
   returnLatestLogisticsInfo?: string
   promotionChannel: string
+  specId?: string | null
 }
 
 type RrzRoot = Frame
@@ -420,8 +422,8 @@ export function stopRrzSync() {
     runtime.shouldStop = true
     appendLog("User requested stop.")
     updateStatus({
-        status: "idle",
-        message: "Stopping...",
+        status: "running",
+        message: "正在停止...",
         logs: getRrzStatus().logs
     })
 }
@@ -2551,6 +2553,14 @@ async function saveOrdersBatch(orders: RrzParsedOrder[]) {
     try {
         appendLog(`[Database] Preparing to save ${orders.length} orders. Sample: ${JSON.stringify(orders[0] || {}, null, 2)}`)
         
+        // Auto-match specId for orders that don't have one yet
+        for (const order of orders) {
+            if (!order.specId && (order.itemTitle || order.itemSku)) {
+                const matched = await autoMatchSpecId(order.itemTitle, order.itemSku)
+                if (matched) (order as Record<string, unknown>).specId = matched
+            }
+        }
+        
         const operations = orders.map(order => 
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
@@ -2626,7 +2636,7 @@ export async function startRrzSync(siteId: string) {
         rt.orderListTextByPage?.clear()
     }
 
-    const page = await ensurePage(headless)
+    let page = await ensurePage(headless)
     
     try {
         await page.bringToFront()
@@ -2719,6 +2729,45 @@ export async function startRrzSync(siteId: string) {
     let pendingSaveOrders: RrzParsedOrder[] = []
     const BATCH_SIZE = 200
 
+    const PAGE_CRASH_ERRORS = ["Target page", "Session closed", "crashed", "Target closed", "Connection closed"]
+    const isCrashError = (e: unknown) => PAGE_CRASH_ERRORS.some(s => String(e).includes(s))
+    let pageRetryCount = 0
+    const MAX_PAGE_RETRIES = 3
+
+    const rebuildAndNavigate = async () => {
+        try { await runtime.context?.close() } catch {}
+        runtime.context = undefined
+        runtime.page = undefined
+        await new Promise(r => setTimeout(r, 3000))
+        page = await ensurePage(headless)
+        await login(page, targetSite)
+        await page.waitForLoadState("domcontentloaded")
+        await waitRandom(page, 1200, 3000)
+        await handlePopup(page)
+        const ok = await openRrzOrderListByClicks(page)
+        if (!ok && targetSite.selectors.order_menu_link) {
+            const origin = getOriginFromUrl(targetSite.selectors.order_menu_link)
+            await page.goto(targetSite.selectors.order_menu_link, { waitUntil: "domcontentloaded", timeout: 30000, referer: origin ? `${origin}/` : undefined })
+            await waitRandom(page, 1200, 3000)
+        }
+        await handlePopup(page)
+        orderRoot = await pickOrderRoot(page, "crash_recovery")
+        if (targetSite.selectors.all_orders_tab_selector) {
+            orderRoot = await switchToAllOrdersTab(page, orderRoot, targetSite.selectors.all_orders_tab_selector)
+            orderRoot = await pickOrderRoot(page, "crash_recovery_after_tab")
+        }
+        if (currentPage > 1) {
+            appendLog(`Re-navigating to page ${currentPage} after crash recovery...`)
+            for (let p = 1; p < currentPage; p++) {
+                if (targetSite.selectors.pagination_next_selector) {
+                    const nb = await orderRoot.$(targetSite.selectors.pagination_next_selector).catch(() => null)
+                    if (nb) { await nb.click({ force: true }); await waitRandom(page, 2000, 3500) }
+                }
+            }
+            orderRoot = await pickOrderRoot(page, `crash_recovery_page_${currentPage}`)
+        }
+    }
+
     while (hasMore && currentPage <= MAX_PAGES) {
         if (runtime.shouldStop) {
             appendLog("User stopped the sync process.");
@@ -2726,13 +2775,32 @@ export async function startRrzSync(siteId: string) {
             break;
         }
 
+        try {
         appendLog(`正在解析第 ${currentPage} 页订单...`)
-        if (currentPage % 2 === 1) {
-            await simulateHumanMouse(page, 1, 3)
-            await simulateHumanScroll(page, 1, 2)
+
+        if (page.isClosed()) throw new Error("Target page, context or browser has been closed")
+
+        const PAGE_TIMEOUT_MS = 5 * 60 * 1000
+        let pageTimeoutHandle: ReturnType<typeof setTimeout> | undefined
+        const pageTimeoutPromise = new Promise<never>((_, reject) => {
+            pageTimeoutHandle = setTimeout(() => reject(new Error("Target page, context or browser has been closed")), PAGE_TIMEOUT_MS)
+        })
+        const pageWorkPromise = (async () => {
+            if (currentPage % 2 === 1) {
+                await simulateHumanMouse(page, 1, 3)
+                await simulateHumanScroll(page, 1, 2)
+            }
+            await waitRandom(page, 800, 1600)
+            return await parseOrders(page, orderRoot, targetSite, currentPage)
+        })()
+        let pageOrders: RrzParsedOrder[]
+        try {
+            pageOrders = await Promise.race([pageWorkPromise, pageTimeoutPromise])
+        } finally {
+            clearTimeout(pageTimeoutHandle)
         }
-        await waitRandom(page, 800, 1600)
-        const pageOrders = await parseOrders(page, orderRoot, targetSite, currentPage)
+
+        pageRetryCount = 0
 
         if (stopThreshold > 0 && pageOrders.length > 0) {
             const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean)
@@ -2826,8 +2894,16 @@ export async function startRrzSync(siteId: string) {
                     await nextBtn.scrollIntoViewIfNeeded().catch(() => void 0)
                     await simulateHumanScroll(page, 1, 2)
                     await waitRandom(page, 600, 1400)
-                    await nextBtn.click({ force: true })
-                    await waitRandom(page, 3000, 5000) 
+                    const clickTimeout = new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error("Target page, context or browser has been closed")), 60000)
+                    )
+                    await Promise.race([
+                        (async () => {
+                            await nextBtn.click({ force: true })
+                            await waitRandom(page, 3000, 5000)
+                        })(),
+                        clickTimeout
+                    ])
                      currentPage++
                      orderRoot = await pickOrderRoot(page, `after_page_${currentPage}`)
                  } else {
@@ -2840,11 +2916,29 @@ export async function startRrzSync(siteId: string) {
         } else {
             hasMore = false
         }
+        } catch (pageErr) {
+            if (isCrashError(pageErr) && pageRetryCount < MAX_PAGE_RETRIES) {
+                pageRetryCount++
+                appendLog(`[Crash] Page crash on page ${currentPage} (retry ${pageRetryCount}/${MAX_PAGE_RETRIES}): ${pageErr}`)
+                updateStatus({ message: `页面崩溃，正在重试第 ${currentPage} 页 (${pageRetryCount}/${MAX_PAGE_RETRIES})...` })
+                await rebuildAndNavigate()
+                appendLog(`Crash recovery complete, retrying page ${currentPage}...`)
+            } else {
+                appendLog(`Fatal error on page ${currentPage}: ${pageErr}`)
+                throw pageErr
+            }
+        }
     }
     
     if (pendingSaveOrders.length > 0) {
         appendLog(`Saving remaining ${pendingSaveOrders.length} orders...`)
         await saveOrdersBatch(pendingSaveOrders)
+    }
+
+    if (runtime.shouldStop) {
+        appendLog("Sync stopped by user.")
+        updateStatus({ status: "idle", message: "已停止" })
+        return
     }
 
     updateStatus({ 

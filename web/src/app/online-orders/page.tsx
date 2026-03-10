@@ -219,7 +219,10 @@ export default async function OnlineOrdersPage() {
         <h2 className="text-3xl font-bold tracking-tight">线上订单管理</h2>
         <p className="text-muted-foreground">查看和管理线上订单数据。</p>
         <div className="mt-3">
-          <OnlineOrdersClient initialConfig={initialConfig} />
+          <OnlineOrdersClient
+            initialConfig={initialConfig}
+            canClearOrders={isAdmin || !!currentUser?.permissions?.includes('online_orders_clear')}
+          />
         </div>
       </div>
     </div>

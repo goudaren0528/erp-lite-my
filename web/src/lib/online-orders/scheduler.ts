@@ -70,25 +70,29 @@ async function runScheduler() {
     const sites = config.sites || []
     if (sites.length === 0) return
 
+    const now = Date.now()
+    const nowDate = new Date()
+    // Current HH:mm string in local time
+    const nowHHmm = `${String(nowDate.getHours()).padStart(2, "0")}:${String(nowDate.getMinutes()).padStart(2, "0")}`
+
     // Run all site checks in parallel
     const promises = sites.map(async (site) => {
-        // Determine if enabled and interval
+        // Determine if enabled
         let enabled = false
-        let interval = 3600 // seconds
+        let interval = 3600 // seconds, used as fallback if no scheduledTimes
+        let scheduledTimes: string[] = []
       
         if (site.id === 'zanchen') {
             enabled = config.autoSyncEnabled ?? false
             interval = config.interval ?? 3600
+            scheduledTimes = config.scheduledTimes ?? []
         } else {
             enabled = site.autoSync?.enabled ?? false
             interval = site.autoSync?.interval ?? 3600
+            scheduledTimes = site.autoSync?.scheduledTimes ?? []
         }
-
-        // Debug log for scheduler decision
-        // console.log(`[Scheduler] Site: ${site.name} (${site.id}), Enabled: ${enabled}, Interval: ${interval}`)
       
         if (!enabled) {
-            // Only log if it's NOT zanchen (to avoid spamming logs for the main site if user disabled it intentionally)
             if (site.id !== 'zanchen') {
                  addLog(`[调度] 跳过 ${site.name}: 自动同步未启用`)
             }
@@ -98,35 +102,38 @@ async function runScheduler() {
         // Check if due
         const lastRunStr = runtime.siteLastRun[site.id]
         const previousRunTime = lastRunStr ? new Date(lastRunStr).getTime() : 0
-        const now = Date.now()
-        
-        // Update next run time for UI (Zanchen only for now)
+
+        let isDue = false
+
         if (site.id === 'zanchen') {
-             const nextRunMs = (previousRunTime > 0 ? previousRunTime + interval * 1000 : now + interval * 1000)
-             runtime.status.nextRunAt = new Date(nextRunMs).toISOString()
-        }
-        
-        // If never run, run immediately. Otherwise check interval.
-        if (previousRunTime > 0 && (now - previousRunTime < interval * 1000)) {
-            if (site.id !== 'zanchen') {
-                 // Optional: Log verbose skip
-                 // addLog(`[调度] 跳过 ${site.name}: 冷却中 (上次: ${new Date(lastRunStr).toLocaleTimeString()})`)
+            if (scheduledTimes.length === 0) return // No times configured — skip
+            // Scheduled times logic for zanchen
+            const matchesSchedule = scheduledTimes.some(t => t === nowHHmm)
+            const recentlyRun = previousRunTime > 0 && (now - previousRunTime < 60 * 1000)
+            isDue = matchesSchedule && !recentlyRun
+            if (isDue) {
+                runtime.status.nextRunAt = undefined // clear stale next run
             }
+        } else if (scheduledTimes.length === 0) {
+            // No scheduled times configured — never auto-run
             return
+        } else {
+            // Scheduled times logic: fire if current HH:mm matches any scheduled time
+            // and we haven't already run within the last 60 seconds (to avoid double-fire)
+            const matchesSchedule = scheduledTimes.some(t => t === nowHHmm)
+            const recentlyRun = previousRunTime > 0 && (now - previousRunTime < 60 * 1000)
+            isDue = matchesSchedule && !recentlyRun
         }
 
-        // Update site last run at start for Fixed Rate scheduling
+        if (!isDue) return
+
+        // Update site last run at start
         runtime.siteLastRun[site.id] = new Date().toISOString()
-        const currentExecutionTime = Date.now() // current time is the run time
-        
-        // Update next run time immediately
         if (site.id === 'zanchen') {
-             const nextRunMs = currentExecutionTime + interval * 1000
-             runtime.status.nextRunAt = new Date(nextRunMs).toISOString()
+             runtime.status.nextRunAt = new Date(Date.now() + interval * 1000).toISOString()
         }
 
         addLog(`开始同步站点: ${site.name}`)
-        // runtime.status.lastRunAt = new Date().toISOString() // Update global last run for UI - Deprecated for per-site tracking
         
         const siteIdLower = (site.id || "").toLowerCase()
         const siteNameLower = (site.name || "").toLowerCase()
@@ -240,22 +247,5 @@ export function startScheduler() {
 }
 
 export async function notifyManualRun(siteId: string) {
-  // Update last run time to now, so the scheduler will skip the next immediate run
-  // and wait for the full interval.
   runtime.siteLastRun[siteId] = new Date().toISOString()
-  
-  // Also update next run time for UI
-  if (siteId === 'zanchen') {
-     try {
-         const config = await loadConfig()
-         if (config) {
-             const interval = config.interval ?? 3600
-             const manualRunTime = runtime.siteLastRun[siteId] ? new Date(runtime.siteLastRun[siteId]).getTime() : Date.now()
-             const nextRunMs = manualRunTime + interval * 1000
-             runtime.status.nextRunAt = new Date(nextRunMs).toISOString()
-         }
-     } catch (e) {
-         console.error("Failed to update next run time:", e)
-     }
-  }
 }

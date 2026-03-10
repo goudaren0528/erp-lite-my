@@ -4,6 +4,7 @@ import { chromium, type BrowserContext, type Page } from "playwright"
 import { loadConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
 import { schedulerLogger } from "./scheduler"
 import { prisma } from "@/lib/db"
+import { autoMatchSpecId } from "@/lib/spec-auto-match"
 
 // Re-use types or define specific ones
 export type AolzuStatus = {
@@ -33,6 +34,7 @@ type AolzuParsedOrder = {
   itemSku: string
   logisticsCompany: string
   trackingNumber: string
+  specId?: string | null
 }
 
 type AolzuRuntime = {
@@ -1018,6 +1020,14 @@ async function saveOrdersBatch(orders: AolzuParsedOrder[]) {
     try {
         appendLog(`[Database] Preparing to save ${orders.length} orders. Sample: ${JSON.stringify(orders[0] || {}, null, 2)}`)
         
+        // Auto-match specId for orders that don't have one yet
+        for (const order of orders) {
+            if (!order.specId && (order.itemTitle || order.itemSku)) {
+                const matched = await autoMatchSpecId(order.itemTitle, order.itemSku)
+                if (matched) (order as Record<string, unknown>).specId = matched
+            }
+        }
+        
         const operations = orders.map(order => 
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
@@ -1079,7 +1089,7 @@ export async function startAolzuSync(siteId: string) {
     const headless = config?.headless ?? false 
     appendLog(`Using headless mode: ${headless}`)
     
-    const page = await ensurePage(headless)
+    let page = await ensurePage(headless)
     
     try {
         await page.bringToFront()
@@ -1141,6 +1151,55 @@ export async function startAolzuSync(siteId: string) {
     let pendingSaveOrders: AolzuParsedOrder[] = []
     const BATCH_SIZE = 200
 
+    const PAGE_CRASH_ERRORS = ["Target page", "Session closed", "crashed", "Target closed", "Connection closed"]
+    const isCrashError = (e: unknown) => PAGE_CRASH_ERRORS.some(s => String(e).includes(s))
+    let pageRetryCount = 0
+    const MAX_PAGE_RETRIES = 3
+    // Rebuild browser context every N pages to prevent OOM from DOM/memory accumulation
+    const MEMORY_REFRESH_INTERVAL = 15
+
+    // Navigate to the order list and set page size, then jump to targetPage if > 1
+    const navigateToPage = async (targetPage: number) => {
+        await login(page, targetSite)
+        await page.waitForLoadState("domcontentloaded")
+        await waitRandom(page, 1200, 3000)
+        await handlePopup(page)
+        const clickOkNav = await openAolzuOrderListByClicks(page)
+        if (!clickOkNav && targetSite.selectors.order_menu_link) {
+            const origin = getOriginFromUrl(targetSite.selectors.order_menu_link)
+            await page.goto(targetSite.selectors.order_menu_link, { waitUntil: "domcontentloaded", timeout: 30000, referer: origin ? `${origin}/` : undefined })
+            await waitRandom(page, 1200, 3000)
+        }
+        await setAolzuPageSizeTo50(page)
+        if (targetPage > 1) {
+            // Try ivu quick-jumper input first (avoids clicking N-1 times)
+            const jumped = await (async () => {
+                try {
+                    const input = await page.$(".ivu-page-options-elevator input")
+                    if (input) {
+                        await input.fill(String(targetPage))
+                        await input.press("Enter")
+                        await waitRandom(page, 2000, 3500)
+                        return true
+                    }
+                } catch { /* fall through */ }
+                return false
+            })()
+            if (!jumped) {
+                appendLog(`Quick-jumper not found, clicking next ${targetPage - 1} times...`)
+                for (let p = 1; p < targetPage; p++) {
+                    if (targetSite.selectors.pagination_next_selector) {
+                        const nb = await page.$(targetSite.selectors.pagination_next_selector)
+                        if (nb) {
+                            await nb.click({ force: true })
+                            await waitRandom(page, 2000, 3500)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     while (hasMore && currentPage <= MAX_PAGES) {
         if (runtime.shouldStop) {
             appendLog("User stopped the sync process.");
@@ -1148,113 +1207,193 @@ export async function startAolzuSync(siteId: string) {
             break;
         }
 
-        appendLog(`Processing page ${currentPage}...`)
-        await simulateHumanMouse(page)
-        await simulateHumanScroll(page, 1, 3)
-        await waitRandom(page, 800, 1600)
-        const pageOrders = await parseOrders(page, targetSite)
+        try {
+            appendLog(`Processing page ${currentPage}...`)
 
-        if (stopThreshold > 0 && pageOrders.length > 0) {
-            const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean)
-            try {
-                const existingFinalOrders = await prisma.onlineOrder.findMany({
-                    where: {
-                        orderNo: { in: orderNos },
-                        platform: "奥租",
-                        status: { in: finalStatuses }
-                    },
-                    select: { orderNo: true, status: true }
-                })
-                const finalSet = new Set(existingFinalOrders.map(o => o.orderNo))
-
-                let shouldStop = false
-                for (const order of pageOrders) {
-                    if (!order.orderNo) continue
-                    if (finalSet.has(order.orderNo)) {
-                        consecutiveFinalStateCount++
-                        if (consecutiveFinalStateCount >= stopThreshold) {
-                            appendLog(`已连续发现 ${consecutiveFinalStateCount} 个历史终态订单，触发增量同步停止阈值。`)
-                            shouldStop = true
-                            break
-                        }
-                    } else {
-                        consecutiveFinalStateCount = 0
-                    }
-                }
-                if (shouldStop) {
-                    hasMore = false
-                    break
-                }
-            } catch (e) {
-                appendLog(`增量阀值检查失败，继续全量抓取: ${e}`)
+            // Guard: if page is already closed/crashed before we even start, throw immediately
+            if (page.isClosed()) {
+                throw new Error("Target page, context or browser has been closed")
             }
-        }
-        
-        if (pageOrders.length > 0) {
-            pendingSaveOrders.push(...pageOrders)
-            appendLog(`Page ${currentPage}: Parsed ${pageOrders.length} orders. (Total Pending: ${pendingSaveOrders.length})`)
-        } else {
-            appendLog(`Warning: No orders parsed on page ${currentPage}.`)
-        }
 
-        await handlePopup(page)
-        await waitRandom(page, 1000, 3000)
-        if (currentPage > 0 && currentPage % 5 === 0) {
-            appendLog(`[System] 已抓取 ${currentPage} 页，随机暂停一段时间...`)
-            await simulateHumanMouse(page, 2, 5)
-            await simulateHumanScroll(page, 2, 5)
-            await waitRandom(page, 3000, 5000)
-        }
+            // Wrap the entire page processing in a timeout so a hung page doesn't block forever
+            const PAGE_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes per page max
+            let pageTimeoutHandle: ReturnType<typeof setTimeout> | undefined
+            const pageTimeoutPromise = new Promise<never>((_, reject) => {
+                pageTimeoutHandle = setTimeout(() => {
+                    reject(new Error("Target page, context or browser has been closed"))
+                }, PAGE_TIMEOUT_MS)
+            })
 
-        if (pendingSaveOrders.length >= BATCH_SIZE) {
-            appendLog(`Batch size reached (${pendingSaveOrders.length}), saving to database...`)
-            await saveOrdersBatch(pendingSaveOrders)
-            pendingSaveOrders = []
-        }
-        
-        const progressMsg = `正在抓取第 ${currentPage} 页 (当前缓存 ${pendingSaveOrders.length} 个待保存)`;
-        
-        appendLog(progressMsg);
-        updateStatus({
-            message: progressMsg
-        });
+            const pageWorkPromise = (async () => {
+                await simulateHumanMouse(page)
+                await simulateHumanScroll(page, 1, 3)
+                await waitRandom(page, 800, 1600)
+                return await parseOrders(page, targetSite)
+            })()
 
-        if (currentPage >= MAX_PAGES) {
-            appendLog(`Reached max pages limit (${MAX_PAGES}). Stopping.`)
-            hasMore = false
-            break
-        }
+            let pageOrders: AolzuParsedOrder[]
+            try {
+                pageOrders = await Promise.race([pageWorkPromise, pageTimeoutPromise])
+            } finally {
+                clearTimeout(pageTimeoutHandle)
+            }
 
-        if (targetSite.selectors.pagination_next_selector) {
-             const nextBtn = await page.$(targetSite.selectors.pagination_next_selector)
-             
-             if (nextBtn) {
-                 const classAttr = await nextBtn.getAttribute('class') || ""
-                 const isDisabled = await nextBtn.getAttribute('disabled') !== null || classAttr.includes('disabled')
-                 
-                 if (!isDisabled) {
-                     appendLog(`Navigating to next page (Page ${currentPage + 1})...`)
-                     await nextBtn.scrollIntoViewIfNeeded().catch(() => void 0)
-                    await simulateHumanScroll(page, 1, 2)
-                     await waitRandom(page, 600, 1400)
-                     await nextBtn.click({ force: true })
-                     await waitRandom(page, 3000, 5000) 
-                     currentPage++
-                 } else {
-                     appendLog("Next page button is disabled. Reached end of list.")
-                     hasMore = false
-                 }
-             } else {
-                 hasMore = false
-             }
-        } else {
-            hasMore = false
+            // Reset retry counter on successful parse
+            pageRetryCount = 0
+
+            if (stopThreshold > 0 && pageOrders.length > 0) {
+                const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean)
+                try {
+                    const existingFinalOrders = await prisma.onlineOrder.findMany({
+                        where: {
+                            orderNo: { in: orderNos },
+                            platform: "奥租",
+                            status: { in: finalStatuses }
+                        },
+                        select: { orderNo: true, status: true }
+                    })
+                    const finalSet = new Set(existingFinalOrders.map(o => o.orderNo))
+
+                    let shouldStop = false
+                    for (const order of pageOrders) {
+                        if (!order.orderNo) continue
+                        if (finalSet.has(order.orderNo)) {
+                            consecutiveFinalStateCount++
+                            if (consecutiveFinalStateCount >= stopThreshold) {
+                                appendLog(`已连续发现 ${consecutiveFinalStateCount} 个历史终态订单，触发增量同步停止阈值。`)
+                                shouldStop = true
+                                break
+                            }
+                        } else {
+                            consecutiveFinalStateCount = 0
+                        }
+                    }
+                    if (shouldStop) {
+                        hasMore = false
+                        break
+                    }
+                } catch (e) {
+                    appendLog(`增量阀值检查失败，继续全量抓取: ${e}`)
+                }
+            }
+            
+            if (pageOrders.length > 0) {
+                pendingSaveOrders.push(...pageOrders)
+                appendLog(`Page ${currentPage}: Parsed ${pageOrders.length} orders. (Total Pending: ${pendingSaveOrders.length})`)
+            } else {
+                appendLog(`Warning: No orders parsed on page ${currentPage}.`)
+            }
+
+            await handlePopup(page)
+            await waitRandom(page, 1000, 3000)
+            if (currentPage > 0 && currentPage % 5 === 0) {
+                appendLog(`[System] 已抓取 ${currentPage} 页，随机暂停一段时间...`)
+                await simulateHumanMouse(page, 2, 5)
+                await simulateHumanScroll(page, 2, 5)
+                await waitRandom(page, 3000, 5000)
+            }
+
+            if (pendingSaveOrders.length >= BATCH_SIZE) {
+                appendLog(`Batch size reached (${pendingSaveOrders.length}), saving to database...`)
+                await saveOrdersBatch(pendingSaveOrders)
+                pendingSaveOrders = []
+            }
+            
+            const progressMsg = `正在抓取第 ${currentPage} 页 (当前缓存 ${pendingSaveOrders.length} 个待保存)`;
+            
+            appendLog(progressMsg);
+            updateStatus({ message: progressMsg });
+
+            if (currentPage >= MAX_PAGES) {
+                appendLog(`Reached max pages limit (${MAX_PAGES}). Stopping.`)
+                hasMore = false
+                break
+            }
+
+            // Periodic memory refresh: rebuild context every N pages to prevent OOM
+            if (currentPage % MEMORY_REFRESH_INTERVAL === 0) {
+                appendLog(`[Memory] Reached page ${currentPage}, rebuilding browser context to free memory...`)
+                updateStatus({ message: `内存刷新中，即将继续第 ${currentPage + 1} 页...` })
+                try { await runtime.context?.close() } catch {}
+                runtime.context = undefined
+                runtime.page = undefined
+                await new Promise(r => setTimeout(r, 2000))
+                page = await ensurePage(headless)
+                await navigateToPage(currentPage + 1)
+                appendLog(`[Memory] Context rebuilt, continuing from page ${currentPage + 1}`)
+                currentPage++
+                continue
+            }
+
+            if (targetSite.selectors.pagination_next_selector) {
+                const nextBtn = await page.$(targetSite.selectors.pagination_next_selector)
+                
+                if (nextBtn) {
+                    const classAttr = await nextBtn.getAttribute('class') || ""
+                    const isDisabled = await nextBtn.getAttribute('disabled') !== null || classAttr.includes('disabled')
+                    
+                    if (!isDisabled) {
+                        appendLog(`Navigating to next page (Page ${currentPage + 1})...`)
+                        await nextBtn.scrollIntoViewIfNeeded().catch(() => void 0)
+                        await simulateHumanScroll(page, 1, 2)
+                        await waitRandom(page, 600, 1400)
+                        // Use a timeout race so a hung click doesn't block forever
+                        const clickTimeout = new Promise<never>((_, reject) =>
+                            setTimeout(() => reject(new Error("Target page, context or browser has been closed")), 60000)
+                        )
+                        await Promise.race([
+                            (async () => {
+                                await nextBtn.click({ force: true })
+                                await waitRandom(page, 3000, 5000)
+                            })(),
+                            clickTimeout
+                        ])
+                        currentPage++
+                    } else {
+                        appendLog("Next page button is disabled. Reached end of list.")
+                        hasMore = false
+                    }
+                } else {
+                    hasMore = false
+                }
+            } else {
+                hasMore = false
+            }
+        } catch (pageErr) {
+            if (isCrashError(pageErr) && pageRetryCount < MAX_PAGE_RETRIES) {
+                pageRetryCount++
+                appendLog(`[Crash] Page crash detected on page ${currentPage} (retry ${pageRetryCount}/${MAX_PAGE_RETRIES}): ${pageErr}`)
+                appendLog("Rebuilding browser context and re-navigating to order list...")
+                updateStatus({ message: `页面崩溃，正在重试第 ${currentPage} 页 (${pageRetryCount}/${MAX_PAGE_RETRIES})...` })
+
+                // Tear down crashed context
+                try { await runtime.context?.close() } catch {}
+                runtime.context = undefined
+                runtime.page = undefined
+
+                // Brief pause before rebuilding
+                await new Promise(r => setTimeout(r, 3000))
+                page = await ensurePage(headless)
+                await navigateToPage(currentPage)
+                appendLog(`Crash recovery complete, retrying page ${currentPage}...`)
+                // Loop continues, retrying same currentPage
+            } else {
+                // Non-crash error or retries exhausted — rethrow to outer catch
+                appendLog(`Fatal error on page ${currentPage} (retries exhausted or non-crash): ${pageErr}`)
+                throw pageErr
+            }
         }
     }
     
     if (pendingSaveOrders.length > 0) {
         appendLog(`Saving remaining ${pendingSaveOrders.length} orders...`)
         await saveOrdersBatch(pendingSaveOrders)
+    }
+
+    if (runtime.shouldStop) {
+        appendLog("Sync stopped by user.")
+        updateStatus({ status: "idle", message: "已停止" })
+        return
     }
 
     updateStatus({ 
@@ -1276,16 +1415,7 @@ export async function startAolzuSync(siteId: string) {
 export function stopAolzuSync() {
     appendLog("Stop command received.")
     runtime.shouldStop = true;
-    updateStatus({ status: "idle", message: "已停止" })
-
-    // Close browser so next run starts with a clean session
-    if (runtime.context) {
-        runtime.context.close().catch(() => {})
-        runtime.context = undefined
-        runtime.page = undefined
-        appendLog("Browser session closed.")
-    }
-
+    updateStatus({ status: "running", message: "正在停止..." })
     return runtime.status
 }
 
