@@ -499,32 +499,29 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
           <Table>
           <TableHeader>
               <TableRow>
-              <TableHead className="w-[160px]">
+              <TableHead className="w-[150px]">
                   <Button variant="ghost" size="sm" onClick={toggleSort} className="-ml-3 hover:bg-transparent flex items-center gap-1">
                       订单号/时间
                       <ArrowUpDown className={cn("ml-2 h-4 w-4 transition-opacity", sortBy === 'createdAt' ? "opacity-100" : "opacity-50")} />
                   </Button>
               </TableHead>
-              <TableHead className="w-[90px]">用户昵称</TableHead>
-              <TableHead className="w-[130px]">小程序单号</TableHead>
-              <TableHead className="w-[130px]">闲鱼单号</TableHead>
-              <TableHead className="w-[80px]">推广方式</TableHead>
-              <TableHead className="w-[80px]">推广员</TableHead>
+              <TableHead className="w-[80px]">用户昵称</TableHead>
+              <TableHead className="w-[130px]">关联单号</TableHead>
+              <TableHead className="w-[100px]">推广</TableHead>
               <TableHead className="w-[130px]">物流信息</TableHead>
-              <TableHead className="w-[160px]">设备信息</TableHead>
+              <TableHead className="w-[150px]">设备信息</TableHead>
               <TableHead className="w-[160px]">匹配规格</TableHead>
-              <TableHead className="w-[70px]">匹配</TableHead>
-              <TableHead className="w-[130px]">
+              <TableHead className="w-[120px]">
                   <Button variant="ghost" size="sm" onClick={toggleRentSort} className="-ml-3 hover:bg-transparent">
                       租期/时间
                       <ArrowUpDown className="ml-2 h-4 w-4" />
                   </Button>
               </TableHead>
-              <TableHead className="w-[100px]">金额</TableHead>
-              <TableHead className="w-[90px]">状态</TableHead>
-              <TableHead className="w-[72px]">结款</TableHead>
-              <TableHead className="w-[90px]">截图</TableHead>
-              <TableHead className="min-w-[120px]">备注</TableHead>
+              <TableHead className="w-[95px]">金额</TableHead>
+              <TableHead className="w-[85px]">状态</TableHead>
+              <TableHead className="w-[68px]">结款</TableHead>
+              <TableHead className="w-[80px]">截图</TableHead>
+              <TableHead className="min-w-[100px]">备注</TableHead>
               </TableRow>
           </TableHeader>
           <TableBody>
@@ -533,7 +530,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
               ))}
               {displayOrders.length === 0 && (
               <TableRow>
-                  <TableCell colSpan={16} className="text-center h-24">
+                  <TableCell colSpan={13} className="text-center h-24">
                       {isLoading || isPending ? "加载中..." : "暂无符合条件的订单"}
                   </TableCell>
               </TableRow>
@@ -1333,11 +1330,14 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         <div className="font-bold text-xs">{order.customerXianyuId}</div>
       </TableCell>
       <TableCell className="align-top">
-         <div className="flex items-center gap-1">
+         <div className="space-y-1">
             <Popover open={isMpOpen} onOpenChange={setIsMpOpen}>
                 <PopoverTrigger asChild>
-                    <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-green-700 font-mono break-all">
-                        {order.miniProgramOrderNo || <span className="text-gray-300 italic text-[10px]">点击填写</span>}
+                    <div className="text-[10px] cursor-pointer hover:underline decoration-dashed underline-offset-4 font-mono break-all leading-tight">
+                        <span className="text-gray-400 mr-1">小程序</span>
+                        {order.miniProgramOrderNo
+                            ? <span className="text-green-700">{order.miniProgramOrderNo}<Copy className="h-2.5 w-2.5 inline ml-0.5 text-gray-400 cursor-pointer" onClick={e => { e.stopPropagation(); copyToClipboard(order.miniProgramOrderNo!) }} /></span>
+                            : <span className="text-gray-300 italic">点击填写</span>}
                     </div>
                 </PopoverTrigger>
                 <PopoverContent className="w-64 p-3">
@@ -1350,19 +1350,13 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                     </div>
                 </PopoverContent>
             </Popover>
-            {order.miniProgramOrderNo && (
-                <Button variant="ghost" size="icon" className="h-4 w-4 shrink-0 text-gray-400 hover:text-blue-600" onClick={() => copyToClipboard(order.miniProgramOrderNo!)}>
-                    <Copy className="h-3 w-3" />
-                </Button>
-            )}
-         </div>
-      </TableCell>
-      <TableCell className="align-top">
-        <div className="flex items-center gap-1">
             <Popover open={isXianyuOpen} onOpenChange={setIsXianyuOpen}>
                 <PopoverTrigger asChild>
-                    <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700 font-mono break-all">
-                        {order.xianyuOrderNo || <span className="text-gray-300 italic text-[10px]">点击填写</span>}
+                    <div className="text-[10px] cursor-pointer hover:underline decoration-dashed underline-offset-4 font-mono break-all leading-tight">
+                        <span className="text-gray-400 mr-1">闲鱼</span>
+                        {order.xianyuOrderNo
+                            ? <span className="text-gray-700">{order.xianyuOrderNo}<Copy className="h-2.5 w-2.5 inline ml-0.5 text-gray-400 cursor-pointer" onClick={e => { e.stopPropagation(); copyToClipboard(order.xianyuOrderNo!) }} /></span>
+                            : <span className="text-gray-300 italic">点击填写</span>}
                     </div>
                 </PopoverTrigger>
                 <PopoverContent className="w-64 p-3">
@@ -1375,18 +1369,15 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                     </div>
                 </PopoverContent>
             </Popover>
-            {order.xianyuOrderNo && (
-                <Button variant="ghost" size="icon" className="h-4 w-4 shrink-0 text-gray-400 hover:text-blue-600" onClick={() => copyToClipboard(order.xianyuOrderNo!)}>
-                    <Copy className="h-3 w-3" />
-                </Button>
-            )}
-        </div>
+         </div>
       </TableCell>
       <TableCell className="align-top">
-         <PlatformEditPopover order={order} onSave={(p) => handleUpdateSourceInfo(order.source, p !== order.platform ? "" : order.sourceContact, p)} />
-      </TableCell>
-      <TableCell className="align-top">
-         <SourceEditPopover order={order} promoters={promoters} onSave={(s, c, pId, cId) => handleUpdateSourceInfo(s, c, undefined, pId, cId)} />
+         <div className="space-y-1">
+             <div className="text-[10px] text-gray-400">方式</div>
+             <PlatformEditPopover order={order} onSave={(p) => handleUpdateSourceInfo(order.source, p !== order.platform ? "" : order.sourceContact, p)} />
+             <div className="text-[10px] text-gray-400 mt-1">推广员</div>
+             <SourceEditPopover order={order} promoters={promoters} onSave={(s, c, pId, cId) => handleUpdateSourceInfo(s, c, undefined, pId, cId)} />
+         </div>
       </TableCell>
       <TableCell className="align-top space-y-2">
         <div className="space-y-1">
@@ -1460,6 +1451,11 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         )}
       </TableCell>
       <TableCell className="align-top">
+        <div className="mb-1">
+          <Badge variant="outline" className={order.specId ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]" : "bg-gray-50 text-gray-500 border-gray-200 text-[10px]"}>
+              {order.specId ? "已匹配" : "未匹配"}
+          </Badge>
+        </div>
         <Popover
           open={isMatchOpen}
           onOpenChange={open => {
@@ -1582,12 +1578,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         </Popover>
       </TableCell>
       <TableCell className="align-top">
-        <Badge variant="outline" className={order.specId ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-gray-50 text-gray-500 border-gray-200"}>
-            {order.specId ? "已匹配" : "未匹配"}
-        </Badge>
-      </TableCell>
-      <TableCell className="align-top">
-        <div className="font-medium">{order.duration} 天</div>
+        <div className="font-medium text-xs">{order.duration} 天</div>
         <div className={`text-xs mt-1 ${getDeliveryTimeColor()}`} title="预计发货">预发: {order.deliveryTime ? format(new Date(order.deliveryTime), 'yyyy-MM-dd') : '-'}</div>
         <div className="text-xs text-muted-foreground" title="实际发货">实发: {order.actualDeliveryTime ? format(new Date(order.actualDeliveryTime), 'yyyy-MM-dd') : '-'}</div>
         <div className="text-xs text-muted-foreground" title="起租日期">起租: {order.rentStartDate ? format(new Date(order.rentStartDate), 'yyyy-MM-dd') : '-'}</div>
@@ -1717,7 +1708,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
       </TableCell>
     </TableRow>
     <TableRow className="bg-gray-50/40 hover:bg-gray-50/60 border-b">
-        <TableCell colSpan={16} className="p-2">
+        <TableCell colSpan={13} className="p-2">
             <div className="flex items-center justify-start gap-2 flex-wrap">
                 {/* Logs - Moved to start */}
                 <Dialog open={isLogsOpen} onOpenChange={setIsLogsOpen}>

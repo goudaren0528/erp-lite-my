@@ -309,6 +309,8 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
   const [editSnValue, setEditSnValue] = useState("")
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState<{ processed: number; total: number } | null>(null)
+  const [importErrorRows, setImportErrorRows] = useState<{ row: Record<string, string>; reason: string }[] | null>(null)
+  const [importDataHeaders, setImportDataHeaders] = useState<string[]>([])
   const importInputRef = useRef<HTMLInputElement>(null)
 
   // Filters
@@ -1312,6 +1314,36 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                 </span>
               </div>
             )}
+            {importErrorRows && importErrorRows.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-destructive border-destructive/50"
+                onClick={() => {
+                  // Build CSV with errorReason inserted as 3rd column
+                  const headers = [...importDataHeaders]
+                  // Insert errorReason after 2nd column (index 2)
+                  const insertAt = Math.min(2, headers.length)
+                  const outHeaders = [...headers.slice(0, insertAt), "errorReason", ...headers.slice(insertAt)]
+                  const escapeCell = (v: string) => v.includes(",") || v.includes('"') || v.includes("\n") ? `"${v.replace(/"/g, '""')}"` : v
+                  const csvLines = [outHeaders.map(escapeCell).join(",")]
+                  for (const { row, reason } of importErrorRows) {
+                    const cells = headers.map(h => row[h] ?? "")
+                    cells.splice(insertAt, 0, reason)
+                    csvLines.push(cells.map(escapeCell).join(","))
+                  }
+                  const blob = new Blob(["\uFEFF" + csvLines.join("\n")], { type: "text/csv;charset=utf-8" })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement("a")
+                  a.href = url
+                  a.download = "import_errors.csv"
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }}
+              >
+                下载异常文件 ({importErrorRows.length})
+              </Button>
+            )}
             <input
               ref={importInputRef}
               type="file"
@@ -1320,6 +1352,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
               onChange={async (e) => {
                 const file = e.target.files?.[0]
                 if (!file) return
+                setImportErrorRows(null)
                 setImporting(true)
                 setImportProgress(null)
                 try {
@@ -1351,6 +1384,12 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                         }
                         if (msg.type === "done") {
                           toast.success(`导入完成：${lastUpserted} 条成功${lastFailed ? `，${lastFailed} 条失败` : ""}`)
+                          if (msg.errorRows?.length > 0) {
+                            setImportErrorRows(msg.errorRows)
+                            setImportDataHeaders(msg.dataHeaders ?? [])
+                          } else {
+                            setImportErrorRows(null)
+                          }
                           setDbRefreshKey(k => k + 1)
                         }
                         if (msg.type === "start") {
@@ -1546,14 +1585,31 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                                   </SelectContent>
                                </Select>
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setDbRefreshKey(key => key + 1)}
-                          >
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            刷新列表
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const blob = new Blob(["\uFEFForderNo,manualSn\n"], { type: "text/csv;charset=utf-8" })
+                                const url = URL.createObjectURL(blob)
+                                const a = document.createElement("a")
+                                a.href = url
+                                a.download = "sn_update_template.csv"
+                                a.click()
+                                URL.revokeObjectURL(url)
+                              }}
+                            >
+                              导出SN模板
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setDbRefreshKey(key => key + 1)}
+                            >
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              刷新列表
+                            </Button>
+                          </div>
                       </div>
                     </div>
                     <div className="rounded-md border bg-white relative min-h-[200px]">
