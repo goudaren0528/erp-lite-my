@@ -13,6 +13,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:/app/data/erp-lite.db
+      - TZ=Asia/Shanghai
       # Encryption key for Next.js Server Actions (Ensure this is strong and consistent)
       - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY}
       # Set to "true" to run seed scripts on startup (admin user creation, etc.)
