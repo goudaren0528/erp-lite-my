@@ -1210,38 +1210,13 @@ export async function startChenglinSync(siteId: string) {
 
 export function stopChenglinSync() {
     appendLog("Stop command received.")
-    
-    // Set stop flag
-    runtime.shouldStop = true;
-    
-    // Mark status as error so UI re-enables button
-    updateStatus({ status: "error", message: "User stopped manually" })
-    
-    // We do NOT close the context/page here to preserve login session
-    // Just mark as stopped in UI. The loop in runChenglinSync (if any) needs to check for a stop flag?
-    // Currently runChenglinSync doesn't have a stop flag check inside the loop, 
-    // but since we are running in a single thread model here (sort of), 
-    // actually we can't easily interrupt the `await` calls unless we have a flag.
-    
-    // However, the user's intent is "Don't close browser".
-    // The current implementation of stopChenglinSync DOES close context.
-    // Let's comment that out.
-    
-    /* 
-    // Attempt to close context
-    try {
-        if (runtime.context) {
-            runtime.context.close().catch(() => {})
-            runtime.context = undefined
-            runtime.page = undefined
-        }
-    } catch {
-        // ignore
+    runtime.shouldStop = true
+    if (runtime.context) {
+        runtime.context.close().catch(() => void 0)
+        runtime.context = undefined
+        runtime.page = undefined
     }
-    */
-   
-    appendLog("Browser session preserved for next run.");
-    
+    updateStatus({ status: "idle", message: "已停止" })
     return runtime.status
 }
 

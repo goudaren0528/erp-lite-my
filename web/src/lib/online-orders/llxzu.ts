@@ -229,7 +229,12 @@ export function getRunningPage() {
 export function stopLlxzuSync() {
     runtime.shouldStop = true
     appendLog("User requested stop.")
-    updateStatus({ status: "running", message: "正在停止..." })
+    if (runtime.context) {
+        runtime.context.close().catch(() => void 0)
+        runtime.context = undefined
+        runtime.page = undefined
+    }
+    updateStatus({ status: "idle", message: "已停止" })
 }
 
 export async function restartLlxzuBrowser() {

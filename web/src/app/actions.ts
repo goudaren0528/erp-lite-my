@@ -16,11 +16,13 @@ const containsFilter = (value: string) => (dbMode ? ({ contains: value, mode: db
 export async function fetchOrdersForExport({
     startDate,
     endDate,
-    status
+    status,
+    filterSettled
 }: {
     startDate?: string;
     endDate?: string;
     status?: string;
+    filterSettled?: 'ALL' | 'YES' | 'NO';
 }) {
     const currentUser = await getCurrentUser();
     if (!currentUser) {
@@ -57,6 +59,13 @@ export async function fetchOrdersForExport({
     // Status filter
     if (status && status !== 'ALL') {
         where.status = status;
+    }
+    
+    // Settled filter
+    if (filterSettled === 'YES') {
+        where.settled = true;
+    } else if (filterSettled === 'NO') {
+        where.settled = false;
     }
     
     const orders = await prisma.order.findMany({
@@ -99,6 +108,7 @@ export async function fetchOrdersForExport({
             creatorName: true,
             createdAt: true,
             updatedAt: true,
+            settled: true,
             extensions: { select: { days: true, price: true } },
         },
         orderBy: { createdAt: 'desc' }
@@ -480,6 +490,7 @@ export async function fetchOrders(params: {
     filterPlatform?: string;
     startDate?: string;
     endDate?: string;
+    filterSettled?: 'ALL' | 'YES' | 'NO';
 }) {
     const currentUser = await getCurrentUser();
     if (!currentUser) {
@@ -507,7 +518,8 @@ export async function fetchOrders(params: {
         filterSource,
         filterPlatform,
         startDate,
-        endDate
+        endDate,
+        filterSettled
     } = params;
 
     const filterOrderNo = rawFilterOrderNo?.trim();
@@ -597,6 +609,12 @@ export async function fetchOrders(params: {
             createdAt.lt = end;
         }
         baseWhere.createdAt = createdAt;
+    }
+
+    if (filterSettled === 'YES') {
+        baseWhere.settled = true;
+    } else if (filterSettled === 'NO') {
+        baseWhere.settled = false;
     }
 
     if (filterCreator) {
@@ -1099,6 +1117,25 @@ export async function updateOrderMatchSpec(orderId: string, productId: string | 
             productId: spec.productId,
         }
     })
+
+    // 自动同步：将相同 productName+variantName 的其他订单也填入同样规格
+    if (spec.id) {
+        const src = await prisma.order.findUnique({
+            where: { id: orderId },
+            select: { productName: true, variantName: true }
+        })
+        if (src?.productName && src?.variantName) {
+            await prisma.order.updateMany({
+                where: {
+                    id: { not: orderId },
+                    productName: src.productName,
+                    variantName: src.variantName,
+                },
+                data: { specId: spec.id, productId: spec.productId }
+            })
+        }
+    }
+
     revalidatePath('/orders')
     return { success: true }
 }
@@ -1833,6 +1870,37 @@ export async function deleteInventoryItem(id: string) {
     }
 }
 
+export async function batchOutboundInventoryItems(data: { itemTypeId: string; warehouseId: string; sns: string[] }) {
+    try {
+        const validSns = data.sns.filter(s => s.trim().length > 0).map(s => s.trim())
+        if (validSns.length === 0) return { success: false, message: "请输入至少一个序列号" }
+
+        const items = await prisma.inventoryItem.findMany({
+            where: { itemTypeId: data.itemTypeId, warehouseId: data.warehouseId, sn: { in: validSns }, status: { not: "DELETED" } },
+            select: { id: true, sn: true }
+        })
+
+        const foundSns = items.map(i => i.sn)
+        const notFound = validSns.filter(s => !foundSns.includes(s))
+
+        if (items.length === 0) return { success: false, message: "未找到任何匹配的序列号" }
+
+        await prisma.inventoryItem.updateMany({
+            where: { id: { in: items.map(i => i.id) } },
+            data: { status: "DELETED" }
+        })
+
+        revalidatePath('/inventory')
+        const msg = notFound.length > 0
+            ? `已出库 ${items.length} 个，未找到: ${notFound.join(', ')}`
+            : `已出库 ${items.length} 个`
+        return { success: true, message: msg }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "批量出库失败" }
+    }
+}
+
 export async function adjustInventoryStock(data: { itemTypeId: string; warehouseId: string; quantity: number }) {
     try {
         const itemType = await prisma.inventoryItemType.findUnique({ where: { id: data.itemTypeId } })
@@ -2043,5 +2111,19 @@ export async function getOrdersBySn(sn: string) {
     return {
         orders: orders.map(o => ({ ...o, customerName: o.sourceContact, manualSn: undefined })),
         onlineOrders
+    }
+}
+
+export async function updateOrderSettled(orderId: string, settled: boolean) {
+    try {
+        await prisma.order.update({
+            where: { id: orderId },
+            data: { settled }
+        });
+        revalidatePath('/orders');
+        return { success: true };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { success: false, message: message || "更新结款状态失败" };
     }
 }

@@ -2739,6 +2739,13 @@ export async function stopZanchenSync() {
   if (!runtime.running) return runtime.status
   runtime.shouldStop = true
   addLog("正在停止同步...")
+  // Force-close context so any blocked await throws and the finally block runs
+  if (runtime.context) {
+    runtime.context.close().catch(() => void 0)
+    runtime.context = undefined
+    runtime.page = undefined
+  }
+  setStatus({ status: "idle", message: "已停止" })
   return runtime.status
 }
 

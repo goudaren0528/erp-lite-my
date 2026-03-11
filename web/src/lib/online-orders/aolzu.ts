@@ -1089,18 +1089,31 @@ export async function startAolzuSync(siteId: string) {
     const headless = config?.headless ?? false 
     appendLog(`Using headless mode: ${headless}`)
     
-    let page = await ensurePage(headless)
-    
-    try {
-        await page.bringToFront()
-    } catch {
-        // ignore
-    }
+    // Timeout guard for the entire initialization phase (ensurePage + login)
+    const INIT_TIMEOUT_MS = 3 * 60 * 1000 // 3 minutes
+    let initTimeoutHandle: ReturnType<typeof setTimeout> | undefined
+    const initTimeoutPromise = new Promise<never>((_, reject) => {
+        initTimeoutHandle = setTimeout(() => {
+            reject(new Error("Initialization timeout: ensurePage/login took too long"))
+        }, INIT_TIMEOUT_MS)
+    })
 
-    await login(page, targetSite)
-    
-    await page.waitForLoadState("domcontentloaded")
-    await waitRandom(page, 1200, 3000)
+    let page: import("playwright").Page
+    try {
+        page = await Promise.race([
+            (async () => {
+                const p = await ensurePage(headless)
+                try { await p.bringToFront() } catch { /* ignore */ }
+                await login(p, targetSite)
+                await p.waitForLoadState("domcontentloaded")
+                await waitRandom(p, 1200, 3000)
+                return p
+            })(),
+            initTimeoutPromise
+        ])
+    } finally {
+        clearTimeout(initTimeoutHandle)
+    }
     
     await handlePopup(page)
     await simulateHumanMouse(page)
@@ -1414,8 +1427,14 @@ export async function startAolzuSync(siteId: string) {
 
 export function stopAolzuSync() {
     appendLog("Stop command received.")
-    runtime.shouldStop = true;
-    updateStatus({ status: "running", message: "正在停止..." })
+    runtime.shouldStop = true
+    // Force-close the browser context so any blocked await throws immediately
+    if (runtime.context) {
+        runtime.context.close().catch(() => void 0)
+        runtime.context = undefined
+        runtime.page = undefined
+    }
+    updateStatus({ status: "idle", message: "已停止" })
     return runtime.status
 }
 

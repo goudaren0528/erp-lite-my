@@ -325,6 +325,8 @@ model Order {
   channelId       String?
   channel         ChannelConfig? @relation(fields: [channelId], references: [id])
 
+  settled         Boolean  @default(false)
+
   creatorId       String
   creatorName     String
   createdAt       DateTime @default(now())

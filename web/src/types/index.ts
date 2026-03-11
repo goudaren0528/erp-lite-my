@@ -166,6 +166,7 @@ export interface Order {
   returnDeadline?: string | null; // 须寄回时间 (YYYY-MM-DD)
   
   remark: string;
+  settled: boolean;
   
   creatorId: string;
   creatorName: string;

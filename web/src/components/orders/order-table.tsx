@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot, fetchOrders, syncOrderMatchSpec, updateOrderMatchSpec } from "@/app/actions"
+import { updateOrderStatus, updateOrderRemark, extendOrder, updateMiniProgramOrderNo, updateXianyuOrderNo, deleteOrder, shipOrder, confirmShipment, returnOrder, approveOrder, rejectOrder, addOverdueFee, updateOrderScreenshot, fetchOrders, syncOrderMatchSpec, updateOrderMatchSpec, updateOrderSettled } from "@/app/actions"
 import { format, addDays, differenceInDays } from "date-fns"
 import { Edit2, Plus, Search, ArrowUpDown, Trash2, Calendar, CircleDollarSign, Truck, RotateCcw, Check, X, Ban, ScrollText, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Copy, Upload, Image as ImageIcon, Loader2 } from "lucide-react"
 import { closeOrder } from "@/app/actions"
@@ -129,6 +129,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
   const [filterSource, setFilterSource] = useState<string>('ALL')
   const [filterPlatform, setFilterPlatform] = useState<string>(initialPlatform || 'ALL')
+  const [filterSettled, setFilterSettled] = useState<'ALL' | 'YES' | 'NO'>('ALL')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc') // Default asc for status order
@@ -207,7 +208,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterSn, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, startDate, endDate, pageSize])
+  }, [filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterSn, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, filterSettled, startDate, endDate, pageSize])
 
   useEffect(() => {
     setIsLoading(true)
@@ -233,7 +234,8 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
           filterSource,
           filterPlatform,
           startDate: startDate || undefined,
-          endDate: endDate || undefined
+          endDate: endDate || undefined,
+          filterSettled
         })
         setCurrentOrders(res.orders as unknown as Order[])
         setTotal(res.total)
@@ -247,7 +249,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
         setIsLoading(false)
       }
     })
-  }, [currentPage, pageSize, sortBy, sortDirection, filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterSn, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, startDate, endDate, refreshKey])
+  }, [currentPage, pageSize, sortBy, sortDirection, filterOrderNo, filterXianyuOrderNo, filterCustomer, filterPromoter, filterProduct, filterSn, filterCreator, filterDuration, filterRecipientName, filterRecipientPhone, matchFilter, filterStatus, filterSource, filterPlatform, filterSettled, startDate, endDate, refreshKey])
 
   const resetFilters = () => {
     setFilterOrderNo('')
@@ -264,6 +266,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
     setFilterStatus('ALL')
     setFilterSource('ALL')
     setFilterPlatform('ALL')
+    setFilterSettled('ALL')
     setStartDate('')
     setEndDate('')
     setCurrentPage(1)
@@ -392,6 +395,17 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
                   </SelectContent>
               </Select>
 
+              <Select value={filterSettled} onValueChange={(v) => setFilterSettled(v as 'ALL' | 'YES' | 'NO')}>
+                  <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="结款状态" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="ALL">结款状态</SelectItem>
+                      <SelectItem value="YES">已结款</SelectItem>
+                      <SelectItem value="NO">未结款</SelectItem>
+                  </SelectContent>
+              </Select>
+
               <Input 
                   placeholder="推广员/电话" 
                   value={filterPromoter}
@@ -485,31 +499,32 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
           <Table>
           <TableHeader>
               <TableRow>
-              <TableHead className="w-[180px]">
+              <TableHead className="w-[160px]">
                   <Button variant="ghost" size="sm" onClick={toggleSort} className="-ml-3 hover:bg-transparent flex items-center gap-1">
                       订单号/时间
                       <ArrowUpDown className={cn("ml-2 h-4 w-4 transition-opacity", sortBy === 'createdAt' ? "opacity-100" : "opacity-50")} />
                   </Button>
               </TableHead>
-              <TableHead className="w-[120px]">用户昵称（闲鱼等）</TableHead>
-              <TableHead className="w-[150px]">小程序单号</TableHead>
-              <TableHead className="w-[150px]">闲鱼单号</TableHead>
-              <TableHead className="w-[100px]">推广方式</TableHead>
-              <TableHead className="w-[100px]">推广员</TableHead>
-              <TableHead className="w-[150px]">物流信息</TableHead>
-              <TableHead className="w-[200px]">设备信息</TableHead>
-              <TableHead className="w-[200px]">匹配规格</TableHead>
-              <TableHead className="w-[100px]">匹配状态</TableHead>
-              <TableHead className="w-[150px]">
+              <TableHead className="w-[90px]">用户昵称</TableHead>
+              <TableHead className="w-[130px]">小程序单号</TableHead>
+              <TableHead className="w-[130px]">闲鱼单号</TableHead>
+              <TableHead className="w-[80px]">推广方式</TableHead>
+              <TableHead className="w-[80px]">推广员</TableHead>
+              <TableHead className="w-[130px]">物流信息</TableHead>
+              <TableHead className="w-[160px]">设备信息</TableHead>
+              <TableHead className="w-[160px]">匹配规格</TableHead>
+              <TableHead className="w-[70px]">匹配</TableHead>
+              <TableHead className="w-[130px]">
                   <Button variant="ghost" size="sm" onClick={toggleRentSort} className="-ml-3 hover:bg-transparent">
                       租期/时间
                       <ArrowUpDown className="ml-2 h-4 w-4" />
                   </Button>
               </TableHead>
-              <TableHead className="w-[120px]">金额详情</TableHead>
-              <TableHead className="w-[100px]">状态</TableHead>
-              <TableHead className="w-[100px]">截图凭证</TableHead>
-              <TableHead className="min-w-[150px]">备注</TableHead>
+              <TableHead className="w-[100px]">金额</TableHead>
+              <TableHead className="w-[90px]">状态</TableHead>
+              <TableHead className="w-[72px]">结款</TableHead>
+              <TableHead className="w-[90px]">截图</TableHead>
+              <TableHead className="min-w-[120px]">备注</TableHead>
               </TableRow>
           </TableHeader>
           <TableBody>
@@ -518,7 +533,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
               ))}
               {displayOrders.length === 0 && (
               <TableRow>
-                  <TableCell colSpan={15} className="text-center h-24">
+                  <TableCell colSpan={16} className="text-center h-24">
                       {isLoading || isPending ? "加载中..." : "暂无符合条件的订单"}
                   </TableCell>
               </TableRow>
@@ -1616,6 +1631,24 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
                 </SelectContent>
               </Select>
       </TableCell>
+      <TableCell className="align-top">
+        <Select
+          value={order.settled ? 'YES' : 'NO'}
+          onValueChange={async (v) => {
+            const res = await updateOrderSettled(order.id, v === 'YES')
+            if (res?.success) { toast.success(v === 'YES' ? '已标记结款' : '已标记未结款'); onOrderUpdated() }
+            else toast.error(res?.message || '操作失败')
+          }}
+        >
+          <SelectTrigger className={cn("w-[72px] h-8 text-xs border-0", order.settled ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="YES">已结款</SelectItem>
+            <SelectItem value="NO">未结款</SelectItem>
+          </SelectContent>
+        </Select>
+      </TableCell>
       <TableCell 
         className={`align-top transition-colors min-w-[120px] ${isDragOver ? 'bg-blue-50 ring-2 ring-blue-500 ring-inset' : ''}`}
         onDrop={handleDrop}
@@ -1678,13 +1711,13 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
             value={remark} 
             onChange={e => setRemark(e.target.value)} 
             onBlur={handleRemarkBlur}
-            className="w-[140px] min-h-[40px] text-[10px] resize-none"
+            className="w-[110px] min-h-[40px] text-[10px] resize-none"
             placeholder="备注..."
         />
       </TableCell>
     </TableRow>
     <TableRow className="bg-gray-50/40 hover:bg-gray-50/60 border-b">
-        <TableCell colSpan={15} className="p-2">
+        <TableCell colSpan={16} className="p-2">
             <div className="flex items-center justify-start gap-2 flex-wrap">
                 {/* Logs - Moved to start */}
                 <Dialog open={isLogsOpen} onOpenChange={setIsLogsOpen}>

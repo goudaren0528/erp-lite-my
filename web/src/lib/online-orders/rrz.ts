@@ -421,11 +421,12 @@ export function getRunningPage() {
 export function stopRrzSync() {
     runtime.shouldStop = true
     appendLog("User requested stop.")
-    updateStatus({
-        status: "running",
-        message: "正在停止...",
-        logs: getRrzStatus().logs
-    })
+    if (runtime.context) {
+        runtime.context.close().catch(() => void 0)
+        runtime.context = undefined
+        runtime.page = undefined
+    }
+    updateStatus({ status: "idle", message: "已停止" })
 }
 
 export async function restartRrzBrowser() {

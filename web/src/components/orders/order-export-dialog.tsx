@@ -61,6 +61,7 @@ export function OrderExportDialog() {
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
   const [status, setStatus] = useState<string>("ALL")
+  const [filterSettled, setFilterSettled] = useState<'ALL' | 'YES' | 'NO'>('ALL')
 
   const handleExport = async () => {
     try {
@@ -68,7 +69,8 @@ export function OrderExportDialog() {
       const orders = await fetchOrdersForExport({
         startDate: startDate || undefined,
         endDate: endDate || undefined,
-        status: status === "ALL" ? undefined : status
+        status: status === "ALL" ? undefined : status,
+        filterSettled: filterSettled === 'ALL' ? undefined : filterSettled
       })
 
       if (!orders || orders.length === 0) {
@@ -111,6 +113,7 @@ export function OrderExportDialog() {
           '应还日期': order.returnDeadline ? format(new Date(order.returnDeadline), 'yyyy-MM-dd') : '-',
           '创建人': order.creatorName,
           '创建时间': format(new Date(order.createdAt), 'yyyy-MM-dd HH:mm:ss'),
+          '结款状态': order.settled ? '已结款' : '未结款',
           '备注': order.remark || '-'
         }
       })
@@ -171,6 +174,19 @@ export function OrderExportDialog() {
                 {Object.entries(statusMap).map(([k, v]) => (
                   <SelectItem key={k} value={k}>{v}</SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label>结款状态</Label>
+            <Select value={filterSettled} onValueChange={(v) => setFilterSettled(v as 'ALL' | 'YES' | 'NO')}>
+              <SelectTrigger>
+                <SelectValue placeholder="结款状态" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部</SelectItem>
+                <SelectItem value="YES">已结款</SelectItem>
+                <SelectItem value="NO">未结款</SelectItem>
               </SelectContent>
             </Select>
           </div>

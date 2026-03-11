@@ -273,6 +273,25 @@ export async function updateOnlineOrderMatchSpec(orderId: string, productId: str
             productId: spec.productId,
         }
     })
+
+    // 自动同步：将相同 itemTitle+itemSku 的其他线上订单也填入同样规格
+    if (spec.id) {
+        const src = await prisma.onlineOrder.findUnique({
+            where: { id: orderId },
+            select: { itemTitle: true, itemSku: true }
+        })
+        if (src?.itemTitle && src?.itemSku) {
+            await prisma.onlineOrder.updateMany({
+                where: {
+                    id: { not: orderId },
+                    itemTitle: src.itemTitle,
+                    itemSku: src.itemSku,
+                },
+                data: { specId: spec.id, productId: spec.productId }
+            })
+        }
+    }
+
     revalidatePath('/online-orders')
     return { success: true }
 }

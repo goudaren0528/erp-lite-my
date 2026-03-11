@@ -26,6 +26,7 @@ import { toast } from "sonner"
 import { 
     createInventoryItem, 
     batchCreateInventoryItems,
+    batchOutboundInventoryItems,
     adjustInventoryStock, 
     createInventoryItemType, 
     updateInventoryItemType, 
@@ -151,9 +152,11 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
 
     // Batch Inbound (Serialized)
     const [batchInboundOpen, setBatchInboundOpen] = useState(false)
+    const [batchDialogTab, setBatchDialogTab] = useState<"IN" | "OUT">("IN")
     const [batchItemTypeId, setBatchItemTypeId] = useState("")
     const [batchWarehouseId, setBatchWarehouseId] = useState("")
     const [batchSns, setBatchSns] = useState("")
+    const [batchOutboundSns, setBatchOutboundSns] = useState("")
 
     // Delete Confirmation (Serialized Item)
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -382,6 +385,8 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
         setBatchItemTypeId(itemTypeId || "")
         setBatchWarehouseId(warehouses[0]?.id || "")
         setBatchSns("")
+        setBatchOutboundSns("")
+        setBatchDialogTab("IN")
         setBatchInboundOpen(true)
     }
 
@@ -403,6 +408,27 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                 warehouseId: batchWarehouseId,
                 sns: sns
             })
+            if (res.success) {
+                toast.success(res.message)
+                setBatchInboundOpen(false)
+            } else {
+                toast.error(res.message)
+            }
+        })
+    }
+
+    const handleBatchOutbound = async () => {
+        if (!batchItemTypeId || !batchWarehouseId) {
+            toast.error("请选择物品和仓库")
+            return
+        }
+        const sns = batchOutboundSns.split('\n').map(s => s.trim()).filter(s => s.length > 0)
+        if (sns.length === 0) {
+            toast.error("请输入至少一个序列号")
+            return
+        }
+        startTransition(async () => {
+            const res = await batchOutboundInventoryItems({ itemTypeId: batchItemTypeId, warehouseId: batchWarehouseId, sns })
             if (res.success) {
                 toast.success(res.message)
                 setBatchInboundOpen(false)
@@ -1103,12 +1129,24 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                 </DialogContent>
             </Dialog>
 
-             {/* Dialog: Batch Inbound (Serialized) */}
+             {/* Dialog: Batch Inbound/Outbound (Serialized) */}
              <Dialog open={batchInboundOpen} onOpenChange={setBatchInboundOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>批量入库 (序列化)</DialogTitle>
+                        <DialogTitle>序列化物品操作</DialogTitle>
                     </DialogHeader>
+                    <div className="flex gap-2 border-b pb-2">
+                        <Button
+                            variant={batchDialogTab === "IN" ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setBatchDialogTab("IN")}
+                        >批量入库</Button>
+                        <Button
+                            variant={batchDialogTab === "OUT" ? "destructive" : "outline"}
+                            size="sm"
+                            onClick={() => setBatchDialogTab("OUT")}
+                        >批量出库</Button>
+                    </div>
                     <div className="py-4 space-y-4">
                         {!batchItemTypeId && (
                             <div className="space-y-2">
@@ -1125,36 +1163,66 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                                 </Select>
                             </div>
                         )}
-                        
-                        <div className="space-y-2">
-                            <Label>入库仓库</Label>
-                             <Select value={batchWarehouseId} onValueChange={setBatchWarehouseId}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="选择仓库..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {warehouses.map(w => (
-                                        <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
 
-                        <div className="space-y-2">
-                            <Label>序列号 (一行一个)</Label>
-                            <Textarea 
-                                value={batchSns} 
-                                onChange={e => setBatchSns(e.target.value)} 
-                                placeholder={"SN001\nSN002\nSN003"}
-                                className="h-32 font-mono"
-                            />
-                            <p className="text-xs text-muted-foreground">
-                                请输入序列号，每行一个。系统将自动批量创建。
-                            </p>
-                        </div>
+                        {batchDialogTab === "IN" ? (
+                            <>
+                                <div className="space-y-2">
+                                    <Label>入库仓库</Label>
+                                    <Select value={batchWarehouseId} onValueChange={setBatchWarehouseId}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="选择仓库..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {warehouses.map(w => (
+                                                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>序列号 (一行一个)</Label>
+                                    <Textarea
+                                        value={batchSns}
+                                        onChange={e => setBatchSns(e.target.value)}
+                                        placeholder={"SN001\nSN002\nSN003"}
+                                        className="h-32 font-mono"
+                                    />
+                                    <p className="text-xs text-muted-foreground">每行一个序列号，系统将自动批量创建。</p>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="space-y-2">
+                                <Label>出库仓库</Label>
+                                <Select value={batchWarehouseId} onValueChange={setBatchWarehouseId}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="选择仓库..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {warehouses.map(w => (
+                                            <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+                        {batchDialogTab === "OUT" && (
+                            <div className="space-y-2">
+                                <Label>序列号 (一行一个)</Label>
+                                <Textarea
+                                    value={batchOutboundSns}
+                                    onChange={e => setBatchOutboundSns(e.target.value)}
+                                    placeholder={"SN001\nSN002\nSN003"}
+                                    className="h-32 font-mono"
+                                />
+                                <p className="text-xs text-muted-foreground">输入要出库的序列号，每行一个，未找到的序列号会在结果中提示。</p>
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
-                        <Button onClick={handleBatchInbound} disabled={isPending}>确认入库</Button>
+                        {batchDialogTab === "IN"
+                            ? <Button onClick={handleBatchInbound} disabled={isPending}>确认入库</Button>
+                            : <Button variant="destructive" onClick={handleBatchOutbound} disabled={isPending}>确认出库</Button>
+                        }
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
