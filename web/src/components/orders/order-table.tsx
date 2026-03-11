@@ -509,8 +509,7 @@ export function OrderTable({ orders, products, promoters = [], initialTotal, ini
               <TableHead className="w-[130px]">关联单号</TableHead>
               <TableHead className="w-[100px]">推广</TableHead>
               <TableHead className="w-[130px]">物流信息</TableHead>
-              <TableHead className="w-[150px]">设备信息</TableHead>
-              <TableHead className="w-[160px]">匹配规格</TableHead>
+              <TableHead className="w-[200px]">设备信息</TableHead>
               <TableHead className="w-[120px]">
                   <Button variant="ghost" size="sm" onClick={toggleRentSort} className="-ml-3 hover:bg-transparent">
                       租期/时间
@@ -1437,145 +1436,151 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         )}
       </TableCell>
       <TableCell className="align-top">
-        <div className="font-semibold">{order.productName}</div>
-        <div className="text-xs text-muted-foreground">{order.variantName}</div>
-        {order.sn && (
-             <div className="text-xs text-blue-600 font-mono mt-1">SN: {order.sn}</div>
-        )}
-        {(order.extensions || []).length > 0 && (
-            <div className="mt-1">
-                <Badge variant="secondary" className="text-xs">
-                    + 续租 {(order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)} 天
-                </Badge>
+        <div className="space-y-1.5">
+          {/* 商品信息 */}
+          <div>
+            <span className="text-[10px] text-muted-foreground">商品信息</span>
+            <div className="font-semibold text-xs">{order.productName}</div>
+            <div className="text-xs text-muted-foreground">{order.variantName}</div>
+            {order.sn && (
+              <div className="text-xs text-blue-600 font-mono">SN: {order.sn}</div>
+            )}
+            {(order.extensions || []).length > 0 && (
+              <Badge variant="secondary" className="text-xs mt-0.5">
+                + 续租 {(order.extensions || []).reduce((acc, curr) => acc + curr.days, 0)} 天
+              </Badge>
+            )}
+          </div>
+          {/* 匹配规格 */}
+          <div className="border-t pt-1.5">
+            <div className="flex items-center gap-1 mb-1">
+              <span className="text-[10px] text-muted-foreground">匹配规格</span>
+              <Badge variant="outline" className={order.specId ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]" : "bg-gray-50 text-gray-500 border-gray-200 text-[10px]"}>
+                {order.specId ? "已匹配" : "未匹配"}
+              </Badge>
             </div>
-        )}
-      </TableCell>
-      <TableCell className="align-top">
-        <div className="mb-1">
-          <Badge variant="outline" className={order.specId ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]" : "bg-gray-50 text-gray-500 border-gray-200 text-[10px]"}>
-              {order.specId ? "已匹配" : "未匹配"}
-          </Badge>
-        </div>
-        <Popover
-          open={isMatchOpen}
-          onOpenChange={open => {
-            setIsMatchOpen(open)
-            if (open) {
-              const nextProductId = fallbackProductId
-              const nextProduct = products.find(p => p.id === nextProductId)
-              const nextOptions = nextProduct?.specs?.length
-                ? nextProduct.specs.map(s => ({ id: s.id, name: s.name }))
-                : (Array.isArray(nextProduct?.variants) ? nextProduct?.variants : []).map((v: ProductVariant) => ({ id: v.specId || v.name, name: v.name }))
-              const matchedSpec = (() => {
-                if (order.specId) {
-                  if (nextProduct?.specs?.length) {
-                    const direct = nextProduct.specs.find(s => s.id === order.specId || s.specId === order.specId)
-                    return direct?.id || ""
-                  }
-                  return order.specId
+            <Popover
+              open={isMatchOpen}
+              onOpenChange={open => {
+                setIsMatchOpen(open)
+                if (open) {
+                  const nextProductId = fallbackProductId
+                  const nextProduct = products.find(p => p.id === nextProductId)
+                  const nextOptions = nextProduct?.specs?.length
+                    ? nextProduct.specs.map(s => ({ id: s.id, name: s.name }))
+                    : (Array.isArray(nextProduct?.variants) ? nextProduct?.variants : []).map((v: ProductVariant) => ({ id: v.specId || v.name, name: v.name }))
+                  const matchedSpec = (() => {
+                    if (order.specId) {
+                      if (nextProduct?.specs?.length) {
+                        const direct = nextProduct.specs.find(s => s.id === order.specId || s.specId === order.specId)
+                        return direct?.id || ""
+                      }
+                      return order.specId
+                    }
+                    if (order.variantName) {
+                      return nextOptions.find(v => v.name === order.variantName)?.id || ""
+                    }
+                    return ""
+                  })()
+                  setMatchProductId(nextProductId)
+                  setMatchSpecValue(matchedSpec || "")
                 }
-                if (order.variantName) {
-                  return nextOptions.find(v => v.name === order.variantName)?.id || ""
-                }
-                return ""
-              })()
-              setMatchProductId(nextProductId)
-              setMatchSpecValue(matchedSpec || "")
-            }
-          }}
-        >
-            <div className="flex items-center gap-2">
+              }}
+            >
+              <div className="flex items-center gap-1.5">
                 <PopoverTrigger asChild>
-                    <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700">
-                        {order.specId ? (matchedSpecInfo ? `${matchedSpecInfo.productName}${matchedSpecInfo.specName ? ` - ${matchedSpecInfo.specName}` : ""}` : `${order.productName || ''}${order.variantName ? ` - ${order.variantName}` : ''}`) : <span className="text-gray-300 italic text-[10px]">点击选择</span>}
-                    </div>
+                  <div className="text-xs cursor-pointer hover:underline decoration-dashed underline-offset-4 text-gray-700">
+                    {order.specId ? (matchedSpecInfo ? `${matchedSpecInfo.productName}${matchedSpecInfo.specName ? ` - ${matchedSpecInfo.specName}` : ""}` : `${order.productName || ''}${order.variantName ? ` - ${order.variantName}` : ''}`) : <span className="text-gray-300 italic text-[10px]">点击选择</span>}
+                  </div>
                 </PopoverTrigger>
                 {order.specId ? (
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-[10px]"
-                        onClick={async (e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            if (!order.productName || !order.variantName) {
-                                toast.error("该订单缺少设备信息，无法同步")
-                                return
-                            }
-                            const ok = window.confirm("确认同步匹配规格到所有设备信息完全一致且未匹配的订单？")
-                            if (!ok) return
-                            try {
-                                const res = await syncOrderMatchSpec(order.id)
-                                if (res?.success) {
-                                    toast.success(`已同步 ${res.updated} 条订单`)
-                                    onOrderUpdated()
-                                } else {
-                                    toast.error("同步失败")
-                                }
-                            } catch (err) {
-                                toast.error(err instanceof Error ? err.message : "同步失败")
-                            }
-                        }}
-                    >
-                        规格同步
-                    </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-1.5 text-[10px]"
+                    onClick={async (e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      if (!order.productName || !order.variantName) {
+                        toast.error("该订单缺少设备信息，无法同步")
+                        return
+                      }
+                      const ok = window.confirm("确认同步匹配规格到所有设备信息完全一致且未匹配的订单？")
+                      if (!ok) return
+                      try {
+                        const res = await syncOrderMatchSpec(order.id)
+                        if (res?.success) {
+                          toast.success(`已同步 ${res.updated} 条订单`)
+                          onOrderUpdated()
+                        } else {
+                          toast.error("同步失败")
+                        }
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : "同步失败")
+                      }
+                    }}
+                  >
+                    规格同步
+                  </Button>
                 ) : null}
-            </div>
-            <PopoverContent className="w-72 p-3">
+              </div>
+              <PopoverContent className="w-72 p-3">
                 <div className="space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">商品</Label>
+                    <SearchableSelect
+                      options={products.map(p => ({ value: p.id, label: p.name }))}
+                      value={fallbackProductId || undefined}
+                      onValueChange={(value) => {
+                        setMatchProductId(value)
+                        setMatchSpecValue('')
+                      }}
+                      placeholder="选择商品"
+                      searchPlaceholder="搜索商品..."
+                      triggerClassName="h-8 text-xs"
+                      className="w-64"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">规格</Label>
+                    <SearchableSelect
+                      options={matchSpecOptions.map(v => ({ value: v.id, label: v.name }))}
+                      value={matchSpecValue || undefined}
+                      onValueChange={setMatchSpecValue}
+                      placeholder={fallbackProductId ? "选择规格" : "先选择商品"}
+                      searchPlaceholder="搜索规格..."
+                      disabled={!fallbackProductId}
+                      triggerClassName="h-8 text-xs"
+                      className="w-64"
+                    />
+                  </div>
+                  {matchSpecValue ? (
                     <div className="space-y-1">
-                        <Label className="text-xs">商品</Label>
-                        <SearchableSelect
-                            options={products.map(p => ({ value: p.id, label: p.name }))}
-                            value={fallbackProductId || undefined}
-                            onValueChange={(value) => {
-                                setMatchProductId(value)
-                                setMatchSpecValue('')
-                            }}
-                            placeholder="选择商品"
-                            searchPlaceholder="搜索商品..."
-                            triggerClassName="h-8 text-xs"
-                            className="w-64"
-                        />
-                    </div>
-                    <div className="space-y-1">
-                        <Label className="text-xs">规格</Label>
-                        <SearchableSelect
-                            options={matchSpecOptions.map(v => ({ value: v.id, label: v.name }))}
-                            value={matchSpecValue || undefined}
-                            onValueChange={setMatchSpecValue}
-                            placeholder={fallbackProductId ? "选择规格" : "先选择商品"}
-                            searchPlaceholder="搜索规格..."
-                            disabled={!fallbackProductId}
-                            triggerClassName="h-8 text-xs"
-                            className="w-64"
-                        />
-                    </div>
-                    {matchSpecValue ? (
-                        <div className="space-y-1">
-                            <Label className="text-xs">规格资产</Label>
-                            <div className="text-xs text-muted-foreground space-y-1">
-                                {selectedBomItems.length > 0 ? (
-                                    selectedBomItems.map((b, idx) => (
-                                        <div key={`${b.itemTypeId}-${idx}`} className="flex items-center justify-between">
-                                            <span>{b.itemTypeName || b.itemTypeId}</span>
-                                            <span className="font-mono">x{b.quantity}</span>
-                                        </div>
-                                    ))
-                                ) : (
-                                    <div className="text-gray-400 italic text-[10px]">无规格资产</div>
-                                )}
+                      <Label className="text-xs">规格资产</Label>
+                      <div className="text-xs text-muted-foreground space-y-1">
+                        {selectedBomItems.length > 0 ? (
+                          selectedBomItems.map((b, idx) => (
+                            <div key={`${b.itemTypeId}-${idx}`} className="flex items-center justify-between">
+                              <span>{b.itemTypeName || b.itemTypeId}</span>
+                              <span className="font-mono">x{b.quantity}</span>
                             </div>
-                        </div>
-                    ) : null}
-                    <div className="flex justify-end gap-2 pt-1">
-                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleClearMatchSpec}>清空</Button>
-                        <Button size="sm" className="h-7 text-xs" onClick={handleSaveMatchSpec} disabled={!matchSpecValue}>保存</Button>
+                          ))
+                        ) : (
+                          <div className="text-gray-400 italic text-[10px]">无规格资产</div>
+                        )}
+                      </div>
                     </div>
+                  ) : null}
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleClearMatchSpec}>清空</Button>
+                    <Button size="sm" className="h-7 text-xs" onClick={handleSaveMatchSpec} disabled={!matchSpecValue}>保存</Button>
+                  </div>
                 </div>
-            </PopoverContent>
-        </Popover>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
       </TableCell>
       <TableCell className="align-top">
         <div className="font-medium text-xs">{order.duration} 天</div>
