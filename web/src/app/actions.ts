@@ -2127,3 +2127,21 @@ export async function updateOrderSettled(orderId: string, settled: boolean) {
         return { success: false, message: message || "更新结款状态失败" };
     }
 }
+
+// ── API Token management ──────────────────────────────────────────────────────
+
+export async function getApiTokenAction() {
+    const currentUser = await getCurrentUser()
+    if (currentUser?.role !== 'ADMIN') return { success: false, token: null }
+    const { getApiToken } = await import('@/lib/api-token')
+    const token = await getApiToken()
+    return { success: true, token }
+}
+
+export async function generateApiTokenAction() {
+    const currentUser = await getCurrentUser()
+    if (currentUser?.role !== 'ADMIN') return { success: false, token: null, message: '无权限' }
+    const { generateApiToken } = await import('@/lib/api-token')
+    const token = await generateApiToken()
+    return { success: true, token }
+}

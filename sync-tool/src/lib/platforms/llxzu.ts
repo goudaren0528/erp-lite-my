@@ -2,10 +2,17 @@
 import fs from "fs"
 import net from "net"
 import { chromium, type BrowserContext, type Page } from "playwright"
-import { loadConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
-import { schedulerLogger } from "./scheduler"
-import { prisma } from "@/lib/db"
-import { autoMatchSpecId } from "@/lib/spec-auto-match"
+
+// sync-tool stubs (dead code, never executed)
+const prisma = null as unknown as {
+  onlineOrder: { upsert: (...a: unknown[]) => Promise<unknown>; findUnique: (...a: unknown[]) => Promise<unknown>; findMany: (...a: unknown[]) => Promise<unknown[]> }
+  order: { findUnique: (...a: unknown[]) => Promise<unknown>; update: (...a: unknown[]) => Promise<unknown>; findMany: (...a: unknown[]) => Promise<unknown[]> }
+  product: { findMany: (...a: unknown[]) => Promise<unknown[]> }
+  $transaction: (...a: unknown[]) => Promise<unknown>
+}
+async function autoMatchSpecId(_t: unknown, _s: unknown): Promise<string | null> { return null }
+
+import { loadConfig, _appBasePath, getExternalConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
 
 // Re-use types or define specific ones
 export type LlxzuStatus = {
@@ -211,7 +218,7 @@ async function openLlxzuOrderListByClicks(page: Page) {
 
 function getLogFilePath() {
   const date = new Date().toISOString().split('T')[0]
-  const logDir = path.join(process.cwd(), "logs")
+  const logDir = path.join(_appBasePath(), "logs")
   if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true })
   }
@@ -222,6 +229,13 @@ export function getLlxzuStatus() {
     return runtime.status
 }
 
+/** Inject a shared page/context from main process (shared browser mode) */
+export function setSharedPage(page: import("playwright").Page, context: import("playwright").BrowserContext) {
+  runtime.page = page
+  runtime.context = context
+  ;(runtime as Record<string, unknown>)._isShared = true
+}
+
 export function getRunningPage() {
     return runtime.page
 }
@@ -229,7 +243,6 @@ export function getRunningPage() {
 export function stopLlxzuSync() {
     runtime.shouldStop = true
     appendLog("User requested stop.")
-    // Do NOT close context — preserves login session for next run
     updateStatus({ status: "idle", message: "已停止" })
 }
 
@@ -284,9 +297,7 @@ function appendLog(message: string) {
     })
     
     try {
-        if (schedulerLogger && schedulerLogger.log) {
-            schedulerLogger.log(`[零零享] ${message}`)
-        }
+        /* schedulerLogger removed */
     } catch(err) {
         console.error("Failed to push to scheduler log", err)
     }
@@ -313,11 +324,12 @@ async function ensureContext(headless: boolean): Promise<BrowserContext> {
       finalHeadless = false
   }
 
-  const userDataDir = path.join(process.cwd(), ".playwright", "llxzu")
+  const userDataDir = path.join(_appBasePath(), ".playwright", "llxzu")
 
   if (runtime.context) {
       try {
-          runtime.context.pages(); 
+          runtime.context.pages()
+          if ((runtime as Record<string, unknown>)._isShared) return runtime.context
           if (runtime.headless !== undefined && runtime.headless !== finalHeadless) {
               appendLog(`Switching headless mode from ${runtime.headless} to ${finalHeadless}. Closing existing context...`)
               await runtime.context.close().catch(() => void 0)
@@ -363,6 +375,10 @@ async function ensureContext(headless: boolean): Promise<BrowserContext> {
   const cdpPort = (await readCdpPort(userDataDir)) ?? (await findFreeTcpPort())
   await writeCdpPort(userDataDir, cdpPort)
 
+  const windowPositionArg = getExternalConfig()?._showBrowser === false
+    ? '--window-position=-4800,-4800'
+    : '--window-position=0,0'
+
   const launchOptions = {
     headless: finalHeadless,
     viewport: { width: 1366, height: 768 },
@@ -379,7 +395,7 @@ async function ensureContext(headless: boolean): Promise<BrowserContext> {
       '--disable-blink-features=AutomationControlled',
       '--disable-dev-shm-usage',
       '--disable-infobars',
-      '--window-position=0,0',
+      windowPositionArg,
       '--ignore-certificate-errors',
       '--ignore-certificate-errors-spki-list',
       '--disable-features=IsolateOrigins,site-per-process',
@@ -1421,7 +1437,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                 rentStartDate,
                 returnDeadline,
                 duration,
-                platform: "零零享", 
+                platform: "\u96f6\u96f6\u4eab", 
                 productName,
                 variantName,
                 itemTitle: productName,
@@ -1448,7 +1464,30 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
     return parsedOrders
 }
 
+const _collectedOrders: LlxzuParsedOrder[] = []
+export function getCollectedOrders() { return [..._collectedOrders] }
+export function clearCollectedOrders() { _collectedOrders.length = 0 }
+export async function closeContext() {
+  if (runtime.context) { await runtime.context.close().catch(() => void 0); runtime.context = undefined; runtime.page = undefined }
+}
+export async function moveWindow(x: number, y: number) {
+  if (!runtime.context) return
+  try {
+    const pages = runtime.context.pages()
+    const page = pages[0]; if (!page) return
+    const cdp = await runtime.context.newCDPSession(page)
+    const { windowId } = await cdp.send('Browser.getWindowForTarget')
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: x, top: y, windowState: 'normal' } })
+    await cdp.detach()
+    if (runtime.page && !runtime.page.isClosed()) await runtime.page.bringToFront().catch(() => void 0)
+  } catch { /* ignore */ }
+}
+
 async function saveOrdersBatch(orders: LlxzuParsedOrder[]) {
+  _collectedOrders.push(...orders)
+  appendLog(`[sync-tool] 已收集 ${orders.length} 条订单（累计 ${_collectedOrders.length} 条）`)
+  return
+  if (false) {
     let savedCount = 0
     try {
         appendLog(`[Database] Preparing to save ${orders.length} orders. Sample: ${JSON.stringify(orders[0] || {}, null, 2)}`)
@@ -1493,6 +1532,7 @@ async function saveOrdersBatch(orders: LlxzuParsedOrder[]) {
         }
         appendLog(`Recovered ${savedCount}/${orders.length} orders in fallback mode.`)
     }
+  } // end disabled DB save
 }
 
 export async function startLlxzuSync(siteId: string) {
@@ -1586,7 +1626,7 @@ export async function startLlxzuSync(siteId: string) {
     appendLog(`Max pages set to: ${MAX_PAGES}`)
     
     let hasMore = true
-    const stopThreshold = config?.stopThreshold ?? 20
+    const stopThreshold = targetSite.stopThreshold ?? config?.stopThreshold ?? 20
     let consecutiveFinalStateCount = 0
     const finalStatuses = ["COMPLETED", "CLOSED", "BOUGHT_OUT", "CANCELED"]
     appendLog(`Incremental stop threshold: ${stopThreshold}`)
@@ -1665,14 +1705,7 @@ export async function startLlxzuSync(siteId: string) {
         if (stopThreshold > 0 && pageOrders.length > 0) {
             const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean)
             try {
-                const existingFinalOrders = await prisma.onlineOrder.findMany({
-                    where: {
-                        orderNo: { in: orderNos },
-                        platform: "零零享",
-                        status: { in: finalStatuses }
-                    },
-                    select: { orderNo: true, status: true }
-                })
+                const existingFinalOrders: { orderNo: string; status: string }[] = [] // sync-tool: skip incremental stop
                 const finalSet = new Set(existingFinalOrders.map(o => o.orderNo))
 
                 let shouldStop = false
@@ -1806,8 +1839,6 @@ export async function startLlxzuSync(siteId: string) {
     })
     appendLog(`Sync failed: ${msg}`)
   } finally {
-      if (runtime.shouldStop) {
-          updateStatus({ status: "idle", message: "已停止" })
-      }
+      // Do not close page to allow reuse
   }
 }

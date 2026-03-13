@@ -1,10 +1,17 @@
 import path from "path"
 import fs from "fs"
 import { chromium, type BrowserContext, type Page } from "playwright"
-import { loadConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
-import { schedulerLogger } from "./scheduler"
-import { prisma } from "@/lib/db"
-import { autoMatchSpecId } from "@/lib/spec-auto-match"
+
+// sync-tool stubs (dead code, never executed)
+const prisma = null as unknown as {
+  onlineOrder: { upsert: (...a: unknown[]) => Promise<unknown>; findUnique: (...a: unknown[]) => Promise<unknown>; findMany: (...a: unknown[]) => Promise<unknown[]> }
+  order: { findUnique: (...a: unknown[]) => Promise<unknown>; update: (...a: unknown[]) => Promise<unknown>; findMany: (...a: unknown[]) => Promise<unknown[]> }
+  product: { findMany: (...a: unknown[]) => Promise<unknown[]> }
+  $transaction: (...a: unknown[]) => Promise<unknown>
+}
+async function autoMatchSpecId(_t: unknown, _s: unknown): Promise<string | null> { return null }
+
+import { loadConfig, _appBasePath, getExternalConfig, type SiteConfig, type OnlineOrdersConfig } from "./zanchen"
 
 // Re-use types or define specific ones
 export type YoupinStatus = {
@@ -157,7 +164,7 @@ async function openYoupinOrderListByClicks(page: Page) {
 
 function getLogFilePath() {
   const date = new Date().toISOString().split('T')[0]
-  const logDir = path.join(process.cwd(), "logs")
+  const logDir = path.join(_appBasePath(), "logs")
   if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true })
   }
@@ -168,6 +175,13 @@ export function getYoupinStatus() {
     return runtime.status
 }
 
+/** Inject a shared page/context from main process (shared browser mode) */
+export function setSharedPage(page: import("playwright").Page, context: import("playwright").BrowserContext) {
+  runtime.page = page
+  runtime.context = context
+  ;(runtime as Record<string, unknown>)._isShared = true
+}
+
 export function getRunningPage() {
     return runtime.page
 }
@@ -175,7 +189,6 @@ export function getRunningPage() {
 export function stopYoupinSync() {
     runtime.shouldStop = true
     appendLog("User requested stop.")
-    // Do NOT close context — preserves login session for next run
     updateStatus({ status: "idle", message: "已停止" })
 }
 
@@ -246,9 +259,7 @@ function appendLog(message: string) {
     })
     
     try {
-        if (schedulerLogger && schedulerLogger.log) {
-            schedulerLogger.log(`[优品租] ${message}`)
-        }
+        /* schedulerLogger removed */
     } catch(err) {
         console.error("Failed to push to scheduler log", err)
     }
@@ -266,7 +277,8 @@ function appendLog(message: string) {
 async function ensureContext(headless: boolean): Promise<BrowserContext> {
   if (runtime.context) {
       try {
-          runtime.context.pages(); 
+          runtime.context.pages()
+          if ((runtime as Record<string, unknown>)._isShared) return runtime.context
           if (runtime.headless !== undefined && runtime.headless !== headless) {
               appendLog(`Switching headless mode from ${runtime.headless} to ${headless}. Closing existing context...`)
               await runtime.context.close().catch(() => void 0)
@@ -282,7 +294,7 @@ async function ensureContext(headless: boolean): Promise<BrowserContext> {
       }
   }
   
-  const userDataDir = path.join(process.cwd(), ".playwright", "youpin")
+  const userDataDir = path.join(_appBasePath(), ".playwright", "youpin")
   
   let finalHeadless = headless
   if (process.platform === 'linux' && !process.env.DISPLAY) {
@@ -293,6 +305,7 @@ async function ensureContext(headless: boolean): Promise<BrowserContext> {
   appendLog(`Launching browser (headless: ${finalHeadless})`)
   
   try {
+      const windowArgs = getExternalConfig()?._showBrowser === false ? ['--window-position=-4800,-4800'] : []
       runtime.context = await chromium.launchPersistentContext(userDataDir, {
         headless: finalHeadless,
         viewport: { width: 1280, height: 800 },
@@ -306,6 +319,7 @@ async function ensureContext(headless: boolean): Promise<BrowserContext> {
             '--disable-blink-features=AutomationControlled',
             '--disable-gpu',
             '--disable-dev-shm-usage',
+            ...windowArgs,
         ],
         ignoreDefaultArgs: ['--enable-automation']
       })
@@ -908,7 +922,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
                 rentStartDate,
                 returnDeadline,
                 duration,
-                platform: "优品租", 
+                platform: "\u4f18\u54c1\u79df", 
                 productName,
                 variantName,
                 itemTitle: productName,
@@ -926,7 +940,30 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
     return parsedOrders
 }
 
+const _collectedOrders: YoupinParsedOrder[] = []
+export function getCollectedOrders() { return [..._collectedOrders] }
+export function clearCollectedOrders() { _collectedOrders.length = 0 }
+export async function closeContext() {
+  if (runtime.context) { await runtime.context.close().catch(() => void 0); runtime.context = undefined; runtime.page = undefined }
+}
+export async function moveWindow(x: number, y: number) {
+  if (!runtime.context) return
+  try {
+    const pages = runtime.context.pages()
+    const page = pages[0]; if (!page) return
+    const cdp = await runtime.context.newCDPSession(page)
+    const { windowId } = await cdp.send('Browser.getWindowForTarget')
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: x, top: y, windowState: 'normal' } })
+    await cdp.detach()
+    if (runtime.page && !runtime.page.isClosed()) await runtime.page.bringToFront().catch(() => void 0)
+  } catch { /* ignore */ }
+}
+
 async function saveOrdersBatch(orders: YoupinParsedOrder[]) {
+  _collectedOrders.push(...orders)
+  appendLog(`[sync-tool] 已收集 ${orders.length} 条订单（累计 ${_collectedOrders.length} 条）`)
+  return
+  if (false) {
     let savedCount = 0
     try {
         appendLog(`[Database] Preparing to save ${orders.length} orders. Sample: ${JSON.stringify(orders[0] || {}, null, 2)}`)
@@ -971,6 +1008,7 @@ async function saveOrdersBatch(orders: YoupinParsedOrder[]) {
         }
         appendLog(`Recovered ${savedCount}/${orders.length} orders in fallback mode.`)
     }
+  } // end disabled DB save
 }
 
 export async function startYoupinSync(siteId: string) {
@@ -1062,7 +1100,7 @@ export async function startYoupinSync(siteId: string) {
     appendLog(`Max pages set to: ${MAX_PAGES}`)
     
     let hasMore = true
-    const stopThreshold = config?.stopThreshold ?? 20
+    const stopThreshold = targetSite.stopThreshold ?? config?.stopThreshold ?? 20
     let consecutiveFinalStateCount = 0
     const finalStatuses = ["COMPLETED", "CLOSED", "BOUGHT_OUT", "CANCELED"]
     appendLog(`Incremental stop threshold: ${stopThreshold}`)
@@ -1142,14 +1180,7 @@ export async function startYoupinSync(siteId: string) {
         if (stopThreshold > 0 && pageOrders.length > 0) {
             const orderNos = pageOrders.map(o => o.orderNo).filter(Boolean)
             try {
-                const existingFinalOrders = await prisma.onlineOrder.findMany({
-                    where: {
-                        orderNo: { in: orderNos },
-                        platform: "优品租",
-                        status: { in: finalStatuses }
-                    },
-                    select: { orderNo: true, status: true }
-                })
+                const existingFinalOrders: { orderNo: string; status: string }[] = [] // sync-tool: skip incremental stop
                 const finalSet = new Set(existingFinalOrders.map(o => o.orderNo))
 
                 let shouldStop = false
@@ -1283,8 +1314,6 @@ export async function startYoupinSync(siteId: string) {
     })
     appendLog(`Sync failed: ${msg}`)
   } finally {
-      if (runtime.shouldStop) {
-          updateStatus({ status: "idle", message: "已停止" })
-      }
+      // Do not close page to allow reuse
   }
 }

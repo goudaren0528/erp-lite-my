@@ -158,6 +158,13 @@ export function MainNav({ user }: MainNavProps) {
             active: pathname === "/system/manual",
             permission: "manual",
          },
+         {
+            href: "/system/settings",
+            label: "系统设置",
+            icon: Shield,
+            active: pathname === "/system/settings",
+            permission: "system_settings",
+         },
       ]
     },
   ]
@@ -173,7 +180,7 @@ export function MainNav({ user }: MainNavProps) {
         return hasPermission("products") || hasPermission("inventory_calendar") || hasPermission("inventory_manage")
     }
     if (permission === "system_group") {
-        return hasPermission("users") || hasPermission("backup") || hasPermission("manual")
+        return hasPermission("users") || hasPermission("backup") || hasPermission("manual") || hasPermission("system_settings")
     }
     if (permission === "settlement_group") {
         return hasPermission("stats_accounts") || hasPermission("stats_promoters")

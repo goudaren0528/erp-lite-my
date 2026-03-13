@@ -64,6 +64,7 @@ const PERMISSIONS_MAP: Record<string, string> = {
     'users': '账号权限管理',
     'backup': '导出导入数据',
     'manual': '操作指南管理',
+    'system_settings': '系统设置',
 }
 
 export function UserList({ users }: UserListProps) {

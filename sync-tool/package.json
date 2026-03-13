@@ -1,0 +1,38 @@
+{
+  "name": "erp-sync-tool",
+  "version": "1.0.0",
+  "description": "ERP 线上订单抓取桌面工具",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build && electron-builder",
+    "electron:dev": "vite",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "concurrently": "^8.0.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "vite-plugin-electron": "^0.28.0",
+    "wait-on": "^7.0.0"
+  },
+  "build": {
+    "appId": "com.erp.sync-tool",
+    "productName": "ERP 订单同步工具",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "dist-electron/**/*"],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" }
+  }
+}

@@ -62,6 +62,7 @@ const PERMISSION_GROUPS = [
             { key: 'users', label: '账号权限管理' },
             { key: 'backup', label: '导出导入数据' },
             { key: 'manual', label: '操作指南管理' },
+            { key: 'system_settings', label: '系统设置' },
         ]
     }
 ]

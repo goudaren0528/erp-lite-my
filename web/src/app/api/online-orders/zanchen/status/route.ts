@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
+import { validateBearerToken } from "@/lib/api-token"
 import { getZanchenStatus, loadConfig } from "@/lib/online-orders/zanchen"
 import { getChenglinStatus } from "@/lib/online-orders/chenglin"
 import { getAolzuStatus } from "@/lib/online-orders/aolzu"
@@ -10,11 +11,17 @@ import { getRrzStatus } from "@/lib/online-orders/rrz"
 export const dynamic = "force-dynamic"
 
 export async function GET(req: NextRequest) {
-  const currentUser = await getCurrentUser()
-  const isAdmin = currentUser?.role === "ADMIN"
-  const canManage = isAdmin || currentUser?.permissions?.includes("online_orders")
-  if (!canManage) {
-    return NextResponse.json({ status: "error", message: "无权限操作" }, { status: 403 })
+  const authHeader = req.headers.get("authorization")
+  if (authHeader) {
+    const valid = await validateBearerToken(authHeader)
+    if (!valid) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 })
+  } else {
+    const currentUser = await getCurrentUser()
+    const isAdmin = currentUser?.role === "ADMIN"
+    const canManage = isAdmin || currentUser?.permissions?.includes("online_orders")
+    if (!canManage) {
+      return NextResponse.json({ status: "error", message: "无权限操作" }, { status: 403 })
+    }
   }
   
   const siteId = req.nextUrl.searchParams.get("siteId")

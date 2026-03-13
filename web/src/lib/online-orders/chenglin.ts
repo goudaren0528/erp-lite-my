@@ -1200,22 +1200,16 @@ export async function startChenglinSync(siteId: string) {
     }
     appendLog(`Error: ${msg}`)
   } finally {
-      // Ensure status is reset if it was running, unless it's an error we want to keep visible?
-      // Actually, 'success' or 'error' are terminal states, so that's fine.
-      // But if we want to allow re-run, we might need to know it's done.
-      // The current UI checks for 'running' to disable the button.
-      // So 'success' or 'error' will re-enable the button.
+      if (runtime.shouldStop) {
+          updateStatus({ status: "idle", message: "已停止" })
+      }
   }
 }
 
 export function stopChenglinSync() {
     appendLog("Stop command received.")
     runtime.shouldStop = true
-    if (runtime.context) {
-        runtime.context.close().catch(() => void 0)
-        runtime.context = undefined
-        runtime.page = undefined
-    }
+    // Do NOT close context — preserves login session for next run
     updateStatus({ status: "idle", message: "已停止" })
     return runtime.status
 }

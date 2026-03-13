@@ -184,6 +184,26 @@ export async function getOnlineOrderCounts(params: {
     return { counts, total };
 }
 
+export async function getPlatformSyncMeta(platforms: string[]): Promise<Record<string, { lastSyncAt: string | null; lastSyncCount: number | null }>> {
+    const keys = platforms.map(p => `sync_meta_${p}`)
+    const configs = await prisma.appConfig.findMany({ where: { key: { in: keys } } })
+    const result: Record<string, { lastSyncAt: string | null; lastSyncCount: number | null }> = {}
+    for (const platform of platforms) {
+        const cfg = configs.find(c => c.key === `sync_meta_${platform}`)
+        if (cfg) {
+            try {
+                const parsed = JSON.parse(cfg.value)
+                result[platform] = { lastSyncAt: parsed.lastSyncAt ?? null, lastSyncCount: parsed.lastSyncCount ?? null }
+            } catch {
+                result[platform] = { lastSyncAt: null, lastSyncCount: null }
+            }
+        } else {
+            result[platform] = { lastSyncAt: null, lastSyncCount: null }
+        }
+    }
+    return result
+}
+
 export async function getMatchProducts() {
     const productsRaw = await prisma.product.findMany({
         select: {

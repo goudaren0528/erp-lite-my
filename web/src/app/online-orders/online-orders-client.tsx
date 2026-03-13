@@ -48,7 +48,7 @@ import {
 } from "@/components/ui/popover"
 import { setAppConfigValue } from "@/app/actions"
 import { fetchOrders } from "@/app/actions"
-import { fetchOnlineOrders, getOnlineOrderCounts, getMatchProducts, syncOnlineOrderMatchSpec, updateOnlineOrderMatchSpec, updateOnlineOrderManualSn } from "./actions"
+import { fetchOnlineOrders, getOnlineOrderCounts, getMatchProducts, syncOnlineOrderMatchSpec, updateOnlineOrderMatchSpec, updateOnlineOrderManualSn, getPlatformSyncMeta } from "./actions"
 import { ArrowUpDown, Plus, Settings2, Trash2, Truck, Play, Square, FileText, RefreshCw, Search, MonitorPlay, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { Product, ProductVariant } from "@/types"
@@ -323,7 +323,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
   
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
   const [statusTotal, setStatusTotal] = useState(0)
-  
+  const [syncMeta, setSyncMeta] = useState<Record<string, { lastSyncAt: string | null; lastSyncCount: number | null }>>({})
   const [offlineConfigs, setOfflineConfigs] = useState<Record<string, OfflineSyncConfig>>({})
   
   // Load offline config for active site when settings sheet is open
@@ -513,6 +513,12 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
       setStatusTotal(res.total)
     }).catch(console.error)
   }, [activeTab, dbRefreshKey, zanchenStatus?.lastRunAt, filterOrderNo, filterRecipientName, filterProduct, filterSn])
+
+  // Load sync meta (last sync time + total orders) for all platform tabs
+  useEffect(() => {
+    const allPlatforms = ["ZANCHEN", "诚赁", "奥租", "优品租", "零零享", "人人租"]
+    getPlatformSyncMeta(allPlatforms).then(setSyncMeta).catch(console.error)
+  }, [dbRefreshKey, zanchenStatus?.lastRunAt, genericStatus?.status])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
@@ -1250,7 +1256,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
               size="sm"
               variant="destructive"
               onClick={handleStopSync}
-              disabled={currentStatus?.status !== "running" && currentStatus?.status !== "awaiting_user"}
+              disabled={currentStatus?.status !== "running" && currentStatus?.status !== "awaiting_user" && currentStatus?.status !== "error"}
             >
               <Square className="h-4 w-4 mr-1" />
               停止同步
@@ -1527,6 +1533,28 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                     )}
                     
                     <div className="space-y-4">
+                      {(() => {
+                        const tabLower = (activeTab || "").toLowerCase()
+                        const siteName = config.sites.find(s => s.id === activeTab)?.name || ""
+                        let platformKey = ""
+                        if (tabLower === "zanchen" || siteName.includes("赞晨")) platformKey = "ZANCHEN"
+                        else if (siteName.includes("诚赁") || tabLower.includes("chenglin")) platformKey = "诚赁"
+                        else if (siteName.includes("奥租") || tabLower.includes("aolzu")) platformKey = "奥租"
+                        else if (siteName.includes("优品") || tabLower.includes("youpin")) platformKey = "优品租"
+                        else if (siteName.includes("零零享") || tabLower.includes("llxzu")) platformKey = "零零享"
+                        else if (siteName.includes("人人租") || tabLower.includes("rrz")) platformKey = "人人租"
+                        const meta = platformKey ? syncMeta[platformKey] : null
+                        if (!meta) return null
+                        return (
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                            {meta.lastSyncAt ? (
+                              <span>上次同步：<span className="font-medium text-foreground">{new Date(meta.lastSyncAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></span>
+                            ) : (
+                              <span>暂无同步记录</span>
+                            )}
+                          </div>
+                        )
+                      })()}
                       <Tabs value={filterStatus} onValueChange={(val) => { setFilterStatus(val); setOnlineOrderPage(1); }} className="w-full">
                           <TabsList className="flex flex-wrap h-auto w-full justify-start">
                               <TabsTrigger value="ALL">全部 ({statusTotal})</TabsTrigger>

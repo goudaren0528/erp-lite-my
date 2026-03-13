@@ -1,8 +1,15 @@
 import { prisma } from "@/lib/db"
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { CONFIG_KEY, type OnlineOrdersConfig } from "@/lib/online-orders/zanchen"
+import { validateBearerToken } from "@/lib/api-token"
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Allow session-based access (browser) or Bearer token (desktop tool)
+  const authHeader = req.headers.get("authorization")
+  if (authHeader) {
+    const valid = await validateBearerToken(authHeader)
+    if (!valid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
   const config = await prisma.appConfig.findUnique({
     where: { key: CONFIG_KEY }
   })
@@ -27,7 +34,13 @@ export async function GET() {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  // Allow session-based access or Bearer token
+  const authHeader = req.headers.get("authorization")
+  if (authHeader) {
+    const valid = await validateBearerToken(authHeader)
+    if (!valid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
   try {
     const data: unknown = await req.json()
     

@@ -1,6 +1,7 @@
-﻿import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { autoMatchSpecId } from "@/lib/spec-auto-match"
+import { validateBearerToken } from "@/lib/api-token"
 
 export const dynamic = "force-dynamic"
 
@@ -88,8 +89,13 @@ function buildUpdateData(row: Record<string, string>) {
 }
 
 const BATCH = 50
-
 export async function POST(req: NextRequest) {
+  // Allow session-based access or Bearer token (desktop sync tool)
+  const authHeader = req.headers.get("authorization")
+  if (authHeader) {
+    const valid = await validateBearerToken(authHeader)
+    if (!valid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
   try {
     const formData = await req.formData()
     const file = formData.get("file") as File | null
@@ -97,18 +103,23 @@ export async function POST(req: NextRequest) {
 
     const buffer = await file.arrayBuffer()
     const bytes = new Uint8Array(buffer)
-    // Detect encoding: UTF-8 BOM (EF BB BF) -> UTF-8, otherwise try GBK (Excel default)
+    // Detect encoding: UTF-8 BOM (EF BB BF) → UTF-8, otherwise try GBK
     let text: string
     if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
       text = new TextDecoder("utf-8").decode(buffer)
     } else {
-      try { text = new TextDecoder("gbk").decode(buffer) }
-      catch { text = new TextDecoder("utf-8").decode(buffer) }
+      try {
+        text = new TextDecoder("gbk").decode(buffer)
+      } catch {
+        text = new TextDecoder("utf-8").decode(buffer)
+      }
     }
     const { headers: rawHeaders, rows } = parseCSV(text)
     if (rows.length === 0) return NextResponse.json({ error: "Empty or invalid CSV" }, { status: 400 })
 
+    // Strip errorReason so re-uploading error files works
     const dataHeaders = rawHeaders.filter(h => h !== "errorReason")
+    // Update-only: no platform/status columns → only update existing records, never create
     const isUpdateOnly = !dataHeaders.includes("platform") && !dataHeaders.includes("status")
     const hasSnColumn = dataHeaders.includes("manualSn")
 
@@ -129,6 +140,7 @@ export async function POST(req: NextRequest) {
         for (let i = 0; i < rows.length; i += BATCH) {
           const batch = rows.slice(i, i + BATCH)
 
+          // Pre-check orderNo existence
           const batchOrderNos = batch.map(r => r["orderNo"]?.trim()).filter(Boolean)
           const existingOrders = await prisma.onlineOrder.findMany({
             where: { orderNo: { in: batchOrderNos } },
@@ -136,6 +148,7 @@ export async function POST(req: NextRequest) {
           })
           const existingSet = new Set(existingOrders.map(o => o.orderNo))
 
+          // Pre-check SN validity across all warehouses
           let validSnSet: Set<string> | null = null
           if (hasSnColumn) {
             const batchSns = batch.map(r => r["manualSn"]?.trim()).filter(Boolean)
@@ -158,12 +171,14 @@ export async function POST(req: NextRequest) {
               continue
             }
 
+            // In update-only mode, reject rows where order doesn't exist
             if (isUpdateOnly && !existingSet.has(orderNo)) {
               failed++
               errorRows.push({ row, reason: "订单号不存在" })
               continue
             }
 
+            // Validate SN if column present and value non-empty
             if (hasSnColumn && validSnSet) {
               const sn = row["manualSn"]?.trim()
               if (sn && !validSnSet.has(sn)) {
@@ -229,6 +244,7 @@ export async function POST(req: NextRequest) {
           send({ type: "progress", processed: Math.min(i + BATCH, total), total, upserted, failed })
         }
 
+        // Auto-match specId for newly processed orders with no specId
         if (processedOrderNos.length > 0) {
           const unmatched = await prisma.onlineOrder.findMany({
             where: { orderNo: { in: processedOrderNos }, specId: null },
@@ -242,6 +258,27 @@ export async function POST(req: NextRequest) {
                 data: { specId: matched },
               }).catch(() => void 0)
             }
+          }
+        }
+
+        // Record sync metadata per platform (last sync time + count for this run)
+        if (upserted > 0) {
+          const processedSet = new Set(processedOrderNos)
+          const platformCountMap: Record<string, number> = {}
+          for (const row of rows) {
+            const p = row["platform"]?.trim()
+            if (p && processedSet.has(row["orderNo"]?.trim())) {
+              platformCountMap[p] = (platformCountMap[p] || 0) + 1
+            }
+          }
+          const now = new Date().toISOString()
+          for (const [platform, count] of Object.entries(platformCountMap)) {
+            const key = `sync_meta_${platform}`
+            await prisma.appConfig.upsert({
+              where: { key },
+              update: { value: JSON.stringify({ lastSyncAt: now, lastSyncCount: count }) },
+              create: { key, value: JSON.stringify({ lastSyncAt: now, lastSyncCount: count }) },
+            }).catch(() => void 0)
           }
         }
 
