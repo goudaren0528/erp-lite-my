@@ -75,6 +75,8 @@ export default function SystemSettingsPage() {
             <div className="text-xs text-muted-foreground space-y-1">
               <div>配置接口：<code className="bg-muted px-1 rounded">{typeof window !== 'undefined' ? window.location.origin : ''}/api/online-orders/config</code></div>
               <div>导入接口：<code className="bg-muted px-1 rounded">{typeof window !== 'undefined' ? window.location.origin : ''}/api/online-orders/import</code></div>
+              <div>线下订单查询：<code className="bg-muted px-1 rounded">{typeof window !== 'undefined' ? window.location.origin : ''}/api/orders</code></div>
+              <div>线上订单查询：<code className="bg-muted px-1 rounded">{typeof window !== 'undefined' ? window.location.origin : ''}/api/online-orders</code></div>
             </div>
           </div>
         ) : (

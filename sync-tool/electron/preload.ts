@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSiteOverride: (siteId: string) => ipcRenderer.invoke('config:getSiteOverride', siteId),
   setSiteOverride: (siteId: string, override: Record<string, unknown> | null) => ipcRenderer.invoke('config:setSiteOverride', siteId, override),
   getErpConfig: () => ipcRenderer.invoke('config:getErpConfig'),
+  restartScheduler: () => ipcRenderer.invoke('sync:restartScheduler'),
   onErpConfigLoaded: (cb: (data: unknown) => void) => {
     const handler = (_e: Electron.IpcRendererEvent, data: unknown) => cb(data)
     ipcRenderer.on('erp:configLoaded', handler)

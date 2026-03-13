@@ -19,7 +19,11 @@ export default function App() {
       setLocalConfig(c)
       if (c.erpUrl && c.apiToken) setPage('sync')
     })
-    // If main process auto-fetched ERP config on startup, receive it here
+    // Try to get already-cached ERP config from main process
+    window.electronAPI.getErpConfig().then(cfg => {
+      if (cfg) setErpConfig(cfg as Record<string, unknown>)
+    })
+    // Also listen for config pushed from main process (e.g. after auto-fetch retry succeeds)
     const unsub = window.electronAPI.onErpConfigLoaded(data => {
       setErpConfig(data as Record<string, unknown>)
     })

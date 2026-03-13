@@ -49,6 +49,7 @@ declare global {
       getSiteOverride: (siteId: string) => Promise<SiteOverride | null>
       setSiteOverride: (siteId: string, override: Record<string, unknown> | null) => Promise<boolean>
       getErpConfig: () => Promise<{ sites?: ErpSiteConfig[]; [key: string]: unknown } | null>
+      restartScheduler: () => Promise<{ success: boolean; message: string }>
       onErpConfigLoaded: (cb: (data: unknown) => void) => () => void
     }
   }

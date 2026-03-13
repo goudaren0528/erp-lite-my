@@ -4,3 +4,9 @@ node_modules
 .vscode/
 *.sqlite
 *.sqlite-journal
+
+# sync-tool build outputs
+sync-tool/release/
+sync-tool/dist/
+sync-tool/dist-electron/
+sync-tool/node_modules/

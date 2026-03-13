@@ -785,34 +785,50 @@ async function openZanchenOrderListByClicks(page: Page) {
   return true
 }
 
-async function ensureAllOrdersTab(page: Page) {
+async function ensureAllOrdersTab(scope: PageOrFrame) {
   const allOrdersTab = "#myTab > li:nth-child(1) > a"
 
   // Fast path: already on the correct tab
-  const isActive = await page
+  const isActive = await scope
     .evaluate(() => {
       const li = document.querySelector("#myTab > li:nth-child(1)")
       return !!li && li.classList.contains("active")
     })
     .catch(() => false)
-  if (isActive) return true
+  if (isActive) {
+    addLog("[System] ensureAllOrdersTab: already active")
+    return true
+  }
 
-  for (let i = 0; i < 3; i += 1) {
+  // Wait for #myTab to appear (page may still be loading)
+  try {
+    await scope.waitForSelector("#myTab", { state: "visible", timeout: 5000 })
+  } catch {
+    addLog("[System] ensureAllOrdersTab: #myTab not found after 5s")
+    return false
+  }
+
+  for (let i = 0; i < 4; i += 1) {
     try {
-      const loc = page.locator(allOrdersTab).first()
+      const loc = scope.locator(allOrdersTab).first()
       await loc.waitFor({ state: "visible", timeout: 3000 })
-      await loc.click({ timeout: 3000 })
-      await page.waitForTimeout(600)
+      await loc.click({ timeout: 3000, force: true })
+      await scope.waitForTimeout(800)
       // Confirm it became active
-      const nowActive = await page
+      const nowActive = await scope
         .evaluate(() => {
           const li = document.querySelector("#myTab > li:nth-child(1)")
           return !!li && li.classList.contains("active")
         })
         .catch(() => false)
-      if (nowActive) return true
-    } catch {
-      await page.waitForTimeout(500)
+      if (nowActive) {
+        addLog(`[System] ensureAllOrdersTab: clicked and confirmed active (attempt ${i + 1})`)
+        return true
+      }
+      addLog(`[System] ensureAllOrdersTab: click attempt ${i + 1} — tab not active yet`)
+    } catch (e) {
+      addLog(`[System] ensureAllOrdersTab: attempt ${i + 1} failed: ${e}`)
+      await scope.waitForTimeout(600)
     }
   }
   return false
@@ -1763,32 +1779,41 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
         }
       }
       try {
-        // Try to find status in the ops column first (as user feedback suggests it's accurate for some)
-        const opsDiv = await row.$("div.ops.list-inner")
-        let statusFromOps = ""
-        if (opsDiv) {
-            const rawOpsText = (await opsDiv.innerText()) || ""
-            // Clean up: remove known action button texts to avoid confusion, though usually status is distinct
-            // Known statuses list
-            const knownStatuses = [
-                "待付款", "待审核", "订单待分配", "待分配员工", "待发货", 
-                "待收货", "待归还", "已逾期", "设备归还中", "归还中", 
-                "已完成", "已关闭", "已取消", "审核拒绝", "已买断", 
-                "已购买", "退租中", "审核中"
-            ]
-            // Find if any known status is present in the ops text
-            statusFromOps = knownStatuses.find(s => rawOpsText.includes(s)) || ""
-            
-            // If not found, maybe it's a pure text node in there?
-            if (!statusFromOps) {
-                 // Try span again as fallback for simple cases
-                 const statusSpan = await row.$("div.ops.list-inner > span")
-                 const spanText = statusSpan ? (await statusSpan.textContent())?.trim() || "" : ""
-                 if (spanText && spanText.length < 10) statusFromOps = spanText
+        // Priority 1: Use structured cell parsing result (most reliable — comes from the correct column)
+        // Priority 2: Try ops div (may contain status for some layouts)
+        // Priority 3: Regex fallback on full row text
+        const knownStatuses = [
+            "待付款", "待审核", "订单待分配", "待分配员工", "待发货", 
+            "待收货", "待归还", "已逾期", "设备归还中", "归还中", 
+            "已完成", "已关闭", "已取消", "审核拒绝", "已买断", 
+            "已购买", "退租中", "审核中"
+        ]
+
+        // Use base.status from structured cell parsing as the primary source
+        let status = base.status || ""
+
+        // Only try ops div if structured parsing didn't yield a known status
+        const isKnownStatus = (s: string) => knownStatuses.some(k => s.includes(k))
+        if (!isKnownStatus(status)) {
+            const opsDiv = await row.$("div.ops.list-inner")
+            if (opsDiv) {
+                const rawOpsText = (await opsDiv.innerText()) || ""
+                addLog(`[Status Debug] ops div text for ${base.orderNo}: "${rawOpsText.substring(0, 80)}"`)
+                const statusFromOps = knownStatuses.find(s => rawOpsText.includes(s)) || ""
+                if (statusFromOps) {
+                    addLog(`[Status Debug] Got status "${statusFromOps}" from ops div for ${base.orderNo} (cell had: "${status}")`)
+                    status = statusFromOps
+                } else {
+                    // Try span as fallback
+                    const statusSpan = await row.$("div.ops.list-inner > span")
+                    const spanText = statusSpan ? (await statusSpan.textContent())?.trim() || "" : ""
+                    if (spanText && spanText.length < 10) status = spanText
+                }
             }
+        } else {
+            addLog(`[Status Debug] Using cell status "${status}" for ${base.orderNo}`)
         }
 
-        let status = statusFromOps || base.status || ""
         const statusRef = { value: status }
         
         if (!status) {
@@ -2004,7 +2029,8 @@ async function extractParsedOrders(page: Page, scope: PageOrFrame, selectors: Se
 function mapStatus(cnStatus: string): string {
   if (!cnStatus) return "PENDING_REVIEW" // Default safe fallback
   
-  if (cnStatus.includes("待审核") || cnStatus.includes("审核中") || cnStatus.includes("待付款")) return "PENDING_REVIEW"
+  if (cnStatus.includes("待付款") || cnStatus.includes("待支付") || cnStatus.includes("未付款")) return "WAIT_PAY"
+  if (cnStatus.includes("待审核") || cnStatus.includes("审核中")) return "PENDING_REVIEW"
   if (cnStatus.includes("待发货") || cnStatus.includes("待分配")) return "PENDING_SHIPMENT"
   if (cnStatus.includes("待收货")) return "PENDING_RECEIPT"
   if (cnStatus.includes("待归还")) return "RENTING"
@@ -2023,8 +2049,12 @@ export function getCollectedOrders() { return [..._collectedOrders] }
 export function clearCollectedOrders() { _collectedOrders.length = 0 }
 
 async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["lastResult"]>["parsedOrders"]>) {
-  // Force platform to ZANCHEN so ERP frontend filter works correctly
-  const normalized = orders.map(o => ({ ...o, platform: "ZANCHEN" }))
+  // Force platform to ZANCHEN and map status to English enum values
+  const normalized = orders.map(o => ({
+    ...o,
+    platform: "ZANCHEN",
+    status: mapStatus(o.status || ""),
+  }))
   _collectedOrders.push(...normalized)
   addLog(`[sync-tool] 已收集 ${orders.length} 条订单（累计 ${_collectedOrders.length} 条）`)
   return
@@ -2391,14 +2421,27 @@ async function runZanchenSync(siteId: string) {
   }
   
   await waitRandom(page, 1200, 3000)
-  addLog("[System] ensureAllOrdersTab...")
-  await ensureAllOrdersTab(page)
-  addLog("[System] ensureAllOrdersTab done")
-  await waitRandom(page, 600, 1800)
-
   addLog("[System] resolveOrderFrame...")
   let scope = await resolveOrderFrame(page, site.selectors)
   addLog(`[System] scope resolved: ${scope === page ? "main page" : "iframe"}`)
+
+  addLog("[System] ensureAllOrdersTab...")
+  const tabOk = await ensureAllOrdersTab(scope)
+  if (!tabOk && site.selectors.order_menu_link) {
+    addLog("[System] Tab click failed, falling back to direct URL navigation...")
+    try {
+      const origin = getOriginFromUrl(site.selectors.order_menu_link)
+      await page.goto(site.selectors.order_menu_link, { waitUntil: "domcontentloaded", timeout: 15000, referer: origin ? `${origin}/` : undefined })
+      await waitRandom(page, 1200, 2000)
+      scope = await resolveOrderFrame(page, site.selectors)
+      addLog("[System] Fallback navigation done, scope re-resolved, retrying tab click...")
+      await ensureAllOrdersTab(scope)
+    } catch (e) {
+      addLog(`[System] Fallback navigation failed: ${e}`)
+    }
+  }
+  addLog("[System] ensureAllOrdersTab done")
+  await waitRandom(page, 600, 1800)
 
   // Explicitly ensure we are on the first page (using scope, as pagination is likely inside the frame)
   try {
@@ -2718,8 +2761,16 @@ async function runZanchenSync(siteId: string) {
          const okRetry = await openZanchenOrderListByClicks(page)
          if (!okRetry) await openOrderList(page, site.selectors)
          await waitRandom(page, 1200, 3000)
-         await ensureAllOrdersTab(page)
          scope = await resolveOrderFrame(page, site.selectors)
+         const tabOkRetry = await ensureAllOrdersTab(scope)
+         if (!tabOkRetry && site.selectors.order_menu_link) {
+           try {
+             const origin = getOriginFromUrl(site.selectors.order_menu_link)
+             await page.goto(site.selectors.order_menu_link, { waitUntil: "domcontentloaded", timeout: 15000, referer: origin ? `${origin}/` : undefined })
+             await waitRandom(page, 1200, 2000)
+             scope = await resolveOrderFrame(page, site.selectors)
+           } catch { /* ignore */ }
+         }
          addLog(`[System] Crash recovery complete, retrying page ${pagesVisited + 1}...`)
          pagesVisited-- // undo the increment so we re-process the same page
      } else {

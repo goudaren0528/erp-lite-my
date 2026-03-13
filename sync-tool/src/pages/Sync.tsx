@@ -56,9 +56,20 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
   useEffect(() => {
     if (erpConfig) {
       setSites((erpConfig.sites as SiteConfig[]) || [])
-    } else {
-      loadErpConfig()
     }
+  }, [erpConfig])
+
+  useEffect(() => {
+    // On mount: if no erpConfig yet, delay slightly to let App.tsx's getErpConfig() resolve first
+    const t = setTimeout(() => {
+      window.electronAPI.getErpConfig().then(cfg => {
+        if (cfg) {
+          setSites(((cfg as Record<string, unknown>).sites as SiteConfig[]) || [])
+        } else {
+          loadErpConfig()
+        }
+      })
+    }, 500)
 
     const unsubLog = window.electronAPI.onSyncLog(({ siteId, msg }) => {
       setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), siteId, msg }].slice(-1000))
@@ -71,7 +82,7 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
         return next
       })
     })
-    return () => { unsubLog(); unsubStatus() }
+    return () => { clearTimeout(t); unsubLog(); unsubStatus() }
   }, [])
 
   useEffect(() => {
@@ -140,6 +151,16 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
         <div style={{ flex: 1 }} />
         <button onClick={loadErpConfig} disabled={loading} style={smallBtnStyle}>
           {loading ? '...' : '刷新配置'}
+        </button>
+        <button
+          onClick={async () => {
+            const res = await window.electronAPI.restartScheduler()
+            addLog('system', res.message)
+          }}
+          style={smallBtnStyle}
+          title="重启定时调度器（定时抓取不触发时使用）"
+        >
+          重启调度器
         </button>
       </div>
 

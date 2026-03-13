@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Notification } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, dialog } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import * as http from 'http'
@@ -270,6 +270,45 @@ function startScheduler() {
 
 // ── Main window ───────────────────────────────────────────────────────────────
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+let forceQuit = false
+
+// Build a 32x32 RGBA tray icon programmatically: blue circle with white cross
+function buildTrayIcon(): Electron.NativeImage {
+  const size = 32
+  const buf = Buffer.alloc(size * size * 4)
+  const cx = size / 2, cy = size / 2, r = size / 2 - 1
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4
+      const inCircle = (x - cx) ** 2 + (y - cy) ** 2 <= r ** 2
+      const inCross = (y >= 13 && y <= 18 && x >= 5 && x <= 26) ||
+                      (x >= 13 && x <= 18 && y >= 5 && y <= 26)
+      if (!inCircle) {
+        buf[i] = 0; buf[i+1] = 0; buf[i+2] = 0; buf[i+3] = 0 // transparent
+      } else if (inCross) {
+        buf[i] = 255; buf[i+1] = 255; buf[i+2] = 255; buf[i+3] = 255 // white
+      } else {
+        buf[i] = 0x3b; buf[i+1] = 0x82; buf[i+2] = 0xf6; buf[i+3] = 255 // #3b82f6 blue
+      }
+    }
+  }
+  return nativeImage.createFromBuffer(buf, { width: size, height: size })
+}
+
+function createTray() {
+  const icon = buildTrayIcon()
+  tray = new Tray(icon)
+  tray.setToolTip('ERP 订单同步工具')
+  const menu = Menu.buildFromTemplate([
+    { label: '显示主窗口', click: () => { mainWindow?.show(); mainWindow?.focus() } },
+    { type: 'separator' },
+    { label: '退出', click: () => { forceQuit = true; app.quit() } },
+  ])
+  tray.setContextMenu(menu)
+  tray.on('double-click', () => { mainWindow?.show(); mainWindow?.focus() })
+}
 
 function createWindow() {
   const userData = app.getPath('userData')
@@ -295,53 +334,98 @@ function createWindow() {
   } else {
     mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
+
+  // Intercept close button
+  mainWindow.on('close', async (e) => {
+    if (forceQuit) return // allow quit from tray menu
+    e.preventDefault()
+    const { response } = await dialog.showMessageBox(mainWindow!, {
+      type: 'question',
+      buttons: ['最小化到托盘', '直接退出', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      title: '关闭同步工具',
+      message: '请选择关闭方式',
+      detail: '最小化到托盘后，定时抓取仍会继续运行。',
+    })
+    if (response === 0) {
+      mainWindow?.hide()
+    } else if (response === 1) {
+      forceQuit = true
+      app.quit()
+    }
+    // response === 2: cancel, do nothing
+  })
 }
 
 app.whenReady().then(async () => {
   // Required on Windows for system notifications to appear
   app.setAppUserModelId('com.erp.sync-tool')
   createWindow()
+  createTray()
 
   // Auto-fetch ERP config on startup if credentials are saved
   const cfg = loadLocalConfig()
   if (cfg.erpUrl && cfg.apiToken) {
-    try {
-      const url = cfg.erpUrl.startsWith('http') ? cfg.erpUrl : `http://${cfg.erpUrl}`
-      const data = await new Promise<unknown>((resolve, reject) => {
-        const parsed = new URL(`${url}/api/online-orders/config`)
-        const isHttps = parsed.protocol === 'https:'
-        const options: http.RequestOptions = {
-          hostname: parsed.hostname,
-          port: parsed.port || (isHttps ? 443 : 80),
-          path: parsed.pathname + parsed.search,
-          method: 'GET',
-          headers: { Authorization: `Bearer ${cfg.apiToken}` },
-        }
-        const req = (isHttps ? https : http).request(options, res => {
-          let body = ''
-          res.on('data', chunk => { body += chunk })
-          res.on('end', () => {
-            if (res.statusCode && res.statusCode >= 400) reject(new Error(`HTTP ${res.statusCode}`))
-            else try { resolve(JSON.parse(body)) } catch { reject(new Error('Invalid JSON')) }
+    // Retry up to 5 times with increasing delay — network/DNS may not be ready at startup
+    const tryFetch = async (attempt: number): Promise<void> => {
+      try {
+        const url = cfg.erpUrl.startsWith('http') ? cfg.erpUrl : `http://${cfg.erpUrl}`
+        const data = await new Promise<unknown>((resolve, reject) => {
+          const parsed = new URL(`${url}/api/online-orders/config`)
+          const isHttps = parsed.protocol === 'https:'
+          const options: http.RequestOptions = {
+            hostname: parsed.hostname,
+            port: parsed.port || (isHttps ? 443 : 80),
+            path: parsed.pathname + parsed.search,
+            method: 'GET',
+            headers: { Authorization: `Bearer ${cfg.apiToken}` },
+          }
+          const req = (isHttps ? https : http).request(options, res => {
+            let body = ''
+            res.on('data', chunk => { body += chunk })
+            res.on('end', () => {
+              if (res.statusCode && res.statusCode >= 400) reject(new Error(`HTTP ${res.statusCode}`))
+              else try { resolve(JSON.parse(body)) } catch { reject(new Error('Invalid JSON')) }
+            })
           })
+          req.on('error', reject)
+          req.end()
         })
-        req.on('error', reject)
-        req.end()
-      })
-      cachedErpConfig = data as ErpConfig
-      startScheduler()
-      mainWindow?.webContents.once('did-finish-load', () => {
-        mainWindow?.webContents.send('erp:configLoaded', cachedErpConfig)
-      })
-    } catch { /* ignore — user can manually reconnect */ }
+        cachedErpConfig = data as ErpConfig
+        startScheduler()
+        // Send to renderer — if window is already loaded send directly, otherwise wait
+        if (mainWindow?.webContents.isLoading()) {
+          mainWindow?.webContents.once('did-finish-load', () => {
+            mainWindow?.webContents.send('erp:configLoaded', cachedErpConfig)
+          })
+        } else {
+          mainWindow?.webContents.send('erp:configLoaded', cachedErpConfig)
+        }
+      } catch (e) {
+        if (attempt < 5) {
+          const delay = attempt * 3000 // 3s, 6s, 9s, 12s, 15s
+          setTimeout(() => tryFetch(attempt + 1), delay)
+        }
+        // else give up silently — user can manually reconnect
+      }
+    }
+    // Wait 2s before first attempt to let network initialize
+    setTimeout(() => tryFetch(1), 2000)
   }
 })
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') { /* do nothing — tray keeps app alive */ } })
+app.on('before-quit', () => { forceQuit = true })
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 
 // ── IPC: config ───────────────────────────────────────────────────────────────
 ipcMain.handle('config:load', () => loadLocalConfig())
-ipcMain.handle('config:save', (_e, config: LocalConfig) => { saveLocalConfig(config); return true })
+ipcMain.handle('config:save', (_e, config: LocalConfig) => {
+  saveLocalConfig(config)
+  // Restart scheduler so new scheduledTimes take effect immediately
+  if (cachedErpConfig) startScheduler()
+  return true
+})
 
 // ── IPC: site overrides ───────────────────────────────────────────────────────
 ipcMain.handle('config:getSiteOverride', (_e, siteId: string) => {
@@ -438,6 +522,13 @@ ipcMain.handle('browser:setSiteVisibility', async (_e, siteId: string, show: boo
 
 // ── IPC: sync status ──────────────────────────────────────────────────────────
 ipcMain.handle('sync:getStatus', () => ({ syncing: [...syncingSet] }))
+ipcMain.handle('sync:restartScheduler', () => {
+  if (cachedErpConfig) {
+    startScheduler()
+    return { success: true, message: '调度器已重启' }
+  }
+  return { success: false, message: '未连接 ERP，无法启动调度器' }
+})
 
 // ── CSV serialization ─────────────────────────────────────────────────────────
 function ordersToCSV(orders: Record<string, unknown>[]): string {
@@ -582,6 +673,27 @@ async function runPlatformSync(
     let lastLogCount = 0
     let attentionNotified = false
     let browserShownForAttention = false
+    let totalUpserted = 0
+    let totalFailed = 0
+    const BATCH_SIZE = 200
+
+    const flushBatch = async (orders: Record<string, unknown>[]) => {
+      if (orders.length === 0) return
+      const sample = orders[0]
+      sendLog(siteId, `[Debug] 样本订单: orderNo=${sample['orderNo']}, platform=${sample['platform']}, status=${sample['status']}`)
+      const csv = ordersToCSV(orders)
+      sendLog(siteId, `[${site?.name ?? siteId}] 推送 ${orders.length} 条到 ERP...`)
+      try {
+        const { upserted, failed, rawResponse } = await pushToErp(erpUrl, apiToken, csv)
+        sendLog(siteId, `[Debug] ERP 响应: ${rawResponse}`)
+        totalUpserted += upserted
+        totalFailed += failed
+        sendLog(siteId, `[${site?.name ?? siteId}] 本批写入 ${upserted} 条，失败 ${failed} 条（累计写入 ${totalUpserted} 条）`)
+      } catch (pushErr) {
+        sendLog(siteId, `[Error] 推送 ERP 失败: ${pushErr}`)
+      }
+    }
+
     const poll = async () => {
       while (true) {
         await new Promise(r => setTimeout(r, 1000))
@@ -610,6 +722,14 @@ async function runPlatformSync(
           const cfg = loadLocalConfig()
           if (!cfg.showBrowser) await setBrowserVisibility(false)
         }
+
+        // Incremental push: flush every BATCH_SIZE orders collected so far
+        const collected = mod.getCollectedOrders()
+        if (collected.length >= BATCH_SIZE) {
+          mod.clearCollectedOrders()
+          await flushBatch(collected)
+        }
+
         // Stop polling when sync is done (idle/success/error), keep polling during awaiting_user
         if (!status || status.status === 'idle' || status.status === 'success' || status.status === 'error') break
       }
@@ -617,23 +737,14 @@ async function runPlatformSync(
 
     await Promise.all([syncPromise, poll()])
 
-    const orders = mod.getCollectedOrders()
-    sendLog(siteId, `[${site?.name ?? siteId}] 抓取完成，共 ${orders.length} 条`)
-    if (orders.length > 0) {
-      // Debug: log first order fields
-      const sample = orders[0]
-      sendLog(siteId, `[Debug] 样本订单: orderNo=${sample['orderNo']}, platform=${sample['platform']}, status=${sample['status']}`)
-      const csv = ordersToCSV(orders)
-      sendLog(siteId, `[Debug] CSV 行数: ${csv.split('\n').length - 1}, 前100字符: ${csv.slice(0, 100)}`)
-      sendLog(siteId, `[${site?.name ?? siteId}] 推送到 ERP...`)
-      try {
-        const { upserted, failed, rawResponse } = await pushToErp(erpUrl, apiToken, csv)
-        sendLog(siteId, `[Debug] ERP 响应: ${rawResponse}`)
-        sendLog(siteId, `[${site?.name ?? siteId}] 写入 ${upserted} 条，跳过/失败 ${failed} 条`)
-      } catch (pushErr) {
-        sendLog(siteId, `[Error] 推送 ERP 失败: ${pushErr}`)
-      }
+    // Flush any remaining orders after sync completes
+    const remaining = mod.getCollectedOrders()
+    sendLog(siteId, `[${site?.name ?? siteId}] 抓取完成，剩余 ${remaining.length} 条待推送`)
+    if (remaining.length > 0) {
+      mod.clearCollectedOrders()
+      await flushBatch(remaining)
     }
+    sendLog(siteId, `[${site?.name ?? siteId}] 全部完成，累计写入 ${totalUpserted} 条，失败 ${totalFailed} 条`)
   } catch (e) {
     const msg = String(e)
     // Browser was closed externally — clear this site's context so next run starts fresh
