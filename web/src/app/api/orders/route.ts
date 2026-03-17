@@ -49,6 +49,8 @@ export async function GET(req: NextRequest) {
         rentStartDate: true, returnDeadline: true, deliveryTime: true,
         actualDeliveryTime: true, completedAt: true,
         remark: true, creatorName: true, createdAt: true, updatedAt: true,
+        specId: true,
+        spec: { select: { specId: true, name: true } },
       },
     }),
   ])

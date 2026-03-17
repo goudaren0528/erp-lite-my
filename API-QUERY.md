@@ -87,12 +87,19 @@ GET /api/orders
       "completedAt": null,
       "remark": null,
       "creatorName": "管理员",
+      "specId": "uuid-of-product-spec",
+      "spec": {
+        "specId": "iphone15pro-256g-black",
+        "name": "iPhone 15 Pro 256G 黑色"
+      },
       "createdAt": "2026-02-01T08:00:00.000Z",
       "updatedAt": "2026-02-01T08:00:00.000Z"
     }
   ]
 }
 ```
+
+> `specId` 为匹配规格的数据库 UUID，`spec.specId` 为业务规格编号，`spec.name` 为规格名称。未匹配时两者均为 `null`。
 
 ---
 
@@ -176,12 +183,19 @@ GET /api/online-orders
       "rentStartDate": "2026-02-01T00:00:00.000Z",
       "returnDeadline": "2026-03-01T00:00:00.000Z",
       "manualSn": null,
+      "specId": "uuid-of-product-spec",
+      "spec": {
+        "specId": "iphone15pro-256g-black",
+        "name": "iPhone 15 Pro 256G 黑色"
+      },
       "createdAt": "2026-02-01T08:00:00.000Z",
       "updatedAt": "2026-02-01T08:00:00.000Z"
     }
   ]
 }
 ```
+
+> `specId` 为匹配规格的数据库 UUID，`spec.specId` 为业务规格编号，`spec.name` 为规格名称。未匹配时两者均为 `null`。
 
 ---
 
