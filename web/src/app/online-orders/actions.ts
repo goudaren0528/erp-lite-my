@@ -66,9 +66,7 @@ export async function fetchOnlineOrders(params: {
         })
     }
     if (searchSn) {
-        const q = searchSn.trim()
-        const rows = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id FROM OnlineOrder WHERE manualSn LIKE ${`%${q}%`}`
-        and.push({ id: { in: rows.map(r => r.id) } })
+        and.push({ manualSn: { contains: searchSn.trim() } })
     }
     if (and.length > 0) {
         where.AND = and
@@ -157,9 +155,7 @@ export async function getOnlineOrderCounts(params: {
         })
     }
     if (params.searchSn) {
-        const q = params.searchSn.trim()
-        const rows = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id FROM OnlineOrder WHERE manualSn LIKE ${`%${q}%`}`
-        and.push({ id: { in: rows.map(r => r.id) } })
+        and.push({ manualSn: { contains: params.searchSn.trim() } })
     }
     if (and.length > 0) {
         where.AND = and
@@ -241,24 +237,56 @@ export async function getMatchProducts() {
     }))
 }
 
+// Statuses that mean the device is actively occupied
+const OCCUPYING_STATUSES = ['PENDING_SHIPMENT', 'SHIPPED', 'PENDING_RECEIPT', 'RENTING', 'RETURNING', 'OVERDUE']
+
 export async function updateOnlineOrderManualSn(orderId: string, manualSn: string) {
     const value = manualSn.trim()
     try {
+        // Get current order to know old SN and status
+        const order = await prisma.onlineOrder.findUnique({
+            where: { id: orderId },
+            select: { manualSn: true, status: true }
+        })
+
         await prisma.onlineOrder.update({
             where: { id: orderId },
-            data: { manualSn: value }
+            data: { manualSn: value || null }
         })
+
+        // Sync InventoryItem status
+        const oldSn = order?.manualSn?.trim()
+        const newSn = value
+
+        // Release old SN if it changed and no other active order holds it
+        if (oldSn && oldSn !== newSn) {
+            const stillOccupied = await prisma.onlineOrder.count({
+                where: { manualSn: oldSn, id: { not: orderId }, status: { in: OCCUPYING_STATUSES } }
+            })
+            const stillOccupiedOffline = await prisma.order.count({
+                where: { sn: oldSn, status: { in: OCCUPYING_STATUSES } }
+            })
+            if (stillOccupied === 0 && stillOccupiedOffline === 0) {
+                await prisma.inventoryItem.updateMany({
+                    where: { sn: oldSn, status: 'RENTING' },
+                    data: { status: 'AVAILABLE' }
+                })
+            }
+        }
+
+        // Occupy new SN if order status is active
+        if (newSn && order?.status && OCCUPYING_STATUSES.includes(order.status)) {
+            await prisma.inventoryItem.updateMany({
+                where: { sn: newSn, status: 'AVAILABLE' },
+                data: { status: 'RENTING' }
+            })
+        }
+
         revalidatePath("/online-orders")
         return { success: true }
-    } catch {
-        try {
-            await prisma.$executeRaw`UPDATE OnlineOrder SET manualSn = ${value} WHERE id = ${orderId}`
-            revalidatePath("/online-orders")
-            return { success: true }
-        } catch (rawError) {
-            const message = rawError instanceof Error ? rawError.message : "保存失败"
-            return { success: false, message }
-        }
+    } catch (rawError) {
+        const message = rawError instanceof Error ? rawError.message : "保存失败"
+        return { success: false, message }
     }
 }
 

@@ -1834,21 +1834,35 @@ export async function batchCreateInventoryItems(data: { itemTypeId: string; ware
         const validSns = data.sns.filter(sn => sn.trim().length > 0).map(sn => sn.trim())
         if (validSns.length === 0) return { success: false, message: "没有有效的序列号" }
 
-        await prisma.$transaction(
-            validSns.map(sn => 
+        // Find existing items with these SNs (non-deleted)
+        const existing = await prisma.inventoryItem.findMany({
+            where: { sn: { in: validSns }, status: { not: "DELETED" } },
+            select: { id: true, sn: true }
+        })
+        const existingSnMap = new Map(existing.map(e => [e.sn!, e.id]))
+
+        const toCreate = validSns.filter(sn => !existingSnMap.has(sn))
+        const toUpdate = validSns.filter(sn => existingSnMap.has(sn))
+
+        await prisma.$transaction([
+            ...toCreate.map(sn =>
                 prisma.inventoryItem.create({
-                    data: {
-                        itemTypeId: data.itemTypeId,
-                        warehouseId: data.warehouseId,
-                        sn: sn,
-                        status: "AVAILABLE"
-                    }
+                    data: { itemTypeId: data.itemTypeId, warehouseId: data.warehouseId, sn, status: "AVAILABLE" }
                 })
-            )
-        )
-        
+            ),
+            ...toUpdate.map(sn =>
+                prisma.inventoryItem.update({
+                    where: { id: existingSnMap.get(sn)! },
+                    data: { itemTypeId: data.itemTypeId, warehouseId: data.warehouseId }
+                })
+            ),
+        ])
+
         revalidatePath('/inventory')
-        return { success: true, message: `成功入库 ${validSns.length} 个物品` }
+        const msg = toCreate.length > 0 && toUpdate.length > 0
+            ? `新增 ${toCreate.length} 个，更新 ${toUpdate.length} 个`
+            : toCreate.length > 0 ? `成功入库 ${toCreate.length} 个物品` : `更新 ${toUpdate.length} 个物品`
+        return { success: true, message: msg }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { success: false, message: message || "批量入库失败" }

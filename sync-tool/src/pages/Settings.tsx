@@ -4,6 +4,7 @@ type LocalConfig = {
   erpUrl: string
   apiToken: string
   showBrowser: boolean
+  showBrowserPerSite: Record<string, boolean>
   scheduledTimes: Record<string, string[]>
   siteOverrides?: Record<string, SiteOverride>
 }
@@ -13,6 +14,7 @@ type SiteOverride = {
   username?: string
   password?: string
   maxPages?: number
+  stopThreshold?: number
   selectors?: Record<string, string>
   autoSync?: { scheduledTimes?: string[]; concurrencyLimit?: number }
 }
@@ -24,6 +26,7 @@ type ErpSiteConfig = {
   username?: string
   password?: string
   maxPages?: number
+  stopThreshold?: number
   selectors?: Record<string, string>
   autoSync?: { scheduledTimes?: string[]; concurrencyLimit?: number }
 }
@@ -49,7 +52,6 @@ export default function SettingsPage({ initialConfig, onSaved }: Props) {
   const [loadingErp, setLoadingErp] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
 
-  // Sync when initialConfig loads asynchronously after electron loadConfig resolves
   useEffect(() => {
     if (initialConfig.erpUrl) setErpUrl(initialConfig.erpUrl)
     if (initialConfig.apiToken) setApiToken(initialConfig.apiToken)
@@ -79,7 +81,9 @@ export default function SettingsPage({ initialConfig, onSaved }: Props) {
     if (!erpUrl || !apiToken) { setError('请填写 ERP 地址和 Token'); return }
     setError(''); setConnMsg('')
     const url = normalizeUrl(erpUrl)
-    const cfg: LocalConfig = { ...initialConfig, erpUrl: url, apiToken }
+    // Read latest config from disk to avoid overwriting locally saved overrides
+    const latestCfg = await window.electronAPI.loadConfig()
+    const cfg: LocalConfig = { ...latestCfg, erpUrl: url, apiToken }
     await window.electronAPI.saveConfig(cfg)
     setTesting(true)
     try {
@@ -239,7 +243,7 @@ export default function SettingsPage({ initialConfig, onSaved }: Props) {
                       style={{ ...smallBtnStyle, fontSize: 11, padding: '2px 8px', marginRight: 8, color: '#ef4444', borderColor: '#fca5a5' }}>
                       清除覆盖
                     </button>
-                    <span style={{ color: '#9ca3af', fontSize: 11 }}>{isExpanded ? '' : ''}</span>
+                    <span style={{ color: '#9ca3af', fontSize: 11 }}>{isExpanded ? '▲' : '▼'}</span>
                   </div>
 
                   {isExpanded && (
@@ -254,7 +258,7 @@ export default function SettingsPage({ initialConfig, onSaved }: Props) {
                         <FieldRow label="最大页数 (0=不限)" erpVal={s.maxPages != null ? String(s.maxPages) : ''}
                           localVal={ov.maxPages != null ? String(ov.maxPages) : undefined}
                           onChange={v => setOvField(s.id, 'maxPages', v ? Number(v) : undefined)} />
-                        <FieldRow label="增量阈值 (连续终态订单数)" erpVal={s.stopThreshold != null ? String(s.stopThreshold) : ''}
+                        <FieldRow label="增量阈値 (连续终态订单数)" erpVal={s.stopThreshold != null ? String(s.stopThreshold) : ''}
                           localVal={ov.stopThreshold != null ? String(ov.stopThreshold) : undefined}
                           onChange={v => setOvField(s.id, 'stopThreshold', v ? Number(v) : undefined)} />
                       </div>

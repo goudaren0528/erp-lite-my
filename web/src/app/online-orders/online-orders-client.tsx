@@ -421,37 +421,6 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
   }, [onlineOrderPage, onlineOrderTotalPages])
 
   useEffect(() => {
-    // Determine platform to filter by
-    const targetSite = draft.sites.find(s => s.id === activeTab)
-    let platformFilter = undefined
-    const activeTabLower = (activeTab || "").toLowerCase()
-    const siteName = targetSite?.name || ""
-    
-    if (siteName.includes("零零享") || activeTabLower.includes("llxzu")) {
-      platformFilter = "零零享"
-    } else if (siteName.includes("人人租") || activeTabLower.includes("rrz")) {
-      platformFilter = "人人租"
-    } else if (siteName.includes("优品") || activeTabLower.includes("youpin")) {
-      platformFilter = "优品租"
-    } else if (siteName.includes("奥租") || activeTabLower.includes("aolzu") || activeTabLower.includes("aozu")) {
-      platformFilter = "奥租"
-    } else if (siteName.includes("诚赁") || activeTabLower.includes("chenglin") || activeTabLower.includes("chenlin")) {
-      platformFilter = "诚赁"
-    } else if (activeTabLower === "zanchen" || siteName.includes("赞晨")) {
-      platformFilter = "ZANCHEN"
-    }
-    
-    // If we have a platform filter, or if it's zanchen (which implies filter), fetch orders.
-    // Actually we should fetch for ANY active tab if we can determine the platform.
-    // If platformFilter is undefined, maybe show all? Or show nothing?
-    // Let's assume undefined means "show all" OR we enforce filter.
-    // Given the request "ChengLin tab shows Zanchen orders", we MUST filter.
-    
-    if (!platformFilter && activeTab !== "zanchen") {
-        setDbOrders([])
-        return 
-    }
-    
     setDbLoading(true)
     ;(async () => {
       try {
@@ -465,7 +434,6 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
           searchRecipient: filterRecipientName,
           searchProduct: filterProduct,
           searchSn: filterSn,
-          filterPlatform: platformFilter,
           matchFilter
         })
         setDbOrders(res.orders as OnlineOrderRow[])
@@ -477,42 +445,19 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
         setDbLoading(false)
       }
     })()
-  }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct, filterSn, matchFilter, genericStatus?.status]) // Add genericStatus.status to dependency
+  }, [onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct, filterSn, matchFilter, genericStatus?.status])
 
   useEffect(() => {
-    // Same logic for counts
-    const targetSite = draft.sites.find(s => s.id === activeTab)
-    let platformFilter = undefined
-    const activeTabLower = (activeTab || "").toLowerCase()
-    const siteName = targetSite?.name || ""
-    
-    if (siteName.includes("零零享") || activeTabLower.includes("llxzu")) {
-      platformFilter = "零零享"
-    } else if (siteName.includes("人人租") || activeTabLower.includes("rrz")) {
-      platformFilter = "人人租"
-    } else if (siteName.includes("优品") || activeTabLower.includes("youpin")) {
-      platformFilter = "优品租"
-    } else if (siteName.includes("奥租") || activeTabLower.includes("aolzu") || activeTabLower.includes("aozu")) {
-      platformFilter = "奥租"
-    } else if (siteName.includes("诚赁") || activeTabLower.includes("chenglin") || activeTabLower.includes("chenlin")) {
-      platformFilter = "诚赁"
-    } else if (activeTabLower === "zanchen" || siteName.includes("赞晨")) {
-      platformFilter = "ZANCHEN"
-    }
-    
-    if (!platformFilter && activeTab !== "zanchen") return
-
     getOnlineOrderCounts({
       searchOrderNo: filterOrderNo,
       searchRecipient: filterRecipientName,
       searchProduct: filterProduct,
       searchSn: filterSn,
-      filterPlatform: platformFilter
     }).then(res => {
       setStatusCounts(res.counts)
       setStatusTotal(res.total)
     }).catch(console.error)
-  }, [activeTab, dbRefreshKey, zanchenStatus?.lastRunAt, filterOrderNo, filterRecipientName, filterProduct, filterSn])
+  }, [dbRefreshKey, zanchenStatus?.lastRunAt, filterOrderNo, filterRecipientName, filterProduct, filterSn])
 
   // Load sync meta (last sync time + total orders) for all platform tabs
   useEffect(() => {
@@ -1469,6 +1414,92 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
 
       {config.sites.length > 0 ? (
         <Tabs value={activeTab} onValueChange={(val) => { setActiveTab(val); setActiveSiteId(val) }} className="w-full">
+          {/* Global filter area - above platform tabs */}
+          <div className="space-y-3 mb-3">
+            <Tabs value={filterStatus} onValueChange={(val) => { setFilterStatus(val); setOnlineOrderPage(1); }} className="w-full">
+              <TabsList className="flex flex-wrap h-auto w-full justify-start">
+                <TabsTrigger value="ALL">全部 ({statusTotal})</TabsTrigger>
+                <TabsTrigger value="WAIT_PAY">待支付 ({statusCounts['WAIT_PAY'] || 0})</TabsTrigger>
+                <TabsTrigger value="PENDING_REVIEW">待审核 ({statusCounts['PENDING_REVIEW'] || 0})</TabsTrigger>
+                <TabsTrigger value="PENDING_SHIPMENT">待发货 ({statusCounts['PENDING_SHIPMENT'] || 0})</TabsTrigger>
+                <TabsTrigger value="SHIPPED">已发货 ({statusCounts['SHIPPED'] || 0})</TabsTrigger>
+                <TabsTrigger value="PENDING_RECEIPT">待收货 ({statusCounts['PENDING_RECEIPT'] || 0})</TabsTrigger>
+                <TabsTrigger value="RENTING">待归还 ({statusCounts['RENTING'] || 0})</TabsTrigger>
+                <TabsTrigger value="RETURNING">归还中 ({statusCounts['RETURNING'] || 0})</TabsTrigger>
+                <TabsTrigger value="OVERDUE">已逾期 ({statusCounts['OVERDUE'] || 0})</TabsTrigger>
+                <TabsTrigger value="DUE_REPAYMENT">待结算 ({statusCounts['DUE_REPAYMENT'] || 0})</TabsTrigger>
+                <TabsTrigger value="BOUGHT_OUT">已买断 ({statusCounts['BOUGHT_OUT'] || 0})</TabsTrigger>
+                <TabsTrigger value="COMPLETED">已完成 ({statusCounts['COMPLETED'] || 0})</TabsTrigger>
+                <TabsTrigger value="CLOSED">已关闭 ({statusCounts['CLOSED'] || 0})</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center space-x-2">
+                  <Search className="w-4 h-4 text-gray-500" />
+                  <Input
+                    placeholder="订单号"
+                    value={filterOrderNo}
+                    onChange={e => { setFilterOrderNo(e.target.value); setOnlineOrderPage(1); }}
+                    className="h-8 w-[180px]"
+                  />
+                </div>
+                <Input
+                  placeholder="收货人姓名"
+                  value={filterRecipientName}
+                  onChange={e => { setFilterRecipientName(e.target.value); setOnlineOrderPage(1); }}
+                  className="h-8 w-[120px]"
+                />
+                <Input
+                  placeholder="商品名称"
+                  value={filterProduct}
+                  onChange={e => { setFilterProduct(e.target.value); setOnlineOrderPage(1); }}
+                  className="h-8 w-[120px]"
+                />
+                <Input
+                  placeholder="设备SN"
+                  value={filterSn}
+                  onChange={e => { setFilterSn(e.target.value); setOnlineOrderPage(1); }}
+                  className="h-8 w-[120px]"
+                />
+                <Select value={matchFilter} onValueChange={(v) => { setMatchFilter(v as 'ALL' | 'MATCHED' | 'UNMATCHED'); setOnlineOrderPage(1); }}>
+                  <SelectTrigger className="h-8 w-[140px]">
+                    <SelectValue placeholder="匹配规格" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">全部</SelectItem>
+                    <SelectItem value="MATCHED">已匹配规格</SelectItem>
+                    <SelectItem value="UNMATCHED">未匹配规格</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const blob = new Blob(["\uFEFForderNo,manualSn\n"], { type: "text/csv;charset=utf-8" })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement("a")
+                    a.href = url
+                    a.download = "sn_update_template.csv"
+                    a.click()
+                    URL.revokeObjectURL(url)
+                  }}
+                >
+                  导出SN模板
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDbRefreshKey(key => key + 1)}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  刷新列表
+                </Button>
+              </div>
+            </div>
+          </div>
           <TabsList className="flex flex-wrap">
             {config.sites.map(site => (
               <TabsTrigger key={site.id} value={site.id}>
@@ -1532,114 +1563,6 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                       </div>
                     )}
                     
-                    <div className="space-y-4">
-                      {(() => {
-                        const tabLower = (activeTab || "").toLowerCase()
-                        const siteName = config.sites.find(s => s.id === activeTab)?.name || ""
-                        let platformKey = ""
-                        if (tabLower === "zanchen" || siteName.includes("赞晨")) platformKey = "ZANCHEN"
-                        else if (siteName.includes("诚赁") || tabLower.includes("chenglin")) platformKey = "诚赁"
-                        else if (siteName.includes("奥租") || tabLower.includes("aolzu")) platformKey = "奥租"
-                        else if (siteName.includes("优品") || tabLower.includes("youpin")) platformKey = "优品租"
-                        else if (siteName.includes("零零享") || tabLower.includes("llxzu")) platformKey = "零零享"
-                        else if (siteName.includes("人人租") || tabLower.includes("rrz")) platformKey = "人人租"
-                        const meta = platformKey ? syncMeta[platformKey] : null
-                        if (!meta) return null
-                        return (
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                            {meta.lastSyncAt ? (
-                              <span>上次同步：<span className="font-medium text-foreground">{new Date(meta.lastSyncAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></span>
-                            ) : (
-                              <span>暂无同步记录</span>
-                            )}
-                          </div>
-                        )
-                      })()}
-                      <Tabs value={filterStatus} onValueChange={(val) => { setFilterStatus(val); setOnlineOrderPage(1); }} className="w-full">
-                          <TabsList className="flex flex-wrap h-auto w-full justify-start">
-                              <TabsTrigger value="ALL">全部 ({statusTotal})</TabsTrigger>
-                              <TabsTrigger value="WAIT_PAY">待支付 ({statusCounts['WAIT_PAY'] || 0})</TabsTrigger>
-                              <TabsTrigger value="PENDING_REVIEW">待审核 ({statusCounts['PENDING_REVIEW'] || 0})</TabsTrigger>
-                              <TabsTrigger value="PENDING_SHIPMENT">待发货 ({statusCounts['PENDING_SHIPMENT'] || 0})</TabsTrigger>
-                              <TabsTrigger value="SHIPPED">已发货 ({statusCounts['SHIPPED'] || 0})</TabsTrigger>
-                              <TabsTrigger value="PENDING_RECEIPT">待收货 ({statusCounts['PENDING_RECEIPT'] || 0})</TabsTrigger>
-                              <TabsTrigger value="RENTING">待归还 ({statusCounts['RENTING'] || 0})</TabsTrigger>
-                              <TabsTrigger value="RETURNING">归还中 ({statusCounts['RETURNING'] || 0})</TabsTrigger>
-                              <TabsTrigger value="OVERDUE">已逾期 ({statusCounts['OVERDUE'] || 0})</TabsTrigger>
-                              <TabsTrigger value="DUE_REPAYMENT">待结算 ({statusCounts['DUE_REPAYMENT'] || 0})</TabsTrigger>
-                              <TabsTrigger value="BOUGHT_OUT">已买断 ({statusCounts['BOUGHT_OUT'] || 0})</TabsTrigger>
-                              <TabsTrigger value="COMPLETED">已完成 ({statusCounts['COMPLETED'] || 0})</TabsTrigger>
-                              <TabsTrigger value="CLOSED">已关闭 ({statusCounts['CLOSED'] || 0})</TabsTrigger>
-                          </TabsList>
-                      </Tabs>
-
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex flex-wrap items-center gap-3">
-                               <div className="flex items-center space-x-2">
-                                 <Search className="w-4 h-4 text-gray-500" />
-                                 <Input 
-                                    placeholder="订单号" 
-                                    value={filterOrderNo} 
-                                    onChange={e => { setFilterOrderNo(e.target.value); setOnlineOrderPage(1); }} 
-                                    className="h-8 w-[180px]" 
-                                 />
-                               </div>
-                               <Input 
-                                  placeholder="收货人姓名" 
-                                  value={filterRecipientName} 
-                                  onChange={e => { setFilterRecipientName(e.target.value); setOnlineOrderPage(1); }} 
-                                  className="h-8 w-[120px]" 
-                               />
-                               <Input 
-                                  placeholder="商品名称" 
-                                  value={filterProduct} 
-                                  onChange={e => { setFilterProduct(e.target.value); setOnlineOrderPage(1); }} 
-                                  className="h-8 w-[120px]" 
-                               />
-                               <Input
-                                  placeholder="设备SN"
-                                  value={filterSn}
-                                  onChange={e => { setFilterSn(e.target.value); setOnlineOrderPage(1); }}
-                                  className="h-8 w-[120px]"
-                               />
-                               <Select value={matchFilter} onValueChange={(v) => { setMatchFilter(v as 'ALL' | 'MATCHED' | 'UNMATCHED'); setOnlineOrderPage(1); }}>
-                                  <SelectTrigger className="h-8 w-[140px]">
-                                    <SelectValue placeholder="匹配规格" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="ALL">全部</SelectItem>
-                                    <SelectItem value="MATCHED">已匹配规格</SelectItem>
-                                    <SelectItem value="UNMATCHED">未匹配规格</SelectItem>
-                                  </SelectContent>
-                               </Select>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                const blob = new Blob(["\uFEFForderNo,manualSn\n"], { type: "text/csv;charset=utf-8" })
-                                const url = URL.createObjectURL(blob)
-                                const a = document.createElement("a")
-                                a.href = url
-                                a.download = "sn_update_template.csv"
-                                a.click()
-                                URL.revokeObjectURL(url)
-                              }}
-                            >
-                              导出SN模板
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setDbRefreshKey(key => key + 1)}
-                            >
-                              <RefreshCw className="h-4 w-4 mr-2" />
-                              刷新列表
-                            </Button>
-                          </div>
-                      </div>
-                    </div>
                     <div className="rounded-md border bg-white relative min-h-[200px]">
                         {dbLoading ? (
                           <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-10">

@@ -786,20 +786,6 @@ async function openZanchenOrderListByClicks(page: Page) {
 }
 
 async function ensureAllOrdersTab(scope: PageOrFrame) {
-  const allOrdersTab = "#myTab > li:nth-child(1) > a"
-
-  // Fast path: already on the correct tab
-  const isActive = await scope
-    .evaluate(() => {
-      const li = document.querySelector("#myTab > li:nth-child(1)")
-      return !!li && li.classList.contains("active")
-    })
-    .catch(() => false)
-  if (isActive) {
-    addLog("[System] ensureAllOrdersTab: already active")
-    return true
-  }
-
   // Wait for #myTab to appear (page may still be loading)
   try {
     await scope.waitForSelector("#myTab", { state: "visible", timeout: 5000 })
@@ -808,18 +794,45 @@ async function ensureAllOrdersTab(scope: PageOrFrame) {
     return false
   }
 
+  // Find the "全部" tab by text content
+  const allTabIndex = await scope.evaluate(() => {
+    const items = Array.from(document.querySelectorAll("#myTab > li"))
+    for (let i = 0; i < items.length; i++) {
+      const text = (items[i].textContent || "").trim()
+      if (text.includes("全部")) return i + 1
+    }
+    return null
+  }).catch(() => null) as number | null
+
+  addLog(`[System] ensureAllOrdersTab: "全部" tab found at index ${allTabIndex}`)
+
+  const allOrdersTab = allTabIndex
+    ? `#myTab > li:nth-child(${allTabIndex}) > a`
+    : "#myTab > li:nth-child(1) > a"
+
+  // Fast path: already on the correct tab
+  const isActive = await scope
+    .evaluate((sel: string) => {
+      const li = document.querySelector(sel)?.parentElement
+      return !!li && li.classList.contains("active")
+    }, allOrdersTab)
+    .catch(() => false)
+  if (isActive) {
+    addLog("[System] ensureAllOrdersTab: already active")
+    return true
+  }
+
   for (let i = 0; i < 4; i += 1) {
     try {
       const loc = scope.locator(allOrdersTab).first()
       await loc.waitFor({ state: "visible", timeout: 3000 })
       await loc.click({ timeout: 3000, force: true })
       await scope.waitForTimeout(800)
-      // Confirm it became active
       const nowActive = await scope
-        .evaluate(() => {
-          const li = document.querySelector("#myTab > li:nth-child(1)")
+        .evaluate((sel: string) => {
+          const li = document.querySelector(sel)?.parentElement
           return !!li && li.classList.contains("active")
-        })
+        }, allOrdersTab)
         .catch(() => false)
       if (nowActive) {
         addLog(`[System] ensureAllOrdersTab: clicked and confirmed active (attempt ${i + 1})`)

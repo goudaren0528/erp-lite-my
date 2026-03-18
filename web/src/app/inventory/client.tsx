@@ -36,7 +36,7 @@ import {
     getOrdersBySn
 } from "@/app/actions"
 import { WarehouseManager } from "@/components/inventory/warehouse-manager"
-import { Search, Plus, ArrowLeftRight, Package, Box, Filter, Edit2, Trash2, Settings2, Upload, AlertTriangle, ArrowDown, ArrowUp, Check } from "lucide-react"
+import { Search, Plus, ArrowLeftRight, Package, Box, Filter, Edit2, Trash2, Settings2, Upload, AlertTriangle, ArrowDown, ArrowUp, Check, Download } from "lucide-react"
 
 // Constants from ItemTypeManager
 const COMMON_UNITS = ["个", "台", "套", "把", "张", "箱", "米", "千克"]
@@ -485,6 +485,84 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
         setSnDetailData(result)
     }, [])
 
+    // -- Handlers: Export/Import CSV (Items Tab) --
+    const [importCsvOpen, setImportCsvOpen] = useState(false)
+    const [importCsvText, setImportCsvText] = useState("")
+    const [importCsvErrors, setImportCsvErrors] = useState<string[]>([])
+
+    const handleExportCsv = () => {
+        const header = "sn,物品名称,仓库,状态,入库时间"
+        const statusLabel = (s: string) => s === "AVAILABLE" ? "可用" : s === "RENTING" ? "在租" : s === "MAINTENANCE" ? "维修中" : s === "LOST" ? "丢失" : s
+        const rows = filteredItems.map(i =>
+            [i.sn || "", i.itemType.name, i.warehouse.name, statusLabel(i.status), new Date(i.createdAt).toLocaleDateString()].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")
+        )
+        const csv = [header, ...rows].join("\n")
+        const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `序列物品明细_${new Date().toISOString().slice(0, 10)}.csv`
+        a.click()
+        URL.revokeObjectURL(url)
+    }
+
+    const handleImportCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = ev => {
+            let text = ev.target?.result as string
+            // Strip BOM
+            if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)
+            setImportCsvText(text)
+            setImportCsvErrors([])
+        }
+        reader.readAsText(file, "utf-8")
+        e.target.value = ""
+    }
+
+    const handleImportCsvSubmit = async () => {
+        const lines = importCsvText.split("\n").map(l => l.trim()).filter(Boolean)
+        if (lines.length < 2) { setImportCsvErrors(["CSV 内容为空或缺少数据行"]); return }
+        // Skip header row
+        const dataLines = lines[0].toLowerCase().startsWith("sn") ? lines.slice(1) : lines
+        const errors: string[] = []
+        // Group by itemTypeName+warehouseName
+        const groups = new Map<string, { itemTypeId: string; warehouseId: string; sns: string[] }>()
+
+        for (let i = 0; i < dataLines.length; i++) {
+            const cols = dataLines[i].split(",").map(c => c.trim().replace(/^"|"$/g, "").replace(/""/g, '"'))
+            const [sn, itemTypeName, warehouseName] = cols
+            if (!sn) { errors.push(`第 ${i + 2} 行: SN 为空`); continue }
+            const itemType = itemTypes.find(t => t.name === itemTypeName && t.isSerialized)
+            if (!itemType) { errors.push(`第 ${i + 2} 行: 找不到序列化物品类型 "${itemTypeName}"`); continue }
+            const warehouse = warehouses.find(w => w.name === warehouseName)
+            if (!warehouse) { errors.push(`第 ${i + 2} 行: 找不到仓库 "${warehouseName}"`); continue }
+            const key = `${itemType.id}__${warehouse.id}`
+            if (!groups.has(key)) groups.set(key, { itemTypeId: itemType.id, warehouseId: warehouse.id, sns: [] })
+            groups.get(key)!.sns.push(sn)
+        }
+
+        if (errors.length > 0) { setImportCsvErrors(errors); return }
+        if (groups.size === 0) { setImportCsvErrors(["没有可导入的有效数据"]); return }
+
+        startTransition(async () => {
+            const allErrors: string[] = []
+            for (const [, group] of groups) {
+                const res = await batchCreateInventoryItems(group)
+                if (!res.success) allErrors.push(res.message || "导入失败")
+            }
+            if (allErrors.length > 0) {
+                setImportCsvErrors(allErrors)
+            } else {
+                toast.success("CSV 导入成功")
+                setImportCsvOpen(false)
+                setImportCsvText("")
+                setImportCsvErrors([])
+            }
+        })
+    }
+
 
     // -- Render --
 
@@ -811,6 +889,14 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                                     <SelectItem value="LOST">丢失</SelectItem>
                                 </SelectContent>
                             </Select>
+                            <div className="ml-auto flex gap-2">
+                                <Button size="sm" variant="outline" onClick={handleExportCsv} title="导出当前筛选结果为 CSV">
+                                    <Download className="h-4 w-4 mr-1" /> 导出 CSV
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => { setImportCsvText(""); setImportCsvErrors([]); setImportCsvOpen(true) }} title="从 CSV 导入序列物品">
+                                    <Upload className="h-4 w-4 mr-1" /> 导入 CSV
+                                </Button>
+                            </div>
                         </div>
 
                         <div className="rounded-md border bg-card">
@@ -1685,6 +1771,58 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                             </>
                         )}
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog: Import CSV */}
+            <Dialog open={importCsvOpen} onOpenChange={setImportCsvOpen}>
+                <DialogContent style={{ maxWidth: 560 }}>
+                    <DialogHeader>
+                        <DialogTitle>导入序列物品 CSV</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3 py-2">
+                        <p className="text-xs text-muted-foreground">
+                            CSV 格式：<code className="bg-muted px-1 rounded">sn,物品名称,仓库名称</code>（第一行为表头，可省略）。物品名称和仓库名称须与系统中已有的完全一致。
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <label className="cursor-pointer">
+                                <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportCsvFile} />
+                                <Button size="sm" variant="outline" asChild>
+                                    <span><Upload className="h-4 w-4 mr-1" /> 选择文件</span>
+                                </Button>
+                            </label>
+                            {importCsvText && <span className="text-xs text-muted-foreground">已加载 {importCsvText.split("\n").filter(Boolean).length} 行</span>}
+                        </div>
+                        {importCsvText && (
+                            <Textarea
+                                className="font-mono text-xs h-40"
+                                value={importCsvText}
+                                onChange={e => { setImportCsvText(e.target.value); setImportCsvErrors([]) }}
+                                placeholder="或直接粘贴 CSV 内容..."
+                            />
+                        )}
+                        {!importCsvText && (
+                            <Textarea
+                                className="font-mono text-xs h-40"
+                                value={importCsvText}
+                                onChange={e => { setImportCsvText(e.target.value); setImportCsvErrors([]) }}
+                                placeholder={"sn,物品名称,仓库名称\nABC123,iPad Pro,主仓库\nDEF456,iPad Pro,主仓库"}
+                            />
+                        )}
+                        {importCsvErrors.length > 0 && (
+                            <div className="rounded-md bg-destructive/10 border border-destructive/30 p-3 space-y-1">
+                                {importCsvErrors.map((e, i) => (
+                                    <p key={i} className="text-xs text-destructive">{e}</p>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setImportCsvOpen(false)}>取消</Button>
+                        <Button onClick={handleImportCsvSubmit} disabled={isPending || !importCsvText.trim()}>
+                            {isPending ? "导入中..." : "确认导入"}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>
