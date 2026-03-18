@@ -320,6 +320,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
   const [filterProduct, setFilterProduct] = useState('')
   const [filterSn, setFilterSn] = useState(initialSn)
   const [matchFilter, setMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
+  const [filterPlatformSearch, setFilterPlatformSearch] = useState('')
   
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
   const [statusTotal, setStatusTotal] = useState(0)
@@ -420,7 +421,24 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
     }
   }, [onlineOrderPage, onlineOrderTotalPages])
 
+  // Derive platform filter: only apply when no search terms are active
+  const hasSearchFilter = !!(filterOrderNo || filterRecipientName || filterProduct || filterSn || filterPlatformSearch)
+
+  const getTabPlatform = (tabId: string) => {
+    const site = draft.sites.find(s => s.id === tabId)
+    const name = site?.name || ""
+    const lower = tabId.toLowerCase()
+    if (name.includes("零零享") || lower.includes("llxzu")) return "零零享"
+    if (name.includes("人人租") || lower.includes("rrz")) return "人人租"
+    if (name.includes("优品") || lower.includes("youpin")) return "优品租"
+    if (name.includes("奥租") || lower.includes("aolzu") || lower.includes("aozu")) return "奥租"
+    if (name.includes("诚赁") || lower.includes("chenglin") || lower.includes("chenlin")) return "诚赁"
+    if (lower === "zanchen" || name.includes("赞晨")) return "ZANCHEN"
+    return undefined
+  }
+
   useEffect(() => {
+    const platformFilter = filterPlatformSearch || (hasSearchFilter ? undefined : getTabPlatform(activeTab))
     setDbLoading(true)
     ;(async () => {
       try {
@@ -434,6 +452,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
           searchRecipient: filterRecipientName,
           searchProduct: filterProduct,
           searchSn: filterSn,
+          filterPlatform: platformFilter,
           matchFilter
         })
         setDbOrders(res.orders as OnlineOrderRow[])
@@ -445,19 +464,21 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
         setDbLoading(false)
       }
     })()
-  }, [onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct, filterSn, matchFilter, genericStatus?.status])
+  }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct, filterSn, matchFilter, genericStatus?.status])
 
   useEffect(() => {
+    const platformFilter = filterPlatformSearch || (hasSearchFilter ? undefined : getTabPlatform(activeTab))
     getOnlineOrderCounts({
       searchOrderNo: filterOrderNo,
       searchRecipient: filterRecipientName,
       searchProduct: filterProduct,
       searchSn: filterSn,
+      filterPlatform: platformFilter,
     }).then(res => {
       setStatusCounts(res.counts)
       setStatusTotal(res.total)
     }).catch(console.error)
-  }, [dbRefreshKey, zanchenStatus?.lastRunAt, filterOrderNo, filterRecipientName, filterProduct, filterSn])
+  }, [activeTab, dbRefreshKey, zanchenStatus?.lastRunAt, filterOrderNo, filterRecipientName, filterProduct, filterSn, filterPlatformSearch])
 
   // Load sync meta (last sync time + total orders) for all platform tabs
   useEffect(() => {
@@ -1470,6 +1491,19 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                     <SelectItem value="ALL">全部</SelectItem>
                     <SelectItem value="MATCHED">已匹配规格</SelectItem>
                     <SelectItem value="UNMATCHED">未匹配规格</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filterPlatformSearch || "ALL"} onValueChange={(v) => { setFilterPlatformSearch(v === "ALL" ? "" : v); setOnlineOrderPage(1); }}>
+                  <SelectTrigger className="h-8 w-[120px]">
+                    <SelectValue placeholder="平台" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">全部平台</SelectItem>
+                    {config.sites.map(site => {
+                      const platform = getTabPlatform(site.id)
+                      if (!platform) return null
+                      return <SelectItem key={site.id} value={platform}>{site.name}</SelectItem>
+                    })}
                   </SelectContent>
                 </Select>
               </div>
