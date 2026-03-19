@@ -53,11 +53,33 @@ type ItemRow = InventoryItem & {
     warehouse: Warehouse
 }
 
+type SnOrderEntry = { rentStartDate: string | null; returnDeadline: string | null }
+
 interface InventoryClientProps {
     itemTypes: InventoryItemType[]
     warehouses: Warehouse[]
     stocks: StockRow[]
     items: ItemRow[]
+    snOrderMap: Record<string, SnOrderEntry[]>
+}
+
+// Compute dynamic occupancy status for a serialized item SN
+function computeSnStatus(sn: string | null, snOrderMap: Record<string, SnOrderEntry[]>, today: Date): "出租中" | "预租" | "在库" {
+    if (!sn) return "在库"
+    const entries = snOrderMap[sn]
+    if (!entries || entries.length === 0) return "在库"
+    let hasPrebook = false
+    for (const e of entries) {
+        const start = e.rentStartDate ? new Date(e.rentStartDate) : null
+        const end = e.returnDeadline ? new Date(e.returnDeadline) : null
+        // Active renting: today >= start AND today <= end (or no end)
+        const started = start ? today >= start : true
+        const notEnded = end ? today <= end : true
+        if (started && notEnded) return "出租中"
+        // Pre-booked: start is in the future
+        if (start && today < start) hasPrebook = true
+    }
+    return hasPrebook ? "预租" : "在库"
 }
 
 type NonSerialOrder = {
@@ -111,8 +133,9 @@ function offlineOrderUrl(orderNo: string, platform?: string | null) {
     return `/orders?${params.toString()}`
 }
 
-export function InventoryClient({ itemTypes, warehouses, stocks, items }: InventoryClientProps) {
+export function InventoryClient({ itemTypes, warehouses, stocks, items, snOrderMap }: InventoryClientProps) {
     const [isPending, startTransition] = useTransition()
+    const today = useMemo(() => new Date(), [])
     
     // -- Tabs & Filters --
     const [activeTab, setActiveTab] = useState("overview")
@@ -247,7 +270,10 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
         return items.filter(i => {
             if (i.status === "DELETED") return false // Hide deleted items
             if (itemWarehouseFilter !== "ALL" && i.warehouseId !== itemWarehouseFilter) return false
-            if (itemStatusFilter !== "ALL" && i.status !== itemStatusFilter) return false
+            if (itemStatusFilter !== "ALL") {
+                const computed = computeSnStatus(i.sn, snOrderMap, today)
+                if (computed !== itemStatusFilter) return false
+            }
             if (!q) return true
             return (
                 i.itemType.name.toLowerCase().includes(q) ||
@@ -255,7 +281,7 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                 (i.sn || "").toLowerCase().includes(q)
             )
         })
-    }, [items, itemSearch, itemWarehouseFilter, itemStatusFilter])
+    }, [items, itemSearch, itemWarehouseFilter, itemStatusFilter, snOrderMap, today])
 
     const itemTotalPages = Math.ceil(filteredItems.length / itemPageSize)
     const paginatedItems = filteredItems.slice((itemPage - 1) * itemPageSize, itemPage * itemPageSize)
@@ -492,10 +518,10 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
 
     const handleExportCsv = () => {
         const header = "sn,物品名称,仓库,状态,入库时间"
-        const statusLabel = (s: string) => s === "AVAILABLE" ? "可用" : s === "RENTING" ? "在租" : s === "MAINTENANCE" ? "维修中" : s === "LOST" ? "丢失" : s
-        const rows = filteredItems.map(i =>
-            [i.sn || "", i.itemType.name, i.warehouse.name, statusLabel(i.status), new Date(i.createdAt).toLocaleDateString()].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")
-        )
+        const rows = filteredItems.map(i => {
+            const cs = computeSnStatus(i.sn, snOrderMap, today)
+            return [i.sn || "", i.itemType.name, i.warehouse.name, cs, new Date(i.createdAt).toLocaleDateString()].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")
+        })
         const csv = [header, ...rows].join("\n")
         const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" })
         const url = URL.createObjectURL(blob)
@@ -586,7 +612,7 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                     <CardContent>
                         <div className="text-2xl font-bold">{items.filter(i => i.status !== "DELETED").length}</div>
                         <p className="text-xs text-muted-foreground">
-                            {items.filter(i => i.status === "AVAILABLE").length} 可用 / {items.filter(i => i.status === "RENTING").length} 在租
+                            {items.filter(i => i.status !== "DELETED" && computeSnStatus(i.sn, snOrderMap, today) === "在库").length} 在库 / {items.filter(i => i.status !== "DELETED" && computeSnStatus(i.sn, snOrderMap, today) === "出租中").length} 出租中 / {items.filter(i => i.status !== "DELETED" && computeSnStatus(i.sn, snOrderMap, today) === "预租").length} 预租
                         </p>
                     </CardContent>
                 </Card>
@@ -883,10 +909,9 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="ALL">所有状态</SelectItem>
-                                    <SelectItem value="AVAILABLE">可用</SelectItem>
-                                    <SelectItem value="RENTING">在租</SelectItem>
-                                    <SelectItem value="MAINTENANCE">维修中</SelectItem>
-                                    <SelectItem value="LOST">丢失</SelectItem>
+                                    <SelectItem value="在库">在库</SelectItem>
+                                    <SelectItem value="出租中">出租中</SelectItem>
+                                    <SelectItem value="预租">预租</SelectItem>
                                 </SelectContent>
                             </Select>
                             <div className="ml-auto flex gap-2">
@@ -920,13 +945,14 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                                                 <Badge variant="outline">{item.warehouse.name}</Badge>
                                             </TableCell>
                                             <TableCell>
-                                                <Badge variant={
-                                                    item.status === "AVAILABLE" ? "default" : 
-                                                    item.status === "RENTING" ? "secondary" : "destructive"
-                                                }>
-                                                    {item.status === "AVAILABLE" ? "可用" :
-                                                     item.status === "RENTING" ? "在租" : item.status}
-                                                </Badge>
+                                                {(() => {
+                                                    const cs = computeSnStatus(item.sn, snOrderMap, today)
+                                                    return (
+                                                        <Badge variant={cs === "在库" ? "default" : cs === "出租中" ? "secondary" : "outline"}>
+                                                            {cs}
+                                                        </Badge>
+                                                    )
+                                                })()}
                                             </TableCell>
                                             <TableCell className="text-muted-foreground text-sm">
                                                 {new Date(item.createdAt).toLocaleDateString()}
@@ -1386,13 +1412,14 @@ export function InventoryClient({ itemTypes, warehouses, stocks, items }: Invent
                                                 <Badge variant="outline">{item.warehouse.name}</Badge>
                                             </TableCell>
                                             <TableCell>
-                                                 <Badge variant={
-                                                    item.status === "AVAILABLE" ? "default" : 
-                                                    item.status === "RENTING" ? "secondary" : "destructive"
-                                                }>
-                                                    {item.status === "AVAILABLE" ? "可用" :
-                                                     item.status === "RENTING" ? "在租" : item.status}
-                                                </Badge>
+                                                 {(() => {
+                                                    const cs = computeSnStatus(item.sn, snOrderMap, today)
+                                                    return (
+                                                        <Badge variant={cs === "在库" ? "default" : cs === "出租中" ? "secondary" : "outline"}>
+                                                            {cs}
+                                                        </Badge>
+                                                    )
+                                                })()}
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-1">
