@@ -916,6 +916,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         const res = await updateOrderStatus(order.id, val)
         if (res?.success) {
             toast.success(res.message)
+            onOrderUpdated?.()
         } else {
             toast.error(res?.message || "操作失败")
         }
@@ -953,6 +954,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
               setMpNo(trimmedNo)
               toast.success(res.message)
               setIsMpOpen(false)
+              onOrderUpdated?.()
           } else {
               toast.error(res?.message || "操作失败")
           }
@@ -968,6 +970,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
           if (res?.success) {
               toast.success(res.message)
               setIsXianyuOpen(false)
+              onOrderUpdated?.()
           } else {
               toast.error(res?.message || "操作失败")
           }
@@ -1044,6 +1047,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
           const res = await updateOrderSourceInfo(order.id, newSource, newContact, newPlatform, newPromoterId, newChannelId)
           if (res.success) {
               toast.success(res.message)
+              onOrderUpdated?.()
           } else {
               toast.error(res.message)
           }
@@ -1059,6 +1063,7 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
         if (res?.success) {
             toast.success(res.message)
             setIsExtensionOpen(false)
+            onOrderUpdated?.()
         } else {
             toast.error(res?.message || "操作失败")
         }
@@ -1087,8 +1092,10 @@ function OrderRow({ order, products, promoters, onOrderUpdated }: { order: Order
   const handleApprove = async () => {
     try {
         const res = await approveOrder(order.id)
-        if (res?.success) toast.success(res.message)
-        else toast.error(res?.message || "操作失败")
+        if (res?.success) {
+            toast.success(res.message)
+            onOrderUpdated?.()
+        } else toast.error(res?.message || "操作失败")
     } catch (error) {
         console.error(error)
         toast.error("操作失败")

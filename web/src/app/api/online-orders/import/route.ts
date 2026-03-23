@@ -83,6 +83,7 @@ function buildUpdateData(row: Record<string, string>) {
   if (row["sourceContact"]             !== undefined) add("sourceContact",             str(row["sourceContact"]))
   if (row["source"]                    !== undefined) add("source",                    str(row["source"]))
   if (row["manualSn"]                  !== undefined) add("manualSn",                  str(row["manualSn"]))
+  if (row["createdAt"]                 !== undefined) add("createdAt",                 toDate(row["createdAt"]))
 
   fieldMap["updatedAt"] = new Date()
   return fieldMap
@@ -229,7 +230,7 @@ export async function POST(req: NextRequest) {
                 }
                 await prisma.onlineOrder.upsert({
                   where: { orderNo },
-                  update: { ...data },
+                  update: { ...data, ...(toDate(row["createdAt"]) ? { createdAt: toDate(row["createdAt"])! } : {}) },
                   create: { orderNo, ...data, specId: null, createdAt: toDate(row["createdAt"]) ?? new Date() },
                 })
               }

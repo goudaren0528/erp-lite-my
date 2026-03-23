@@ -42,6 +42,7 @@ type ChenglinParsedOrder = {
   returnLogisticsCompany: string
   returnTrackingNumber: string
   specId?: string | null
+  createdAt?: Date
 }
 
 type ChenglinRuntime = {
@@ -366,37 +367,56 @@ async function isOnLoginPage(page: Page, site: SiteConfig) {
 
 async function login(page: Page, site: SiteConfig) {
   if (!site.loginUrl) return
+
+  // Always navigate to loginUrl unless we can confirm we're already on a valid order page.
+  // This handles session expiry: URL may still look like the order page, but the server
+  // will redirect to login after goto(). We detect this by checking isOnLoginPage AFTER goto.
+  const currentUrl = page.url()
+  const orderMenuLink = site.selectors.order_menu_link
+  const alreadyOnOrderPage = orderMenuLink
+    ? currentUrl.startsWith(orderMenuLink)
+    : (currentUrl !== "about:blank" && !currentUrl.includes("login") && currentUrl.includes(new URL(site.loginUrl).hostname))
   
-  // Check if already logged in
-  if (await isOnLoginPage(page, site) || page.url() === "about:blank") {
-     appendLog(`Navigating to login: ${site.loginUrl}`)
-     const origin = getOriginFromUrl(site.loginUrl)
-     await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
+  if (!alreadyOnOrderPage) {
+    appendLog(`Navigating to login: ${site.loginUrl}`)
+    const origin = getOriginFromUrl(site.loginUrl)
+    await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
+    // Give SPA time to render login form or redirect to order page if session is valid
+    await waitRandom(page, 1500, 2500)
   }
 
-  // Auto-fill if selectors exist
+  // Re-check after potential goto (handles session expiry redirect)
+  if (!(await isOnLoginPage(page, site))) {
+    appendLog("Already logged in, skipping credential fill.")
+    return true
+  }
+
+  // Auto-fill if selectors exist — use waitForSelector for reliable SPA rendering
   const { username_input, password_input, login_button } = site.selectors
   if (username_input && site.username) {
      try {
-        if (await page.isVisible(username_input, { timeout: 2000 })) {
+        const input = await page.waitForSelector(username_input, { timeout: 8000 }).catch(() => null)
+        if (input) {
             appendLog("Filling username...")
-            await page.fill(username_input, site.username)
+            await input.fill(site.username)
         }
      } catch {}
   }
   if (password_input && site.password) {
      try {
-        if (await page.isVisible(password_input, { timeout: 2000 })) {
+        const input = await page.waitForSelector(password_input, { timeout: 5000 }).catch(() => null)
+        if (input) {
             appendLog("Filling password...")
-            await page.fill(password_input, site.password)
+            await input.fill(site.password)
         }
      } catch {}
   }
   if (login_button) {
      try {
-        if (await page.isVisible(login_button, { timeout: 2000 })) {
+        const btn = await page.waitForSelector(login_button, { timeout: 5000 }).catch(() => null)
+        if (btn) {
             appendLog("Clicking login button...")
-            await page.click(login_button)
+            await btn.click()
             await waitRandom(page, 1200, 2600)
         }
      } catch {}
@@ -793,6 +813,10 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<ChenglinParsed
                 duration = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) 
             }
 
+            // 7. Order created time: "下单：2026-03-19 10:18:18"
+            const chenglinCreatedMatch = fullText.match(/下单[:：]\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+            const orderCreatedAt = chenglinCreatedMatch ? new Date(chenglinCreatedMatch[1]) : undefined
+
             parsedOrders.push({
                 orderNo,
                 customerName,
@@ -812,7 +836,8 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<ChenglinParsed
                 logisticsCompany,
                 trackingNumber,
                 returnLogisticsCompany,
-                returnTrackingNumber
+                returnTrackingNumber,
+                createdAt: orderCreatedAt
             })
             
         } catch (e) {
@@ -866,7 +891,7 @@ async function saveOrdersBatch(orders: ChenglinParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -887,7 +912,7 @@ async function saveOrdersBatch(orders: ChenglinParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch {
@@ -953,7 +978,17 @@ export async function startChenglinSync(siteId: string) {
     await simulateHumanMouse(page)
 
     appendLog("Opening order list via menu clicks...")
-    const clickOk = await openChenglinOrderListByClicks(page)
+    const currentUrl = page.url()
+    const orderMenuLink = targetSite.selectors.order_menu_link
+    const alreadyOnOrderList = orderMenuLink
+      ? currentUrl.startsWith(orderMenuLink)
+      : false
+    let clickOk = alreadyOnOrderList
+    if (alreadyOnOrderList) {
+      appendLog("Already on order list page, skipping menu navigation.")
+    } else {
+      clickOk = await openChenglinOrderListByClicks(page)
+    }
     if (!clickOk) {
         appendLog("Menu click navigation failed, falling back to configured order_menu_link if available.")
         if (targetSite.selectors.order_menu_link) {

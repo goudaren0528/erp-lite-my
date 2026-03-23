@@ -48,6 +48,7 @@ type LlxzuParsedOrder = {
   variantName: string
   itemTitle: string
   itemSku: string
+  createdAt?: Date
   logisticsCompany?: string
   trackingNumber: string
   promotionChannel: string
@@ -619,12 +620,26 @@ async function isOnLoginPage(page: Page, site: SiteConfig) {
 async function login(page: Page, site: SiteConfig) {
   if (!site.loginUrl) return
 
+  // Always navigate to loginUrl unless we can confirm we're already on a valid order page.
   if (await isOnLoginPage(page, site) || page.url() === "about:blank") {
     appendLog(`Navigating to login: ${site.loginUrl}`)
     const origin = getOriginFromUrl(site.loginUrl)
     await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
     // Wait for Vue SPA to render (hash routing needs extra time after domcontentloaded)
     await waitRandom(page, 2500, 4000)
+  } else {
+    // Session may have expired — navigate to loginUrl so server can redirect if needed
+    const currentUrl = page.url()
+    const orderMenuLink = site.selectors.order_menu_link
+    const alreadyOnOrderPage = orderMenuLink
+      ? currentUrl.startsWith(orderMenuLink)
+      : (currentUrl.includes("/Order/OrderManage") || currentUrl.includes("/order/audit") || currentUrl.includes("/orderList"))
+    if (!alreadyOnOrderPage) {
+      appendLog(`Not on order page (${currentUrl}), navigating to login to check session...`)
+      const origin = getOriginFromUrl(site.loginUrl)
+      await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
+      await waitRandom(page, 2500, 4000)
+    }
   }
 
   if (await isOnLoginPage(page, site)) {
@@ -1028,14 +1043,28 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                 !l.includes("运单号") &&
                 !l.includes("风控")
             )
-            
-            if (nameCandidates.length > 0) {
-                const brands = ["三星", "Samsung", "Galaxy", "Apple", "iPhone", "DJI", "大疆", "华为", "小米", "vivo", "OPPO", "MacBook", "iPad", "索尼", "Canon", "Nikon"]
+
+            // Priority: take the line immediately after "商品信息" label
+            const productInfoIdx = lines.findIndex(l => l.trim() === "商品信息")
+            if (productInfoIdx !== -1 && lines[productInfoIdx + 1]) {
+                productName = lines[productInfoIdx + 1].trim()
+            } else {
+                const brands = ["三星", "Samsung", "Galaxy", "Apple", "iPhone", "DJI", "大疆", "华为", "小米", "vivo", "OPPO", "MacBook", "iPad", "索尼", "Canon", "Nikon", "佳能", "尼康", "富士"]
                 const brandLine = nameCandidates.find(l => brands.some(b => l.includes(b)))
                 if (brandLine) {
                     productName = brandLine
                 } else {
-                    productName = nameCandidates[0]
+                    // Fallback: skip date-like and order-no-like lines
+                    const fallback = nameCandidates.find(l =>
+                        !/^\d{4}-\d{2}-\d{2}/.test(l) &&
+                        !/^\d{10,}$/.test(l) &&
+                        !l.includes("订单号") &&
+                        !l.includes("商铺") &&
+                        !l.includes("渠道") &&
+                        !l.includes("结算") &&
+                        !l.includes("责任人")
+                    )
+                    productName = fallback || ""
                 }
             }
             
@@ -1424,6 +1453,20 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                     duration = parseInt(durationMatch[1])
                 }
             }
+
+            // Order creation time: first standalone datetime not on the rental period line
+            let orderCreatedAt: Date | undefined
+            const llxzuDatetimeMatches = [...fullText.matchAll(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/g)]
+            for (const m of llxzuDatetimeMatches) {
+                // Skip datetimes that appear on the rental period line
+                const lineStart = fullText.lastIndexOf('\n', m.index) + 1
+                const lineEnd = fullText.indexOf('\n', m.index)
+                const lineText = fullText.slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
+                if (!lineText.includes('租期')) {
+                    orderCreatedAt = new Date(m[1])
+                    break
+                }
+            }
             
             parsedOrders.push({
                 orderNo,
@@ -1444,7 +1487,8 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                 itemSku: variantName,
                 logisticsCompany,
                 trackingNumber,
-                promotionChannel
+                promotionChannel,
+                createdAt: orderCreatedAt
             })
             
         } catch (e) {
@@ -1504,7 +1548,7 @@ async function saveOrdersBatch(orders: LlxzuParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -1523,7 +1567,7 @@ async function saveOrdersBatch(orders: LlxzuParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch (innerErr) {
@@ -1581,7 +1625,17 @@ export async function startLlxzuSync(siteId: string) {
     await simulateHumanScroll(page, 1, 3)
 
     appendLog("Opening order list via menu clicks...")
-    const clickOk = await openLlxzuOrderListByClicks(page)
+    const currentUrl = page.url()
+    const orderMenuLink = targetSite.selectors.order_menu_link
+    const alreadyOnOrderList = orderMenuLink
+      ? currentUrl.startsWith(orderMenuLink)
+      : (currentUrl.includes("/Order/OrderManage") || currentUrl.includes("/order/audit") || currentUrl.includes("/orderList"))
+    let clickOk = alreadyOnOrderList
+    if (alreadyOnOrderList) {
+      appendLog("Already on order list page, skipping menu navigation.")
+    } else {
+      clickOk = await openLlxzuOrderListByClicks(page)
+    }
     if (!clickOk) {
         appendLog("Menu click navigation failed, falling back to configured order_menu_link if available.")
         if (targetSite.selectors.order_menu_link) {

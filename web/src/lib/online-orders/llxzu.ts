@@ -45,6 +45,7 @@ type LlxzuParsedOrder = {
   trackingNumber: string
   promotionChannel: string
   specId?: string
+  createdAt?: Date
 }
 
 const globalForLlxzu = globalThis as unknown as { llxzuRuntime?: LlxzuRuntime }
@@ -1012,14 +1013,28 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                 !l.includes("运单号") &&
                 !l.includes("风控")
             )
-            
-            if (nameCandidates.length > 0) {
-                const brands = ["三星", "Samsung", "Galaxy", "Apple", "iPhone", "DJI", "大疆", "华为", "小米", "vivo", "OPPO", "MacBook", "iPad", "索尼", "Canon", "Nikon"]
+
+            // Priority: take the line immediately after "商品信息" label
+            const productInfoIdx = lines.findIndex(l => l.trim() === "商品信息")
+            if (productInfoIdx !== -1 && lines[productInfoIdx + 1]) {
+                productName = lines[productInfoIdx + 1].trim()
+            } else {
+                const brands = ["三星", "Samsung", "Galaxy", "Apple", "iPhone", "DJI", "大疆", "华为", "小米", "vivo", "OPPO", "MacBook", "iPad", "索尼", "Canon", "Nikon", "佳能", "尼康", "富士", "索尼"]
                 const brandLine = nameCandidates.find(l => brands.some(b => l.includes(b)))
                 if (brandLine) {
                     productName = brandLine
                 } else {
-                    productName = nameCandidates[0]
+                    // Fallback: skip date-like and order-no-like lines
+                    const fallback = nameCandidates.find(l =>
+                        !/^\d{4}-\d{2}-\d{2}/.test(l) &&
+                        !/^\d{10,}$/.test(l) &&
+                        !l.includes("订单号") &&
+                        !l.includes("商铺") &&
+                        !l.includes("渠道") &&
+                        !l.includes("结算") &&
+                        !l.includes("责任人")
+                    )
+                    productName = fallback || ""
                 }
             }
             
@@ -1428,7 +1443,19 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                 itemSku: variantName,
                 logisticsCompany,
                 trackingNumber,
-                promotionChannel
+                promotionChannel,
+                createdAt: (() => {
+                    // llxzu has no "下单时间" label — scan all datetimes, take first not on a rental period line
+                    const dtMatches = [...fullText.matchAll(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/g)]
+                    for (const m of dtMatches) {
+                        const idx = m.index ?? 0
+                        const lineStart = fullText.lastIndexOf('\n', idx) + 1
+                        const lineEnd = fullText.indexOf('\n', idx)
+                        const lineText = fullText.slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
+                        if (!lineText.includes('租期')) return new Date(m[1])
+                    }
+                    return undefined
+                })()
             })
             
         } catch (e) {
@@ -1465,7 +1492,7 @@ async function saveOrdersBatch(orders: LlxzuParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -1484,7 +1511,7 @@ async function saveOrdersBatch(orders: LlxzuParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch (innerErr) {
@@ -1793,9 +1820,17 @@ export async function startLlxzuSync(siteId: string) {
 
     updateStatus({ 
         status: "success", 
-        message: "Sync completed", 
+        message: "Sync completed",
+        lastRunAt: new Date().toISOString(),
     })
     appendLog("Sync completed successfully.")
+    // Persist last run time to DB
+    const now = new Date().toISOString()
+    await prisma.appConfig.upsert({
+        where: { key: "sync_meta_零零享" },
+        update: { value: JSON.stringify({ lastSyncAt: now }) },
+        create: { key: "sync_meta_零零享", value: JSON.stringify({ lastSyncAt: now }) },
+    }).catch(() => void 0)
 
   } catch (e) {
     const msg = String(e)

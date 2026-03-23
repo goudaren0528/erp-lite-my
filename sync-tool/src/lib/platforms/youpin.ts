@@ -44,6 +44,7 @@ type YoupinParsedOrder = {
   trackingNumber: string
   promotionChannel: string
   specId?: string | null
+  createdAt?: Date
 }
 
 type YoupinRuntime = {
@@ -411,13 +412,26 @@ async function isOnLoginPage(page: Page, site: SiteConfig) {
 
 async function login(page: Page, site: SiteConfig) {
   if (!site.loginUrl) return
+
+  // Always navigate to loginUrl unless we can confirm we're already on a valid order page.
+  const currentUrl = page.url()
+  const orderMenuLink = site.selectors.order_menu_link
+  const alreadyOnOrderPage = orderMenuLink
+    ? currentUrl.startsWith(orderMenuLink)
+    : (currentUrl !== "about:blank" && !currentUrl.includes("login") && currentUrl.includes(new URL(site.loginUrl).hostname))
   
-  if (await isOnLoginPage(page, site) || page.url() === "about:blank") {
-     appendLog(`Navigating to login: ${site.loginUrl}`)
-     const origin = getOriginFromUrl(site.loginUrl)
-     await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
-     // 等页面完全稳定，不做任何填写操作，避免触发验证码刷新
-     await waitRandom(page, 1000, 1500)
+  if (!alreadyOnOrderPage) {
+    appendLog(`Navigating to login: ${site.loginUrl}`)
+    const origin = getOriginFromUrl(site.loginUrl)
+    await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
+    // 等页面完全稳定，不做任何填写操作，避免触发验证码刷新
+    await waitRandom(page, 1000, 1500)
+  }
+
+  // Re-check: if session is still valid, skip waiting for login
+  if (!(await isOnLoginPage(page, site))) {
+    appendLog("Already logged in, skipping manual login wait.")
+    return true
   }
 
   // 优品租：不自动填账密，不点登录，不做任何操作
@@ -646,11 +660,24 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
                 !l.includes("下单时间") && 
                 !l.includes("发货时间") &&
                 !l.includes("运单号") &&
-                !l.includes("风控")
+                !l.includes("风控") &&
+                !/^\d{10,}$/.test(l) &&           // 排除纯数字订单号
+                !/^\d{4}-\d{2}-\d{2}/.test(l) &&  // 排除日期行
+                !l.includes("ID：") &&
+                !l.includes("支付宝") &&
+                !l.includes("订单来源") &&
+                !/^\d+\.\d+\(/.test(l) &&          // 排除金额行如 140.00(总)
+                !/^\d+天$/.test(l) &&              // 排除 "7天"
+                !l.includes("查看详情") &&
+                !l.includes("续租申请") &&
+                !l.includes("添加快递") &&
+                !l.includes("关闭订单") &&
+                !l.includes("全额免押") &&
+                !l.includes("身份证")
             )
             
             if (nameCandidates.length > 0) {
-                const brands = ["三星", "Samsung", "Galaxy", "Apple", "iPhone", "DJI", "大疆", "华为", "小米", "vivo", "OPPO", "MacBook", "iPad", "索尼", "Canon", "Nikon"]
+                const brands = ["三星", "Samsung", "Galaxy", "Apple", "iPhone", "DJI", "大疆", "华为", "小米", "vivo", "OPPO", "MacBook", "iPad", "索尼", "Canon", "Nikon", "佳能", "尼康", "富士"]
                 const brandLine = nameCandidates.find(l => brands.some(b => l.includes(b)))
                 if (brandLine) {
                     productName = brandLine
@@ -910,6 +937,10 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
                 // If no date available, keep COMPLETED (safe default for old orders)
             }
 
+            // Order creation time: "下单时间 2026-03-19 09:32:22"
+            const youpinCreatedMatch = fullText.match(/下单时间\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+            const orderCreatedAt = youpinCreatedMatch ? new Date(youpinCreatedMatch[1]) : undefined
+
             parsedOrders.push({
                 orderNo,
                 customerName,
@@ -929,7 +960,8 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
                 itemSku: variantName,
                 logisticsCompany,
                 trackingNumber,
-                promotionChannel
+                promotionChannel,
+                createdAt: orderCreatedAt
             })
             
         } catch (e) {
@@ -980,7 +1012,7 @@ async function saveOrdersBatch(orders: YoupinParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -999,7 +1031,7 @@ async function saveOrdersBatch(orders: YoupinParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch (innerErr) {
@@ -1269,9 +1301,11 @@ export async function startYoupinSync(siteId: string) {
                      hasMore = false
                  }
              } else {
+                 appendLog(`Next page button not found with selector: "${targetSite.selectors.pagination_next_selector}". Stopping.`)
                  hasMore = false
              }
         } else {
+            appendLog("No pagination_next_selector configured. Stopping after first page.")
             hasMore = false
         }
         } catch (pageErr) {

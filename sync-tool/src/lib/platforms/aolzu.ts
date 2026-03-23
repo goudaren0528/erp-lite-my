@@ -42,6 +42,7 @@ type AolzuParsedOrder = {
   logisticsCompany: string
   trackingNumber: string
   specId?: string | null
+  createdAt?: Date
 }
 
 type AolzuRuntime = {
@@ -264,6 +265,17 @@ export function getRunningPage() {
     return runtime.page
 }
 
+/** Callback registered by main process to receive new page/context after memory rebuild */
+type ContextRebuiltCallback = (page: import("playwright").Page, context: import("playwright").BrowserContext) => void
+let _onContextRebuilt: ContextRebuiltCallback | null = null
+export function setOnContextRebuilt(cb: ContextRebuiltCallback) { _onContextRebuilt = cb }
+
+function notifyContextRebuilt() {
+  if (_onContextRebuilt && runtime.page && runtime.context) {
+    _onContextRebuilt(runtime.page, runtime.context)
+  }
+}
+
 function updateStatus(updates: Partial<AolzuStatus>) {
     const currentLogs = runtime.status.logs || []
     let newLogs = currentLogs
@@ -445,35 +457,54 @@ async function isOnLoginPage(page: Page, site: SiteConfig) {
 
 async function login(page: Page, site: SiteConfig) {
   if (!site.loginUrl) return
+
+  // Always navigate to loginUrl unless we can confirm we're already on a valid order page.
+  // This handles session expiry: URL may still look like the order page, but the server
+  // will redirect to login after goto(). We detect this by checking isOnLoginPage AFTER goto.
+  const currentUrl = page.url()
+  const orderMenuLink = site.selectors.order_menu_link
+  const alreadyOnOrderPage = orderMenuLink
+    ? currentUrl.startsWith(orderMenuLink)
+    : (currentUrl !== "about:blank" && !currentUrl.includes("login") && currentUrl.includes(new URL(site.loginUrl).hostname))
   
-  if (await isOnLoginPage(page, site) || page.url() === "about:blank") {
-     appendLog(`Navigating to login: ${site.loginUrl}`)
-     const origin = getOriginFromUrl(site.loginUrl)
-     await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
+  if (!alreadyOnOrderPage) {
+    appendLog(`Navigating to login: ${site.loginUrl}`)
+    const origin = getOriginFromUrl(site.loginUrl)
+    await page.goto(site.loginUrl, { waitUntil: "domcontentloaded", referer: origin ? `${origin}/` : undefined })
+    await waitRandom(page, 1500, 2500)
+  }
+
+  // Re-check after potential goto (handles session expiry redirect)
+  if (!(await isOnLoginPage(page, site))) {
+    appendLog("Already logged in, skipping credential fill.")
+    return true
   }
 
   const { username_input, password_input, login_button } = site.selectors
   if (username_input && site.username) {
      try {
-        if (await page.isVisible(username_input, { timeout: 2000 })) {
+        const input = await page.waitForSelector(username_input, { timeout: 8000 }).catch(() => null)
+        if (input) {
             appendLog("Filling username...")
-            await page.fill(username_input, site.username)
+            await input.fill(site.username)
         }
      } catch {}
   }
   if (password_input && site.password) {
      try {
-        if (await page.isVisible(password_input, { timeout: 2000 })) {
+        const input = await page.waitForSelector(password_input, { timeout: 5000 }).catch(() => null)
+        if (input) {
             appendLog("Filling password...")
-            await page.fill(password_input, site.password)
+            await input.fill(site.password)
         }
      } catch {}
   }
   if (login_button) {
      try {
-        if (await page.isVisible(login_button, { timeout: 2000 })) {
+        const btn = await page.waitForSelector(login_button, { timeout: 5000 }).catch(() => null)
+        if (btn) {
             appendLog("Clicking login button...")
-            await page.click(login_button)
+            await btn.click()
             await waitRandom(page, 1200, 2600)
         }
      } catch {}
@@ -656,6 +687,11 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
     for (const [index, element] of orderElements.entries()) {
         try {
             const fullText = await element.innerText()
+            
+            // Debug: log raw text for first few orders to help diagnose parsing issues
+            if (index < 3) {
+                appendLog(`[Debug] Order ${index} raw text: ${fullText.replace(/\s+/g, ' ').substring(0, 400)}`)
+            }
             
             // NOTE: This parsing logic is based on Chenglin and needs to be adapted for Aolzu
             // once we have sample data or page structure.
@@ -1014,7 +1050,16 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
                 itemTitle: productName,
                 itemSku: variantName,
                 logisticsCompany,
-                trackingNumber
+                trackingNumber,
+                createdAt: (() => {
+                    // Match date and time separately to handle potential newlines between them
+                    const mLabeled = fullText.match(/下单时间[:：]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/)
+                    if (mLabeled) return new Date(`${mLabeled[1]} ${mLabeled[2]}`)
+                    // Try datetime at start of text
+                    const mStart = fullText.match(/^\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/)
+                    if (mStart) return new Date(`${mStart[1]} ${mStart[2]}`)
+                    return undefined
+                })()
             })
             
         } catch (e) {
@@ -1070,7 +1115,7 @@ async function saveOrdersBatch(orders: AolzuParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -1089,7 +1134,7 @@ async function saveOrdersBatch(orders: AolzuParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch (innerErr) {
@@ -1158,7 +1203,17 @@ export async function startAolzuSync(siteId: string) {
     await simulateHumanMouse(page)
 
     appendLog("Opening order list via menu clicks...")
-    const clickOk = await openAolzuOrderListByClicks(page)
+    const currentUrl = page.url()
+    const orderMenuLink = targetSite.selectors.order_menu_link
+    const alreadyOnOrderList = orderMenuLink
+      ? currentUrl.startsWith(orderMenuLink)
+      : (currentUrl.includes("kusen888.com") && !currentUrl.includes("login"))
+    let clickOk = alreadyOnOrderList
+    if (alreadyOnOrderList) {
+      appendLog("Already on order list page, skipping menu navigation.")
+    } else {
+      clickOk = await openAolzuOrderListByClicks(page)
+    }
     if (!clickOk) {
         appendLog("Menu click navigation failed, falling back to configured order_menu_link if available.")
         if (targetSite.selectors.order_menu_link) {
@@ -1357,15 +1412,22 @@ export async function startAolzuSync(siteId: string) {
 
             // Periodic memory refresh: rebuild context every N pages to prevent OOM
             if (currentPage % MEMORY_REFRESH_INTERVAL === 0) {
-                appendLog(`[Memory] Reached page ${currentPage}, rebuilding browser context to free memory...`)
+                appendLog(`[Memory] Reached page ${currentPage}, rebuilding page (keeping context/session) to free memory...`)
                 updateStatus({ message: `内存刷新中，即将继续第 ${currentPage + 1} 页...` })
-                try { await runtime.context?.close() } catch {}
-                runtime.context = undefined
+                // Close only the page, NOT the context — preserves session cookies
+                try { await page.close() } catch {}
                 runtime.page = undefined
-                await new Promise(r => setTimeout(r, 2000))
-                page = await ensurePage(headless)
+                await new Promise(r => setTimeout(r, 1500))
+                // Open a fresh page in the same context
+                const ctx = runtime.context!
+                const newPage = await ctx.newPage()
+                runtime.page = newPage
+                page = newPage
+                // Re-mark as shared and notify main process
+                ;(runtime as Record<string, unknown>)._isShared = true
+                notifyContextRebuilt()
                 await navigateToPage(currentPage + 1)
-                appendLog(`[Memory] Context rebuilt, continuing from page ${currentPage + 1}`)
+                appendLog(`[Memory] Page rebuilt, continuing from page ${currentPage + 1}`)
                 currentPage++
                 continue
             }

@@ -37,6 +37,7 @@ type YoupinParsedOrder = {
   trackingNumber: string
   promotionChannel: string
   specId?: string | null
+  createdAt?: Date
 }
 
 type YoupinRuntime = {
@@ -632,9 +633,25 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
                 !l.includes("下单时间") && 
                 !l.includes("发货时间") &&
                 !l.includes("运单号") &&
-                !l.includes("风控")
+                !l.includes("风控") &&
+                !/^\d{10,}$/.test(l) &&           // 排除纯数字订单号
+                !/^\d{4}-\d{2}-\d{2}/.test(l) &&  // 排除日期行
+                !l.includes("ID：") &&
+                !l.includes("支付宝") &&
+                !l.includes("订单来源") &&
+                !/^\d+\.\d+\(/.test(l) &&          // 排除金额行如 140.00(总)
+                !/^\d+天$/.test(l) &&              // 排除 "7天"
+                !l.includes("查看详情") &&
+                !l.includes("续租申请") &&
+                !l.includes("添加快递") &&
+                !l.includes("关闭订单") &&
+                !l.includes("全额免押") &&
+                !l.includes("身份证")
             )
-            
+
+            appendLog(`[DEBUG:${orderNo}] lines: ${JSON.stringify(lines)}`)
+            appendLog(`[DEBUG:${orderNo}] nameCandidates: ${JSON.stringify(nameCandidates)}`)
+
             if (nameCandidates.length > 0) {
                 const brands = ["三星", "Samsung", "Galaxy", "Apple", "iPhone", "DJI", "大疆", "华为", "小米", "vivo", "OPPO", "MacBook", "iPad", "索尼", "Canon", "Nikon"]
                 const brandLine = nameCandidates.find(l => brands.some(b => l.includes(b)))
@@ -643,6 +660,9 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
                 } else {
                     productName = nameCandidates[0]
                 }
+                appendLog(`[DEBUG:${orderNo}] brandLine: ${JSON.stringify(brandLine)}, productName: ${JSON.stringify(productName)}`)
+            } else {
+                appendLog(`[DEBUG:${orderNo}] nameCandidates empty, productName will be empty`)
             }
             
             // Variant / Package
@@ -915,7 +935,11 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<YoupinParsedOr
                 itemSku: variantName,
                 logisticsCompany,
                 trackingNumber,
-                promotionChannel
+                promotionChannel,
+                createdAt: (() => {
+                    const m = fullText.match(/下单时间[:：\s]+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+                    return m ? new Date(m[1]) : undefined
+                })()
             })
             
         } catch (e) {
@@ -943,7 +967,7 @@ async function saveOrdersBatch(orders: YoupinParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -962,7 +986,7 @@ async function saveOrdersBatch(orders: YoupinParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch (innerErr) {
@@ -1270,9 +1294,16 @@ export async function startYoupinSync(siteId: string) {
 
     updateStatus({ 
         status: "success", 
-        message: "Sync completed", 
+        message: "Sync completed",
+        lastRunAt: new Date().toISOString(),
     })
     appendLog("Sync completed successfully.")
+    const now = new Date().toISOString()
+    await prisma.appConfig.upsert({
+        where: { key: "sync_meta_优品租" },
+        update: { value: JSON.stringify({ lastSyncAt: now }) },
+        create: { key: "sync_meta_优品租", value: JSON.stringify({ lastSyncAt: now }) },
+    }).catch(() => void 0)
 
   } catch (e) {
     const msg = String(e)

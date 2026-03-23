@@ -415,7 +415,22 @@ app.whenReady().then(async () => {
   }
 })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') { /* do nothing — tray keeps app alive */ } })
-app.on('before-quit', () => { forceQuit = true })
+app.on('before-quit', async (e) => {
+  forceQuit = true
+  // Gracefully close all browser contexts so Chromium can flush session/cookies to disk
+  const contexts = [...platformContexts.values()]
+  const moduleCloses = Object.values(platformModules).map(mod => (mod as { closeContext?: () => Promise<void> }).closeContext?.())
+  if (contexts.length > 0 || moduleCloses.some(Boolean)) {
+    e.preventDefault()
+    await Promise.allSettled([
+      ...contexts.map(ctx => ctx.close().catch(() => void 0)),
+      ...moduleCloses.map(p => p?.catch(() => void 0)),
+    ])
+    platformContexts.clear()
+    platformPages.clear()
+    app.quit()
+  }
+})
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 
 // ── IPC: config ───────────────────────────────────────────────────────────────
@@ -539,7 +554,8 @@ function ordersToCSV(orders: Record<string, unknown>[]): string {
     'duration', 'rentStartDate', 'returnDeadline', 'customerName', 'recipientPhone',
     'address', 'logisticsCompany', 'trackingNumber', 'latestLogisticsInfo',
     'returnLogisticsCompany', 'returnTrackingNumber', 'returnLatestLogisticsInfo',
-    'promotionChannel', 'source', 'sourceContact', 'customerXianyuId', 'productId'
+    'promotionChannel', 'source', 'sourceContact', 'customerXianyuId', 'productId',
+    'createdAt'
   ]
   const esc = (v: unknown) => {
     const s = v == null ? '' : String(v)
@@ -651,9 +667,12 @@ async function runPlatformSync(
     sendLog(siteId, `[${site?.name ?? siteId}] 开始初始化...`)
     const localConfig = loadLocalConfig()
     const mergedConfig = applyLocalOverrides(erpConfig, localConfig)
+    // Override headless based on per-site or global showBrowser setting from local config
+    const effectiveShowBrowser = localConfig.showBrowserPerSite[siteId] ?? localConfig.showBrowser
+    const configWithBrowser = { ...mergedConfig, headless: !effectiveShowBrowser, _showBrowser: effectiveShowBrowser }
     // Inject merged config into all platform modules (not just zanchen)
     for (const m of Object.values(platformModules)) {
-      m.setExternalConfig?.(mergedConfig as unknown as Parameters<typeof zanchenMod.setExternalConfig>[0])
+      m.setExternalConfig?.(configWithBrowser as unknown as Parameters<typeof zanchenMod.setExternalConfig>[0])
     }
     mod.clearCollectedOrders()
 
@@ -665,6 +684,25 @@ async function runPlatformSync(
     const sharedPage = await getPageForSite(siteId, showBrowser)
     const siteCtx = platformContexts.get(siteId)!
     mod.setSharedPage?.(sharedPage, siteCtx)
+
+    // Register context-rebuild callback so memory refresh re-registers the new context with main process
+    const setOnContextRebuilt = mod['setOnContextRebuilt'] as ((cb: (page: Page, ctx: BrowserContext) => void) => void) | undefined
+    setOnContextRebuilt?.((newPage, newCtx) => {
+      platformContexts.set(siteId, newCtx)
+      platformPages.set(siteId, newPage)
+      sendLog(siteId, `[Memory] 新浏览器上下文已注册到主进程`)
+      // If browser should be visible, move the new window on-screen
+      const cfg = loadLocalConfig()
+      const shouldShow = cfg.showBrowserPerSite[siteId] ?? cfg.showBrowser
+      if (shouldShow) {
+        newCtx.newCDPSession(newPage).then(cdp =>
+          cdp.send('Browser.getWindowForTarget').then(({ windowId }) =>
+            cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: 100, top: 100, windowState: 'normal' } })
+              .then(() => cdp.detach())
+          )
+        ).catch(() => void 0)
+      }
+    })
 
     sendLog(siteId, `[${site?.name ?? siteId}] 启动抓取...`)
     const syncPromise = startFn(siteId)

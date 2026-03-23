@@ -12,6 +12,7 @@ export type ChenglinStatus = {
   message?: string
   needsAttention?: boolean
   logs?: string[]
+  lastRunAt?: string
 }
 
 type ChenglinParsedOrder = {
@@ -35,6 +36,7 @@ type ChenglinParsedOrder = {
   returnLogisticsCompany: string
   returnTrackingNumber: string
   specId?: string | null
+  createdAt?: Date
 }
 
 type ChenglinRuntime = {
@@ -798,7 +800,13 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<ChenglinParsed
                 logisticsCompany,
                 trackingNumber,
                 returnLogisticsCompany,
-                returnTrackingNumber
+                returnTrackingNumber,
+                createdAt: (() => {
+                    const m = fullText.match(/下单[:：]\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/) ||
+                              fullText.match(/下单时间[:：]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/)
+                    if (!m) return undefined
+                    return m[2] ? new Date(`${m[1]} ${m[2]}`) : new Date(m[1])
+                })()
             })
             
         } catch (e) {
@@ -829,7 +837,7 @@ async function saveOrdersBatch(orders: ChenglinParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -850,7 +858,7 @@ async function saveOrdersBatch(orders: ChenglinParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch {
@@ -1186,10 +1194,17 @@ export async function startChenglinSync(siteId: string) {
 
     runtime.status = { 
         status: "success", 
-        message: "Sync completed", 
+        message: "Sync completed",
+        lastRunAt: new Date().toISOString(),
         logs: runtime.status.logs 
     }
     appendLog("Sync completed successfully.")
+    const now = new Date().toISOString()
+    await prisma.appConfig.upsert({
+        where: { key: "sync_meta_诚赁" },
+        update: { value: JSON.stringify({ lastSyncAt: now }) },
+        create: { key: "sync_meta_诚赁", value: JSON.stringify({ lastSyncAt: now }) },
+    }).catch(() => void 0)
 
   } catch (e) {
     const msg = String(e)

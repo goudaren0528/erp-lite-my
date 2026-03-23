@@ -103,6 +103,7 @@ export type ZanchenStatus = {
       returnLogisticsCompany?: string
       returnTrackingNumber?: string
       returnLatestLogisticsInfo?: string
+      createdAt?: Date | string
     }[]
   }
   snapshotSaved?: boolean
@@ -1244,7 +1245,12 @@ function parseOrderFromCells(data: Record<string, string>) {
     latestLogisticsInfo: undefined as string | undefined,
     returnLogisticsCompany: undefined as string | undefined,
     returnTrackingNumber: undefined as string | undefined,
-    returnLatestLogisticsInfo: undefined as string | undefined
+    returnLatestLogisticsInfo: undefined as string | undefined,
+    createdAt: (() => {
+      const timeCell = findCellByHeader(data, ["下单时间", "创建时间", "订单时间"])
+      const m = timeCell.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/)
+      return m ? new Date(`${m[1]} ${m[2]}`) : undefined
+    })()
   }
 }
 
@@ -1354,7 +1360,15 @@ function parseOrderFromText(text: string) {
     latestLogisticsInfo: undefined as string | undefined,
     returnLogisticsCompany: undefined as string | undefined,
     returnTrackingNumber: undefined as string | undefined,
-    returnLatestLogisticsInfo: undefined as string | undefined
+    returnLatestLogisticsInfo: undefined as string | undefined,
+    createdAt: (() => {
+      // Zanchen row text starts with the datetime directly: "2026-03-19  10:45:45 订单编号: ..."
+      const mStart = text.match(/^\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+      if (mStart) return new Date(mStart[1])
+      // Fallback: labeled format
+      const mLabeled = text.match(/下单时间[:：]?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+      return mLabeled ? new Date(mLabeled[1]) : undefined
+    })()
   }
 }
 

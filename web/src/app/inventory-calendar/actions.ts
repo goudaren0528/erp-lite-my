@@ -105,14 +105,20 @@ export async function getInventoryData(startStr: string, endStr: string) {
         // If not found, default to 0 (as per user requirement: "Item View unrelated to BOM")
         let directStock = nameStockMap.get(p.name) || 0
         let hasSharedComponents = false
-        const allBomItemTypes = new Set<string>()
+        // Track which spec each itemTypeId first appears in
+        // Only mark shared if the SAME itemTypeId appears in DIFFERENT specs
+        const itemTypeToSpecId = new Map<string, string>()
 
         p.specs.forEach(spec => {
+            const seenInThisSpec = new Set<string>()
             spec.bomItems.forEach(bom => {
-                if (allBomItemTypes.has(bom.itemTypeId)) {
+                if (seenInThisSpec.has(bom.itemTypeId)) return // skip duplicates within same spec
+                seenInThisSpec.add(bom.itemTypeId)
+                if (itemTypeToSpecId.has(bom.itemTypeId) && itemTypeToSpecId.get(bom.itemTypeId) !== spec.id) {
                     hasSharedComponents = true
+                } else {
+                    itemTypeToSpecId.set(bom.itemTypeId, spec.id)
                 }
-                allBomItemTypes.add(bom.itemTypeId)
             })
         })
 
@@ -253,8 +259,9 @@ export async function getInventoryCalendarConfig() {
     
     // Default values
     const config = {
-        deliveryBufferDays: 2, // Days before rent start to occupy
-        returnBufferDays: 3    // Days after return deadline to free up
+        deliveryBufferDays: 2,
+        returnBufferDays: 3,
+        requireSnForOccupancy: false, // Default OFF: any matched order counts as occupied
     }
     
     if (!canManage) return config
@@ -273,7 +280,7 @@ export async function getInventoryCalendarConfig() {
     return config
 }
 
-export async function saveInventoryCalendarConfig(config: { deliveryBufferDays: number, returnBufferDays: number }) {
+export async function saveInventoryCalendarConfig(config: { deliveryBufferDays: number; returnBufferDays: number }) {
     const user = await getCurrentUser()
     const canManage = user?.role === 'ADMIN' || user?.permissions?.includes('inventory_manage')
     if (!canManage) return { success: false, message: "无权限操作" }

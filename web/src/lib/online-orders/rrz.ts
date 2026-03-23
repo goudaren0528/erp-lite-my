@@ -121,6 +121,7 @@ type RrzParsedOrder = {
   returnLatestLogisticsInfo?: string
   promotionChannel: string
   specId?: string | null
+  createdAt?: Date
 }
 
 type RrzRoot = Frame
@@ -1399,7 +1400,8 @@ async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expected
             returnTrackingNumber: base.return_logistic_number || "",
             returnLatestLogisticsInfo: "",
             itemTitle: spu.spu_name || "",
-            itemSku: spu.sku_name || ""
+            itemSku: spu.sku_name || "",
+            createdAt: undefined as Date | undefined
         }
     })
 
@@ -2525,7 +2527,11 @@ async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expected
                 returnLogisticsCompany,
                 returnTrackingNumber,
                 returnLatestLogisticsInfo,
-                promotionChannel
+                promotionChannel,
+                createdAt: (() => {
+                    const m = fullText.match(/下单时间[:：]?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+                    return m ? new Date(m[1]) : undefined
+                })()
             })
             
         } catch (e) {
@@ -2562,7 +2568,7 @@ async function saveOrdersBatch(orders: RrzParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -2581,7 +2587,7 @@ async function saveOrdersBatch(orders: RrzParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch (innerErr) {
@@ -2940,9 +2946,16 @@ export async function startRrzSync(siteId: string) {
 
     updateStatus({ 
         status: "success", 
-        message: "Sync completed", 
+        message: "Sync completed",
+        lastRunAt: new Date().toISOString(),
     })
     appendLog("Sync completed successfully.")
+    const now = new Date().toISOString()
+    await prisma.appConfig.upsert({
+        where: { key: "sync_meta_人人租" },
+        update: { value: JSON.stringify({ lastSyncAt: now }) },
+        create: { key: "sync_meta_人人租", value: JSON.stringify({ lastSyncAt: now }) },
+    }).catch(() => void 0)
 
   } catch (e) {
     const msg = String(e)

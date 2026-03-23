@@ -1000,6 +1000,25 @@ export async function updateOrder(orderId: string, formData: FormData) {
         const specId = rawData.specId as string;
         const duration = Number(rawData.duration);
 
+        // Validate specId exists before writing to avoid foreign key constraint violation
+        // Mirror createOrder logic: try id → specId field → productId+variantName fallback
+        let resolvedSpecId: string | null = null
+        if (specId?.trim()) {
+            const specExists =
+                (await prisma.productSpec.findUnique({ where: { id: specId.trim() } })) ||
+                (await prisma.productSpec.findFirst({ where: { specId: specId.trim() } }))
+            resolvedSpecId = specExists?.id || null
+        }
+        if (!resolvedSpecId && productId && variantName) {
+            const specByProduct = await prisma.productSpec.findFirst({ where: { productId, name: variantName } })
+            resolvedSpecId = specByProduct?.id || null
+        }
+        const itemTitle = (rawData.itemTitle as string) || ""
+        const itemSku = (rawData.itemSku as string) || ""
+        if (!resolvedSpecId && (itemTitle || itemSku)) {
+            resolvedSpecId = (await autoMatchSpecId(itemTitle || null, itemSku || null)) || null
+        }
+
         if (duration > 0) {
             standardPrice = await getStandardPriceSnapshot({ specId, productId, variantName, duration });
         }
@@ -1019,7 +1038,7 @@ export async function updateOrder(orderId: string, formData: FormData) {
                 productName: (rawData.productName as string) || '',
                 productId: (rawData.productId as string) || null,
                 variantName: (rawData.variantName as string) || '',
-                specId: (rawData.specId as string) || null,
+                specId: resolvedSpecId,
                 sn: (rawData.sn as string) || null,
                 
                 duration: Number(rawData.duration) || 0,

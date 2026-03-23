@@ -1556,7 +1556,12 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                           (site.id === "zanchen" || site.id === "chenglin" || site.id === "aolzu" || site.id === "youpin" || site.id === "llxzu" || site.id === "rrz" || site.name.includes("诚赁") || site.name.includes("奥租") || site.name.includes("优品") || site.name.includes("零零享") || site.name.includes("人人租"))
                             ? (
                                 <>
-                                {currentStatus?.status === "running" ? "正在同步中..." : (currentStatus?.lastRunAt ? `最近同步: ${new Date(currentStatus.lastRunAt).toLocaleString()}` : "等待启动")}
+                                {currentStatus?.status === "running" ? "正在同步中..." : (() => {
+                                  const siteIdToMetaKey: Record<string, string> = { zanchen: "ZANCHEN", chenglin: "诚赁", aolzu: "奥租", youpin: "优品租", llxzu: "零零享", rrz: "人人租" }
+                                  const metaKey = siteIdToMetaKey[site.id] ?? site.name
+                                  const lastAt = currentStatus?.lastRunAt || syncMeta[metaKey]?.lastSyncAt
+                                  return lastAt ? `最近抓取: ${new Date(lastAt).toLocaleString()}` : "等待启动"
+                                })()}
                                 {currentStatus?.message && <span className="ml-2 text-blue-600">[{currentStatus.message}]</span>}
                                 </>
                               )

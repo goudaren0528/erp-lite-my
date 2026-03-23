@@ -85,6 +85,7 @@ export type ZanchenStatus = {
       returnLogisticsCompany?: string
       returnTrackingNumber?: string
       returnLatestLogisticsInfo?: string
+      createdAt?: Date | string
     }[]
   }
   snapshotSaved?: boolean
@@ -1155,7 +1156,12 @@ function parseOrderFromCells(data: Record<string, string>) {
     latestLogisticsInfo: undefined as string | undefined,
     returnLogisticsCompany: undefined as string | undefined,
     returnTrackingNumber: undefined as string | undefined,
-    returnLatestLogisticsInfo: undefined as string | undefined
+    returnLatestLogisticsInfo: undefined as string | undefined,
+    createdAt: (() => {
+      const timeCell = findCellByHeader(data, ["下单时间", "创建时间", "订单时间"])
+      const m = timeCell.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/)
+      return m ? new Date(`${m[1]} ${m[2]}`) : undefined
+    })()
   }
 }
 
@@ -1265,7 +1271,14 @@ function parseOrderFromText(text: string) {
     latestLogisticsInfo: undefined as string | undefined,
     returnLogisticsCompany: undefined as string | undefined,
     returnTrackingNumber: undefined as string | undefined,
-    returnLatestLogisticsInfo: undefined as string | undefined
+    returnLatestLogisticsInfo: undefined as string | undefined,
+    createdAt: (() => {
+      // Zanchen row text starts with the datetime directly: "2026-03-19  10:45:45 订单编号: ..."
+      const mStart = text.match(/^\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/)
+      if (mStart) return new Date(`${mStart[1]} ${mStart[2]}`)
+      const mLabeled = text.match(/下单时间[:：]?\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/)
+      return mLabeled ? new Date(`${mLabeled[1]} ${mLabeled[2]}`) : undefined
+    })()
   }
 }
 
@@ -2093,6 +2106,7 @@ async function saveOrdersToDB(orders: NonNullable<NonNullable<ZanchenStatus["las
           returnLatestLogisticsInfo: o.returnLatestLogisticsInfo || undefined,
           rentStartDate: rentStartDateValue || undefined,
           returnDeadline: returnDeadlineValue || undefined,
+          createdAt: o.createdAt ? new Date(o.createdAt) : new Date(),
           ...(autoSpecId ? { specId: autoSpecId } : {})
         }
       })
@@ -2712,6 +2726,12 @@ async function runZanchenSync(siteId: string) {
     snapshotSaved: saved,
     message: saved ? "已保存快照到数据库" : undefined
   })
+  const now = new Date().toISOString()
+  await prisma.appConfig.upsert({
+    where: { key: "sync_meta_ZANCHEN" },
+    update: { value: JSON.stringify({ lastSyncAt: now }) },
+    create: { key: "sync_meta_ZANCHEN", value: JSON.stringify({ lastSyncAt: now }) },
+  }).catch(() => void 0)
 }
 
 export async function startZanchenSync(siteId: string) {

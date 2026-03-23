@@ -128,6 +128,7 @@ type RrzParsedOrder = {
   returnLatestLogisticsInfo?: string
   promotionChannel: string
   specId?: string | null
+  createdAt?: Date
 }
 
 type RrzRoot = Frame
@@ -2539,7 +2540,11 @@ async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expected
                 returnLogisticsCompany,
                 returnTrackingNumber,
                 returnLatestLogisticsInfo,
-                promotionChannel
+                promotionChannel,
+                createdAt: (() => {
+                    const m = fullText.match(/下单时间[:：]?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
+                    return m ? new Date(m[1]) : undefined
+                })()
             })
             
         } catch (e) {
@@ -2599,7 +2604,7 @@ async function saveOrdersBatch(orders: RrzParsedOrder[]) {
             prisma.onlineOrder.upsert({
                 where: { orderNo: order.orderNo },
                 update: { ...order, updatedAt: new Date() },
-                create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
             })
         )
         
@@ -2618,7 +2623,7 @@ async function saveOrdersBatch(orders: RrzParsedOrder[]) {
                 await prisma.onlineOrder.upsert({
                     where: { orderNo: order.orderNo },
                     update: { ...order, updatedAt: new Date() },
-                    create: { ...order, createdAt: new Date(), updatedAt: new Date() }
+                    create: { ...order, createdAt: order.createdAt ?? new Date(), updatedAt: new Date() }
                 })
                 savedCount++
             } catch (innerErr) {

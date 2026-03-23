@@ -146,6 +146,9 @@ model BackupLog {
   operator  String
   details   String
   timestamp DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([type])
 }
 
 model Product {
@@ -186,6 +189,9 @@ model SpecBom {
   quantity   Int
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([specId])
+  @@index([itemTypeId])
 }
 
 model Warehouse {
@@ -226,6 +232,11 @@ model InventoryItem {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   allocations InventoryAllocation[]
+
+  @@index([itemTypeId])
+  @@index([warehouseId])
+  @@index([status])
+  @@index([itemTypeId, warehouseId])
 }
 
 model InventoryStock {
@@ -256,6 +267,11 @@ model InventoryReservation {
   endDate    DateTime
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([itemTypeId])
+  @@index([warehouseId])
+  @@index([startDate, endDate])
 }
 
 model InventoryAllocation {
@@ -270,6 +286,10 @@ model InventoryAllocation {
   returnedAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([itemId])
+  @@index([warehouseId])
 }
 
 model Order {
@@ -347,9 +367,14 @@ model Order {
 
   @@index([status])
   @@index([createdAt])
+  @@index([updatedAt])
   @@index([specId])
   @@index([promoterId])
   @@index([channelId])
+  @@index([productId])
+  @@index([miniProgramOrderNo])
+  @@index([xianyuOrderNo])
+  @@index([customerXianyuId])
 }
 
 model OrderExtension {
@@ -360,6 +385,8 @@ model OrderExtension {
   
   orderId   String
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
 }
 
 model OrderLog {
@@ -371,6 +398,9 @@ model OrderLog {
   
   orderId   String
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([createdAt])
 }
 
 model ManualChapter {

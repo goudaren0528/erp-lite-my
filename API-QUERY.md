@@ -22,6 +22,8 @@ Authorization: Bearer <your-token>
 GET /api/orders
 ```
 
+> 注意：仅返回人工创建的订单，系统自动同步生成的订单（`creatorId = "system"`）不在此接口返回范围内。
+
 ### 查询参数
 
 | 参数 | 类型 | 说明 |
@@ -45,6 +47,49 @@ GET /api/orders
 | RETURNING | 归还中 |
 | COMPLETED | 已完成 |
 | CLOSED | 已关闭 |
+
+### 响应字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | string | 数据库 UUID |
+| orderNo | string | 订单号 |
+| source | string | 来源（RETAIL / PEER / PART_TIME_AGENT） |
+| platform | string | 平台 |
+| status | string | 订单状态 |
+| customerXianyuId | string\|null | 客户闲鱼 ID / 昵称 |
+| sourceContact | string\|null | 来源联系人 |
+| productName | string\|null | 商品名称 |
+| variantName | string\|null | 规格名称 |
+| sn | string\|null | 设备序列号 |
+| duration | number\|null | 租期（天） |
+| rentPrice | number\|null | 租金 |
+| deposit | number\|null | 押金 |
+| insurancePrice | number\|null | 保险费 |
+| overdueFee | number\|null | 逾期费 |
+| totalAmount | number\|null | 总金额 |
+| address | string\|null | 收货地址 |
+| recipientName | string\|null | 收件人姓名 |
+| recipientPhone | string\|null | 收件人电话 |
+| logisticsCompany | string\|null | 发货物流公司 |
+| trackingNumber | string\|null | 发货快递单号 |
+| latestLogisticsInfo | string\|null | 最新物流信息 |
+| returnLogisticsCompany | string\|null | 归还物流公司 |
+| returnTrackingNumber | string\|null | 归还快递单号 |
+| returnLatestLogisticsInfo | string\|null | 归还最新物流信息 |
+| rentStartDate | string\|null | 租期开始日期（ISO 8601） |
+| returnDeadline | string\|null | 应还日期（ISO 8601） |
+| deliveryTime | string\|null | 预计发货时间（ISO 8601） |
+| actualDeliveryTime | string\|null | 实际发货时间（ISO 8601） |
+| completedAt | string\|null | 完成时间（ISO 8601） |
+| remark | string\|null | 备注 |
+| creatorName | string\|null | 创建人姓名 |
+| specId | string\|null | 匹配规格的数据库 UUID，未匹配为 null |
+| spec | object\|null | 规格信息，未匹配为 null |
+| spec.specId | string | 业务规格编号 |
+| spec.name | string | 规格名称 |
+| createdAt | string | 订单创建时间（ISO 8601） |
+| updatedAt | string | 最后更新时间（ISO 8601） |
 
 ### 响应示例
 
@@ -87,7 +132,7 @@ GET /api/orders
       "completedAt": null,
       "remark": null,
       "creatorName": "管理员",
-      "specId": "uuid-of-product-spec",
+      "specId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       "spec": {
         "specId": "iphone15pro-256g-black",
         "name": "iPhone 15 Pro 256G 黑色"
@@ -98,8 +143,6 @@ GET /api/orders
   ]
 }
 ```
-
-> `specId` 为匹配规格的数据库 UUID，`spec.specId` 为业务规格编号，`spec.name` 为规格名称。未匹配时两者均为 `null`。
 
 ---
 
@@ -146,6 +189,45 @@ GET /api/online-orders
 | BOUGHT_OUT | 已买断 |
 | CLOSED | 已关闭 |
 
+### 响应字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | string | 数据库 UUID |
+| orderNo | string | 订单号 |
+| platform | string | 平台（见平台枚举） |
+| status | string | 订单状态（见状态枚举） |
+| merchantName | string\|null | 商户名称 |
+| productName | string\|null | 商品名称 |
+| variantName | string\|null | 规格名称 |
+| itemTitle | string\|null | 平台商品标题（原始） |
+| itemSku | string\|null | 平台 SKU（原始） |
+| totalAmount | number\|null | 总金额 |
+| rentPrice | number\|null | 租金 |
+| deposit | number\|null | 押金 |
+| insurancePrice | number\|null | 保险费 |
+| duration | number\|null | 租期（天） |
+| promotionChannel | string\|null | 推广渠道 |
+| source | string\|null | 来源（RETAIL / PEER 等） |
+| customerName | string\|null | 客户姓名 |
+| recipientPhone | string\|null | 收件人电话 |
+| address | string\|null | 收货地址 |
+| logisticsCompany | string\|null | 发货物流公司 |
+| trackingNumber | string\|null | 发货快递单号 |
+| latestLogisticsInfo | string\|null | 最新物流信息 |
+| returnLogisticsCompany | string\|null | 归还物流公司 |
+| returnTrackingNumber | string\|null | 归还快递单号 |
+| returnLatestLogisticsInfo | string\|null | 归还最新物流信息 |
+| rentStartDate | string\|null | 租期开始日期（ISO 8601） |
+| returnDeadline | string\|null | 应还日期（ISO 8601） |
+| manualSn | string\|null | 手动录入的设备序列号 |
+| specId | string\|null | 匹配规格的数据库 UUID，未匹配为 null |
+| spec | object\|null | 规格信息，未匹配为 null |
+| spec.specId | string | 业务规格编号 |
+| spec.name | string | 规格名称 |
+| createdAt | string | 订单在原平台的创建时间（ISO 8601） |
+| updatedAt | string | 最后更新时间（ISO 8601） |
+
 ### 响应示例
 
 ```json
@@ -183,7 +265,7 @@ GET /api/online-orders
       "rentStartDate": "2026-02-01T00:00:00.000Z",
       "returnDeadline": "2026-03-01T00:00:00.000Z",
       "manualSn": null,
-      "specId": "uuid-of-product-spec",
+      "specId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       "spec": {
         "specId": "iphone15pro-256g-black",
         "name": "iPhone 15 Pro 256G 黑色"
@@ -194,8 +276,6 @@ GET /api/online-orders
   ]
 }
 ```
-
-> `specId` 为匹配规格的数据库 UUID，`spec.specId` 为业务规格编号，`spec.name` 为规格名称。未匹配时两者均为 `null`。
 
 ---
 
@@ -222,7 +302,7 @@ curl "https://your-erp.com/api/orders?status=RENTING&page=1&pageSize=50" \
   -H "Authorization: Bearer your-token-here"
 
 # 查询赞晨线上订单，按日期范围
-curl "https://your-erp.com/api/online-orders?platform=ZANCHEN&startDate=2026-01-01&endDate=2026-03-13" \
+curl "https://your-erp.com/api/online-orders?platform=ZANCHEN&startDate=2026-01-01&endDate=2026-03-19" \
   -H "Authorization: Bearer your-token-here"
 ```
 

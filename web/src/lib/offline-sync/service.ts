@@ -284,8 +284,24 @@ async function runSync(siteId: string) {
       let needsUpdate = false
 
       if (onlineOrder.status && onlineOrder.status !== offlineOrder.status) {
-        updates.status = onlineOrder.status
-        needsUpdate = true
+        const statusPriority: Record<string, number> = {
+          "PENDING_PAYMENT": 0,
+          "PENDING_REVIEW": 1,
+          "PENDING_SHIPMENT": 2,
+          "RENTING": 3,
+          "RETURNING": 4,
+          "COMPLETED": 5,
+          "CLOSED": 6,
+          "CANCELED": 6,
+        }
+        const currentPriority = statusPriority[offlineOrder.status] ?? -1
+        const newPriority = statusPriority[onlineOrder.status] ?? -1
+        // Only update status if the online status is strictly higher priority
+        // This prevents syncing from reverting a status that was manually advanced in ERP
+        if (newPriority > currentPriority) {
+          updates.status = onlineOrder.status
+          needsUpdate = true
+        }
       }
 
       if (onlineOrder.logisticsCompany && onlineOrder.logisticsCompany !== offlineOrder.logisticsCompany) {
