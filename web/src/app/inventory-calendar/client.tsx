@@ -564,12 +564,17 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         let outCount = 0
         const occupiedComponents = new Map<string, number>()
 
-        relevantOrders.forEach(o => {
+        // For BOM occupancy calculation, always use ALL orders for the product
+        // (not just the filtered spec orders), because all specs share the same physical inventory.
+        const productId = activeTab === 'spec'
+            ? allVariants.find(v => v.id === selectedVariantId)?.productId
+            : selectedProductId
+        const allProductOrders = productId ? (productOrderMap.get(productId) || []) : relevantOrders
+
+        allProductOrders.forEach(o => {
             const range = getOrderOccupancyRange(o)
             if (!range) return
-
             if (date >= range.start && date <= range.end) {
-                occupiedCount++
                 const specInfo = getOrderSpecInfo(o)
                 const requirements = aggregateBomItems(specInfo?.spec.bomItems)
                 if (requirements) {
@@ -577,6 +582,16 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                         occupiedComponents.set(itemTypeId, (occupiedComponents.get(itemTypeId) || 0) + qty)
                     })
                 }
+            }
+        })
+
+        // in/out/occupiedCount are still based on filteredOrders (the selected spec/product view)
+        relevantOrders.forEach(o => {
+            const range = getOrderOccupancyRange(o)
+            if (!range) return
+
+            if (date >= range.start && date <= range.end) {
+                occupiedCount++
             }
 
             if (isSameDay(date, range.end)) {
@@ -856,8 +871,12 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
     // Pre-calculate daily stats for a specific set of orders
     // Returns a Map<DayString, Stats>
-    const getDailyStatsMap = (relevantOrders: OrderSimple[], totalStock: number, start: Date, end: Date) => {
+    const getDailyStatsMap = (relevantOrders: OrderSimple[], totalStock: number, start: Date, end: Date, allProductOrders?: OrderSimple[]) => {
         const statsMap = new Map<string, { occupied: number, available: number, inCount: number, outCount: number }>()
+        
+        // Use allProductOrders for BOM occupancy (all specs share same physical inventory)
+        // Fall back to relevantOrders if not provided
+        const bomOrders = allProductOrders || relevantOrders
         
         // Initialize map for the range? Or just compute on the fly?
         // Computing on the fly for each day is slow.
@@ -866,40 +885,33 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         // But we need to support random access by day.
         // Let's iterate orders and populate a map of days.
         
+        // in/out counts from relevantOrders (the selected spec/product view)
         relevantOrders.forEach(o => {
             const range = getOrderOccupancyRange(o)
             if (!range) return
-
-            // Optimization: Only process if range overlaps with view window
             if (range.end < start || range.start > end) return
 
-            // Iterate days in range
-            const current = range.start < start ? start : range.start
-            const last = range.end > end ? end : range.end
-            
-            // Check Out (Start Date)
-            // Even if start is before view window, we might want to know? 
-            // No, only if start is IN view window.
             const outDate = range.outDate || range.start
             if (outDate >= start && outDate <= end) {
                 const k = outDate.toDateString()
                 if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0 })
                 statsMap.get(k)!.outCount++
             }
-            
-            // Check In (End Date)
             if (range.end >= start && range.end <= end) {
                 const k = range.end.toDateString()
                 if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0 })
                 statsMap.get(k)!.inCount++
             }
+        })
 
-            // Occupancy
-            // Loop from current to last
-            // This loop can still be slow if range is huge (e.g. 1 year rental).
-            // But usually rentals are short.
-            // If range is huge, maybe we shouldn't loop?
-            // For 60 days view, max loop is 60. Acceptable.
+        // Occupancy from bomOrders (all specs of the product, to correctly reflect shared physical inventory)
+        bomOrders.forEach(o => {
+            const range = getOrderOccupancyRange(o)
+            if (!range) return
+            if (range.end < start || range.start > end) return
+
+            const current = range.start < start ? start : range.start
+            const last = range.end > end ? end : range.end
             for (let d = new Date(current); d <= last; d.setDate(d.getDate() + 1)) {
                 const k = d.toDateString()
                 if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0 })
@@ -946,8 +958,13 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         }
 
         return rows.map(row => {
+            // For BOM occupancy, always use product-level orders (all specs share same physical inventory)
+            const productId = activeTab === 'spec'
+                ? allVariants.find(v => v.id === row.id)?.productId
+                : row.id
+            const allProductOrders = productId ? (productOrderMap.get(productId) || []) : []
             const rowOrders = productOrderMap.get(row.key) || []
-            const statsMap = getDailyStatsMap(rowOrders, row.stock, start, end)
+            const statsMap = getDailyStatsMap(rowOrders, row.stock, start, end, allProductOrders)
             return { ...row, statsMap }
         })
     }, [viewMode, activeTab, products, allVariants, productOrderMap, selectedProductId, selectedVariantId])
