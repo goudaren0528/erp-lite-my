@@ -2789,19 +2789,8 @@ async function sendWebhook(config: OnlineOrdersConfig | null, message: string) {
     }
 
     let baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim()
-    baseUrl = baseUrl.replace(/\s+/g, "")
-    if (baseUrl && !baseUrl.startsWith("http")) {
-        if (baseUrl.startsWith("//")) {
-             baseUrl = `http:${baseUrl}`
-        } else {
-             baseUrl = `http://${baseUrl}`
-        }
-    }
-    baseUrl = baseUrl.replace(/^http\/\//, "http://")
-    baseUrl = baseUrl.replace(/^https\/\//, "https://")
-    baseUrl = baseUrl.replace(/^https?:\/\/(https?:\/\/)/, "$1")
-    baseUrl = baseUrl.replace(/^https?:\/\/(https?)\/\//, "$1://")
-    baseUrl = baseUrl.replace(/\/$/, "")
+    baseUrl = baseUrl.replace(/\/$/, "").replace(/^(https?:\/\/)+/, (m) => m.slice(0, m.indexOf('://') + 3))
+    if (baseUrl && !baseUrl.startsWith("http")) baseUrl = `https://${baseUrl}`
 
     const remoteLink = baseUrl 
         ? `${baseUrl}/online-orders/remote-auth`

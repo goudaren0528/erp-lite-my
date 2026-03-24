@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ChevronLeft, ChevronRight, Loader2, Settings, ExternalLink, Calendar as CalendarIcon, Table as TableIcon, Edit } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2, Settings, ExternalLink, Calendar as CalendarIcon, Table as TableIcon, Edit, Wand2 } from "lucide-react"
 import { getInventoryData, getInventoryCalendarConfig, saveInventoryCalendarConfig, getInventoryItems } from "./actions"
+import { batchAutoMatchOrderSpecs } from "@/app/actions"
 import { toast } from "sonner"
 import {
   Tooltip,
@@ -254,6 +255,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const [returnBufferDays, setReturnBufferDays] = useState(3)
     const [isSavingConfig, setIsSavingConfig] = useState(false)
     const [isConfigOpen, setIsConfigOpen] = useState(false)
+    const [isBatchMatching, setIsBatchMatching] = useState(false)
     
     // View mode: "calendar" or "table"
     const [viewMode, setViewMode] = useState<"calendar" | "table">("calendar")
@@ -299,6 +301,21 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             toast.error("保存失败")
         } finally {
             setIsSavingConfig(false)
+        }
+    }
+
+    const handleBatchMatch = async () => {
+        setIsBatchMatching(true)
+        try {
+            const res = await batchAutoMatchOrderSpecs()
+            if (res.success) {
+                toast.success(res.message)
+                setRefreshKey(v => v + 1)
+            }
+        } catch (e) {
+            toast.error("批量匹配失败")
+        } finally {
+            setIsBatchMatching(false)
         }
     }
 
@@ -423,35 +440,12 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     }, [products])
 
     const getOrderSpecInfo = (order: OrderSimple) => {
+        // Only match orders that have an explicit specId linked to a known spec with BOM data
         if (order.specId) {
             const hit = specLookup.byId.get(order.specId)
             if (hit) return hit
             const hitBySpecId = specLookup.bySpecId.get(order.specId)
             if (hitBySpecId) return hitBySpecId
-        }
-        const pid = getOrderProductId(order)
-        if (pid && pid !== "UNKNOWN") {
-            if (order.variantName) {
-                // Exact name match
-                const hit = specLookup.byName.get(`${pid}:${order.variantName}`)
-                if (hit) return hit
-                // Case-insensitive + partial name match
-                const vl = order.variantName.toLowerCase()
-                const product = products.find(p => p.id === pid)
-                if (product?.specs) {
-                    const specHit = product.specs.find(s => s.name.toLowerCase() === vl)
-                    if (specHit) return { spec: specHit, product }
-                    const partialHit = product.specs.find(s =>
-                        vl.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(vl)
-                    )
-                    if (partialHit) return { spec: partialHit, product }
-                }
-            }
-            // Fallback: matched product but no spec match — use first spec for BOM occupancy
-            const product = products.find(p => p.id === pid)
-            if (product?.specs && product.specs.length > 0) {
-                return { spec: product.specs[0], product, isFallback: true }
-            }
         }
         return null
     }
@@ -661,40 +655,20 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         }
     }
 
-    // Filtered orders
+    // Filtered orders — only orders with a matched spec (specId linked to a known ProductSpec with BOM)
     const filteredOrders = useMemo(() => {
         return orders.filter(o => {
-            const pid = getOrderProductId(o)
-            // Must match to a known product
-            if (pid === "UNKNOWN") return false
+            const specInfo = getOrderSpecInfo(o)
+            if (!specInfo) return false
 
             if (activeTab === "item") {
                 if (!selectedProductId) return false
-                return pid === selectedProductId
+                return specInfo.product.id === selectedProductId
             } else {
                 if (!selectedVariantId) return false
                 const selectedVariant = allVariants.find(v => v.id === selectedVariantId)
                 if (!selectedVariant) return false
-                if (pid !== selectedVariant.productId) return false
-
-                // Exact specId match
-                if (o.specId && o.specId === selectedVariant.id) return true
-
-                // Exact variantName match
-                if (o.variantName === selectedVariant.name) return true
-
-                // Case-insensitive variantName match
-                if (o.variantName && selectedVariant.name &&
-                    o.variantName.toLowerCase() === selectedVariant.name.toLowerCase()) return true
-
-                // Partial variantName match
-                if (o.variantName && selectedVariant.name) {
-                    const vl = o.variantName.toLowerCase()
-                    const sl = selectedVariant.name.toLowerCase()
-                    if (vl.includes(sl) || sl.includes(vl)) return true
-                }
-
-                return false
+                return specInfo.spec.id === selectedVariant.id
             }
         })
     }, [orders, activeTab, selectedProductId, selectedVariantId, products, allVariants])
@@ -874,28 +848,23 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     )
 
 
-    // Pre-calculate orders per product/variant to avoid O(N*M) filtering
+    // Pre-calculate orders per product/variant — only orders with a matched spec
     const productOrderMap = useMemo(() => {
         const map = new Map<string, OrderSimple[]>()
         
-        // Helper to add order to map
         const addToMap = (key: string, o: OrderSimple) => {
             if (!map.has(key)) map.set(key, [])
             map.get(key)!.push(o)
         }
 
         orders.forEach(o => {
-            const pid = getOrderProductId(o)
-            if (pid === "UNKNOWN") return // skip unmatched orders
-            
-            // For Item View: Key is ProductId
-            addToMap(pid, o)
-            
-            // For Spec View: Key is ProductId:VariantName
-            if (o.variantName) {
-                const specKey = `${pid}:${o.variantName}`
-                addToMap(specKey, o)
-            }
+            const specInfo = getOrderSpecInfo(o)
+            if (!specInfo) return // only orders with a matched spec count
+
+            // Key by productId (for item view BOM occupancy across all specs)
+            addToMap(specInfo.product.id, o)
+            // Key by specId (for spec view)
+            addToMap(specInfo.spec.id, o)
         })
         
         return map
@@ -1207,6 +1176,12 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {canManage && (
+                        <Button variant="outline" size="sm" onClick={handleBatchMatch} disabled={isBatchMatching} title="按规格名称自动匹配订单">
+                            {isBatchMatching ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Wand2 className="h-4 w-4 mr-1" />}
+                            自动匹配
+                        </Button>
+                    )}
                     {canManage && (
                         <Popover open={isConfigOpen} onOpenChange={setIsConfigOpen}>
                             <PopoverTrigger asChild>

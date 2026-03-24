@@ -495,7 +495,7 @@ async function sendWebhookSimple(config: OnlineOrdersConfig, message: string) {
     if (!config?.webhookUrls || config.webhookUrls.length === 0) return
     
     let baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim()
-    baseUrl = baseUrl.replace(/\/$/, "")
+    baseUrl = baseUrl.replace(/\/$/, "").replace(/^(https?:\/\/)+/, (m) => m.slice(0, m.indexOf('://') + 3))
     const remoteLink = baseUrl ? `${baseUrl}/online-orders/remote-auth` : "(未配置APP_URL)"
         
     const payload = {

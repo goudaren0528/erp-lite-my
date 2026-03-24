@@ -149,6 +149,10 @@ async function getContextForSite(siteId: string, platformKey: string, showBrowse
   const profileDir = join(userData, '.playwright', platformKey)
   if (!existsSync(profileDir)) mkdirSync(profileDir, { recursive: true })
 
+  // Remove SingletonLock to prevent "browser has been closed" on restart
+  const singletonLock = join(profileDir, 'SingletonLock')
+  try { if (existsSync(singletonLock)) { require('fs').unlinkSync(singletonLock); sendLog(siteId, `[System] 清理 SingletonLock`) } } catch { void 0 }
+
   const args = [
     '--no-sandbox', '--disable-setuid-sandbox',
     '--disable-blink-features=AutomationControlled',
@@ -785,13 +789,18 @@ async function runPlatformSync(
     sendLog(siteId, `[${site?.name ?? siteId}] 全部完成，累计写入 ${totalUpserted} 条，失败 ${totalFailed} 条`)
   } catch (e) {
     const msg = String(e)
-    // Browser was closed externally — clear this site's context so next run starts fresh
-    if (msg.includes('Target page, context or browser has been closed') || msg.includes('browserContext') || msg.includes('browser has been closed')) {
+    // Browser was closed externally (during sync) — clear context so next run starts fresh
+    // Only treat as "browser closed" if sync had already started (page existed), not on launch failure
+    const pageExisted = platformPages.has(siteId)
+    if (pageExisted && (msg.includes('Target page, context or browser has been closed') || msg.includes('browser has been closed'))) {
       platformContexts.delete(siteId)
       platformPages.delete(siteId)
       sendLog(siteId, `浏览器已关闭，已重置状态，请重新点击抓取`)
     } else {
       sendLog(siteId, `错误: ${msg}`)
+      // Also clear context on launch failure so next attempt starts fresh
+      platformContexts.delete(siteId)
+      platformPages.delete(siteId)
     }
   } finally {
     syncingSet.delete(siteId)

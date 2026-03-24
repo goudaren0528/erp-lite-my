@@ -1159,6 +1159,51 @@ export async function updateOrderMatchSpec(orderId: string, productId: string | 
     return { success: true }
 }
 
+// Batch auto-match: for all products with specs+BOM, match orders by productName+variantName
+export async function batchAutoMatchOrderSpecs() {
+    const currentUser = await getCurrentUser()
+    if (!currentUser) throw new Error("未登录")
+
+    // Load all specs that have BOM items
+    const specs = await prisma.productSpec.findMany({
+        where: { bomItems: { some: {} } },
+        include: { product: true, bomItems: true }
+    })
+
+    if (specs.length === 0) return { success: true, matched: 0, message: "没有配置了BOM的规格" }
+
+    let totalMatched = 0
+
+    for (const spec of specs) {
+        // Match by exact variantName = spec.name AND productName = product.name
+        const res = await prisma.order.updateMany({
+            where: {
+                specId: null,
+                productName: spec.product.name,
+                variantName: spec.name,
+            },
+            data: { specId: spec.id, productId: spec.productId }
+        })
+        totalMatched += res.count
+
+        // Also match online orders
+        const resOnline = await prisma.onlineOrder.updateMany({
+            where: {
+                specId: null,
+                productName: spec.product.name,
+                variantName: spec.name,
+            },
+            data: { specId: spec.id, productId: spec.productId }
+        })
+        totalMatched += resOnline.count
+    }
+
+    revalidatePath('/orders')
+    revalidatePath('/online-orders')
+    revalidatePath('/inventory-calendar')
+    return { success: true, matched: totalMatched, message: `已自动匹配 ${totalMatched} 条订单` }
+}
+
 export async function updateOrderStatus(orderId: string, newStatus: OrderStatus) {
   try {
     const currentUser = await getCurrentUser();
