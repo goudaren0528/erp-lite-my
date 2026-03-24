@@ -2906,6 +2906,8 @@ export async function startRrzSync(siteId: string) {
             break
         }
 
+        // Try DOM-based pagination first
+        let domPageAdvanced = false
         if (targetSite.selectors.pagination_next_selector) {
              const nextBtn = await orderRoot.$(targetSite.selectors.pagination_next_selector).catch(() => null)
              
@@ -2939,15 +2941,61 @@ export async function startRrzSync(siteId: string) {
                     ])
                      currentPage++
                      orderRoot = await pickOrderRoot(page, `after_page_${currentPage}`)
+                     domPageAdvanced = true
                  } else {
                      appendLog("Next page button is disabled. Reached end of list.")
                      hasMore = false
                  }
-             } else {
-                 hasMore = false
              }
-        } else {
-            hasMore = false
+        }
+
+        // API-driven pagination fallback: if DOM pagination didn't advance but we got a full page,
+        // directly fetch the next page via the intercepted API URL (increment page param).
+        if (!domPageAdvanced && hasMore) {
+            const rt = getRuntimeWithApi()
+            const prevUrl = rt.orderListUrlByPage?.get(currentPage) || rt.latestOrderListUrl || ""
+            if (prevUrl && pageOrders.length > 0) {
+                try {
+                    // Check per_page from URL to know if this was a full page
+                    let perPage = 15
+                    try {
+                        const u = new URL(prevUrl)
+                        const pp = Number(u.searchParams.get("per_page"))
+                        if (pp > 0) perPage = pp
+                    } catch {}
+
+                    if (pageOrders.length < perPage) {
+                        // Last page (partial), no more data
+                        appendLog(`[API Pagination] Got ${pageOrders.length}/${perPage} orders, reached last page.`)
+                        hasMore = false
+                    } else {
+                        const nextPage = currentPage + 1
+                        const nextUrl = prevUrl.replace(/([?&]page=)\d+/, `$1${nextPage}`)
+                        if (nextUrl === prevUrl) {
+                            appendLog("API pagination: could not find page param in URL, stopping.")
+                            hasMore = false
+                        } else {
+                            appendLog(`[API Pagination] Fetching page ${nextPage} via API: ${nextUrl}`)
+                            ensurePageMaps(rt)
+                            rt.expectedApiPage = nextPage
+                            rt.orderListDataByPage?.delete(nextPage)
+                            rt.orderListUrlByPage?.delete(nextPage)
+                            rt.orderListTextByPage?.delete(nextPage)
+                            // Trigger the API call from within the page context so cookies/auth are included
+                            await page.evaluate((url: string) => {
+                                return fetch(url, { credentials: "include" }).catch(() => null)
+                            }, nextUrl)
+                            await waitRandom(page, 2000, 3500)
+                            currentPage = nextPage
+                        }
+                    }
+                } catch (apiPageErr) {
+                    appendLog(`[API Pagination] Error fetching next page: ${apiPageErr}`)
+                    hasMore = false
+                }
+            } else {
+                hasMore = false
+            }
         }
         } catch (pageErr) {
             if (isCrashError(pageErr) && pageRetryCount < MAX_PAGE_RETRIES) {
