@@ -623,29 +623,22 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             }
         })
 
-        let availableByBom: number | null = null
+        let available: number
+        let occupied: number
 
         if (activeTab === 'spec') {
+            // Spec view: use BOM-based calculation (buildable from components)
             const selectedVariant = allVariants.find(v => v.id === selectedVariantId)
             const specInfo = selectedVariant ? specLookup.byId.get(selectedVariant.id) : null
             const buildable = computeBuildable(specInfo?.spec.bomItems, occupiedComponents)
-            if (buildable !== null) availableByBom = buildable
+            available = buildable !== null ? buildable : Math.max(0, totalStock - occupiedCount)
+            occupied = Math.max(0, totalStock - available)
         } else {
-            const product = products.find(p => p.id === selectedProductId)
-            if (product?.specs && product.specs.length > 0) {
-                const specBuildables = product.specs
-                    .map(s => computeBuildable(s.bomItems, occupiedComponents))
-                    .filter((v): v is number => v !== null)
-                if (specBuildables.length > 0) {
-                    availableByBom = product.hasSharedComponents
-                        ? Math.max(...specBuildables)
-                        : specBuildables.reduce((acc, v) => acc + v, 0)
-                }
-            }
+            // Item view: simple calculation — totalStock is the fixed physical inventory count,
+            // occupied = number of orders occupying stock on this day
+            available = Math.max(0, totalStock - occupiedCount)
+            occupied = occupiedCount
         }
-
-        const available = availableByBom !== null ? availableByBom : Math.max(0, totalStock - occupiedCount)
-        const occupied = Math.max(0, totalStock - available)
 
         return {
             occupied,
