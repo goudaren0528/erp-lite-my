@@ -103,6 +103,15 @@ export async function GET(req: NextRequest) {
         }
     }
 
+    if (shouldExport('inventory')) {
+        exportData.inventory = {
+            warehouses: await prisma.warehouse.findMany(),
+            itemTypes: await prisma.inventoryItemType.findMany(),
+            stocks: await prisma.inventoryStock.findMany(),
+            items: await prisma.inventoryItem.findMany({ where: { status: { not: 'DELETED' } } }),
+        };
+    }
+
     if (shouldExport('backupLogs')) {
         exportData.backupLogs = await prisma.backupLog.findMany();
     }

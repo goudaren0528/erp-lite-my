@@ -14,13 +14,14 @@ import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 
 export default function BackupPage() {
-    const [selected, setSelected] = useState<string[]>(["orders", "products", "promoters", "users", "accountGroups", "channelConfigs", "commissionRules", "onlineOrdersConfig"])
+    const [selected, setSelected] = useState<string[]>(["inventory", "orders", "products", "promoters", "users", "accountGroups", "channelConfigs", "commissionRules", "onlineOrdersConfig"])
     const [logs, setLogs] = useState<BackupLog[]>([])
     const [isLoadingLogs, setIsLoadingLogs] = useState(true)
     const [isImporting, setIsImporting] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     const options = [
+        { id: "inventory", label: "库存配置 (inventory.json)" },
         { id: "orders", label: "订单数据 (orders.json)" },
         { id: "products", label: "商品数据 (products.json)" },
         { id: "promoters", label: "推广员数据 (promoters.json)" },

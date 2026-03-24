@@ -414,6 +414,79 @@ export async function importData(formData: FormData) {
                 importedTypes.push(`Products(${count})`);
             }
 
+            if (data.inventory && typeof data.inventory === 'object') {
+                const inv = data.inventory as {
+                    warehouses?: { id: string; name: string; isDefault?: boolean }[];
+                    itemTypes?: { id: string; name: string; isSerialized: boolean; unit?: string | null; category?: string | null; purchasePrice?: number | null }[];
+                    stocks?: { id: string; itemTypeId: string; warehouseId: string; quantity: number }[];
+                    items?: { id: string; itemTypeId: string; warehouseId: string; sn?: string | null; status?: string }[];
+                };
+                const warehouseIdMap = new Map<string, string>();
+                const itemTypeIdMap = new Map<string, string>();
+
+                if (inv.warehouses && Array.isArray(inv.warehouses)) {
+                    for (const w of inv.warehouses) {
+                        const existing = await tx.warehouse.findUnique({ where: { name: w.name } });
+                        if (existing) {
+                            warehouseIdMap.set(w.id, existing.id);
+                        } else {
+                            const created = await tx.warehouse.create({
+                                data: { id: w.id, name: w.name, isDefault: w.isDefault ?? false }
+                            });
+                            warehouseIdMap.set(w.id, created.id);
+                        }
+                    }
+                }
+
+                if (inv.itemTypes && Array.isArray(inv.itemTypes)) {
+                    for (const t of inv.itemTypes) {
+                        const existing = await tx.inventoryItemType.findFirst({ where: { name: t.name } });
+                        if (existing) {
+                            await tx.inventoryItemType.update({
+                                where: { id: existing.id },
+                                data: { isSerialized: t.isSerialized, unit: t.unit ?? null, category: t.category ?? null, purchasePrice: t.purchasePrice ?? null }
+                            });
+                            itemTypeIdMap.set(t.id, existing.id);
+                        } else {
+                            const created = await tx.inventoryItemType.create({
+                                data: { id: t.id, name: t.name, isSerialized: t.isSerialized, unit: t.unit ?? null, category: t.category ?? null, purchasePrice: t.purchasePrice ?? null }
+                            });
+                            itemTypeIdMap.set(t.id, created.id);
+                        }
+                    }
+                }
+
+                let stockCount = 0;
+                if (inv.stocks && Array.isArray(inv.stocks)) {
+                    for (const s of inv.stocks) {
+                        const itemTypeId = itemTypeIdMap.get(s.itemTypeId) ?? s.itemTypeId;
+                        const warehouseId = warehouseIdMap.get(s.warehouseId) ?? s.warehouseId;
+                        await tx.inventoryStock.upsert({
+                            where: { itemTypeId_warehouseId: { itemTypeId, warehouseId } },
+                            update: { quantity: s.quantity },
+                            create: { id: s.id, itemTypeId, warehouseId, quantity: s.quantity }
+                        });
+                        stockCount++;
+                    }
+                }
+
+                let itemCount = 0;
+                if (inv.items && Array.isArray(inv.items)) {
+                    for (const i of inv.items) {
+                        const itemTypeId = itemTypeIdMap.get(i.itemTypeId) ?? i.itemTypeId;
+                        const warehouseId = warehouseIdMap.get(i.warehouseId) ?? i.warehouseId;
+                        await tx.inventoryItem.upsert({
+                            where: { id: i.id },
+                            update: { itemTypeId, warehouseId, sn: i.sn ?? null, status: i.status ?? 'AVAILABLE' },
+                            create: { id: i.id, itemTypeId, warehouseId, sn: i.sn ?? null, status: i.status ?? 'AVAILABLE' }
+                        });
+                        itemCount++;
+                    }
+                }
+
+                importedTypes.push(`Inventory(warehouses:${warehouseIdMap.size}, itemTypes:${itemTypeIdMap.size}, stocks:${stockCount}, items:${itemCount})`);
+            }
+
             if (data.orders && Array.isArray(data.orders)) {
                 let count = 0;
                 for (const o of data.orders) {
