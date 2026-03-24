@@ -326,18 +326,18 @@ export async function updateOnlineOrderMatchSpec(orderId: string, productId: str
         }
     })
 
-    // 自动同步：将相同 itemTitle+itemSku 的其他线上订单也填入同样规格
+    // 自动同步：将相同 productName+variantName 的其他线上订单也填入同样规格
     if (spec.id) {
         const src = await prisma.onlineOrder.findUnique({
             where: { id: orderId },
-            select: { itemTitle: true, itemSku: true }
+            select: { productName: true, variantName: true }
         })
-        if (src?.itemTitle && src?.itemSku) {
+        if (src?.productName && src?.variantName) {
             await prisma.onlineOrder.updateMany({
                 where: {
                     id: { not: orderId },
-                    itemTitle: src.itemTitle,
-                    itemSku: src.itemSku,
+                    productName: src.productName,
+                    variantName: src.variantName,
                 },
                 data: { specId: spec.id, productId: spec.productId }
             })
@@ -355,20 +355,20 @@ export async function syncOnlineOrderMatchSpec(orderId: string) {
             id: true,
             specId: true,
             productId: true,
-            itemTitle: true,
-            itemSku: true,
+            productName: true,
+            variantName: true,
         }
     })
 
     if (!source) throw new Error("订单不存在")
     if (!source.specId || !source.productId) throw new Error("该订单尚未匹配规格")
-    if (!source.itemTitle || !source.itemSku) throw new Error("该订单缺少商品标题或SKU，无法按标题+SKU同步")
+    if (!source.productName || !source.variantName) throw new Error("该订单缺少设备信息，无法同步")
 
     const res = await prisma.onlineOrder.updateMany({
         where: {
             id: { not: source.id },
-            itemTitle: source.itemTitle,
-            itemSku: source.itemSku,
+            productName: source.productName,
+            variantName: source.variantName,
         },
         data: {
             specId: source.specId,

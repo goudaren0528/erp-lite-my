@@ -671,11 +671,12 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
   const getMatchSpecOptions = (productId: string) => {
     const product = products.find(p => p.id === productId)
     if (!product) return []
+    // Only return specs that exist as ProductSpec records (have a real id)
     if (product.specs && product.specs.length > 0) {
       return product.specs.map(s => ({ id: s.id, name: s.name }))
     }
-    const vars = Array.isArray(product.variants) ? product.variants : []
-    return vars.map((v: ProductVariant) => ({ id: v.specId || v.name, name: v.name }))
+    // No specs configured — return empty, cannot match
+    return []
   }
 
   const getMatchBomItems = (productId: string, specValue: string) => {
@@ -1827,8 +1828,8 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                                           size="sm"
                                           className="h-7 px-2 text-[10px]"
                                           onClick={async () => {
-                                            if (!order.itemTitle || !order.itemSku) {
-                                              toast.error("该订单缺少商品标题或SKU，无法同步")
+                                            if (!order.productName || !order.variantName) {
+                                              toast.error("该订单缺少设备信息，无法同步")
                                               return
                                             }
                                             const ok = window.confirm("确认同步匹配规格到所有商品标题+SKU完全一致且未匹配的订单？")
