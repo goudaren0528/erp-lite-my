@@ -740,6 +740,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
                     .replace(/发货时间[：:]\s*[\d\-: ]+/g, "")
                     .replace(/快递单号[：:]\s*\S+/g, "")
                     .replace(/【[^】]*(速运|快递|物流)[^】]*】/g, "")
+                    .replace(/下单机型[：:]\s*[^\n]+/g, "")
                     .replace(/\s+/g, " ")
                     .trim()
                 productName = raw
@@ -761,6 +762,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
                         .replace(/店铺名称[：:][^\n]+/g, "")
                         .replace(/下单时间[：:][^\n]+/g, "")
                         .replace(/订单号[：:][^\n]+/g, "")
+                        .replace(/下单机型[：:]\s*[^\n]+/g, "")
                         .replace(/支付宝[^\n]+/g, "")
                         .trim()
                     // Take the last non-empty segment
@@ -792,6 +794,8 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
             if (!productName || !variantName) {
                 const cleanText = fullText.replace(/\s+/g, ' ').substring(0, 600)
                 appendLog(`[Debug] OrderNo: ${orderNo} parse issue - productName="${productName}" variantName="${variantName}" Raw: ${cleanText}`)
+            } else {
+                appendLog(`[Parse] OrderNo: ${orderNo} productName="${productName}" variantName="${variantName}"`)
             }
 
             // 3. Status
