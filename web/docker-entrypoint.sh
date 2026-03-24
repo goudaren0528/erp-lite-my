@@ -9,9 +9,6 @@ if echo "$DATABASE_URL" | grep -q "^postgresql://"; then
   # For mixed environments (SQLite local, Postgres prod), we must use db push
   # instead of migrate deploy because migrations are provider-specific.
   echo "Running database push (skipping migrations for cross-provider compatibility)..."
-  # Drop legacy tables not managed by this schema before db push to avoid data loss errors.
-  # These tables belong to another project and will be recreated by that project automatically.
-  echo 'DROP TABLE IF EXISTS "zulin_daily_metrics"; DROP TABLE IF EXISTS "zulin_upload_batch"; DROP TABLE IF EXISTS "_bak_zulin_daily_metrics"; DROP TABLE IF EXISTS "_bak_zulin_upload_batch";' | npx prisma db execute --url "$DATABASE_URL" --stdin 2>/dev/null || true
   npx prisma db push
 else
   # Default to standard migrations for SQLite (or matching provider)
