@@ -5,6 +5,10 @@ import { Prisma } from "@prisma/client"
 import { matchDeviceMapping } from "@/lib/product-matching"
 import { revalidatePath } from "next/cache"
 
+const isPostgres = process.env.DATABASE_URL?.startsWith('postgres')
+const dbMode = isPostgres ? ('insensitive' as const) : undefined
+const containsFilter = (value: string) => (dbMode ? ({ contains: value, mode: dbMode } as const) : ({ contains: value } as const))
+
 export async function fetchOnlineOrders(params: {
     page: number;
     pageSize: number;
@@ -60,8 +64,8 @@ export async function fetchOnlineOrders(params: {
     if (searchProduct) {
         and.push({
             OR: [
-                { productName: { contains: searchProduct } },
-                { itemTitle: { contains: searchProduct } },
+                { productName: containsFilter(searchProduct) },
+                { itemTitle: containsFilter(searchProduct) },
             ]
         })
     }
@@ -149,8 +153,8 @@ export async function getOnlineOrderCounts(params: {
     if (params.searchProduct) {
         and.push({
             OR: [
-                { productName: { contains: params.searchProduct } },
-                { itemTitle: { contains: params.searchProduct } },
+                { productName: containsFilter(params.searchProduct) },
+                { itemTitle: containsFilter(params.searchProduct) },
             ]
         })
     }
