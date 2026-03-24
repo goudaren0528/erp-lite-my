@@ -386,14 +386,20 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const getOrderProductId = (order: OrderSimple) => {
         if (order.productId) return order.productId
         
-        // Match by name or keywords
+        // Match by name or keywords (case-insensitive)
+        const orderName = (order.productName || order.itemTitle || "").toLowerCase()
         const p = products.find(p => {
-            if (p.name === order.productName) return true
+            if (p.name.toLowerCase() === orderName) return true
+            // Partial name match: product name contained in order name
+            if (orderName.includes(p.name.toLowerCase())) return true
             if (p.matchKeywords) {
                 try {
                     const keywords = JSON.parse(p.matchKeywords)
                     if (Array.isArray(keywords)) {
-                        return keywords.some(k => order.productName?.includes(k) || order.itemTitle?.includes(k))
+                        return keywords.some((k: string) => {
+                            const kl = k.toLowerCase()
+                            return orderName.includes(kl) || (order.itemTitle || "").toLowerCase().includes(kl)
+                        })
                     }
                 } catch {}
             }
@@ -424,9 +430,28 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             if (hitBySpecId) return hitBySpecId
         }
         const pid = getOrderProductId(order)
-        if (pid && order.variantName) {
-            const hit = specLookup.byName.get(`${pid}:${order.variantName}`)
-            if (hit) return hit
+        if (pid && pid !== "UNKNOWN") {
+            if (order.variantName) {
+                // Exact name match
+                const hit = specLookup.byName.get(`${pid}:${order.variantName}`)
+                if (hit) return hit
+                // Case-insensitive + partial name match
+                const vl = order.variantName.toLowerCase()
+                const product = products.find(p => p.id === pid)
+                if (product?.specs) {
+                    const specHit = product.specs.find(s => s.name.toLowerCase() === vl)
+                    if (specHit) return { spec: specHit, product }
+                    const partialHit = product.specs.find(s =>
+                        vl.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(vl)
+                    )
+                    if (partialHit) return { spec: partialHit, product }
+                }
+            }
+            // Fallback: matched product but no spec match — use first spec for BOM occupancy
+            const product = products.find(p => p.id === pid)
+            if (product?.specs && product.specs.length > 0) {
+                return { spec: product.specs[0], product, isFallback: true }
+            }
         }
         return null
     }
@@ -639,9 +664,10 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     // Filtered orders
     const filteredOrders = useMemo(() => {
         return orders.filter(o => {
-            if (!getOrderSpecInfo(o)) return false
             const pid = getOrderProductId(o)
-            
+            // Must match to a known product
+            if (pid === "UNKNOWN") return false
+
             if (activeTab === "item") {
                 if (!selectedProductId) return false
                 return pid === selectedProductId
@@ -649,21 +675,26 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 if (!selectedVariantId) return false
                 const selectedVariant = allVariants.find(v => v.id === selectedVariantId)
                 if (!selectedVariant) return false
-
-                // Relaxed filtering for Online Orders
-                if (o.isOnline) {
-                    if (o.specId === selectedVariant.id) return true
-                    // Fallback to name matching if specId doesn't match directly
-                    return o.productId === selectedVariant.productId && o.variantName === selectedVariant.name
-                }
-
                 if (pid !== selectedVariant.productId) return false
 
-                if (o.specId) {
-                    return o.specId === selectedVariant.id
+                // Exact specId match
+                if (o.specId && o.specId === selectedVariant.id) return true
+
+                // Exact variantName match
+                if (o.variantName === selectedVariant.name) return true
+
+                // Case-insensitive variantName match
+                if (o.variantName && selectedVariant.name &&
+                    o.variantName.toLowerCase() === selectedVariant.name.toLowerCase()) return true
+
+                // Partial variantName match
+                if (o.variantName && selectedVariant.name) {
+                    const vl = o.variantName.toLowerCase()
+                    const sl = selectedVariant.name.toLowerCase()
+                    if (vl.includes(sl) || sl.includes(vl)) return true
                 }
 
-                return o.variantName === selectedVariant.name
+                return false
             }
         })
     }, [orders, activeTab, selectedProductId, selectedVariantId, products, allVariants])
@@ -855,6 +886,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
         orders.forEach(o => {
             const pid = getOrderProductId(o)
+            if (pid === "UNKNOWN") return // skip unmatched orders
             
             // For Item View: Key is ProductId
             addToMap(pid, o)
