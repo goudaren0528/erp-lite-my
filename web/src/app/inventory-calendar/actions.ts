@@ -235,7 +235,14 @@ export async function getInventoryData(startStr: string, endStr: string) {
         }
     })
 
-    return { products, offlineOrders, onlineOrders, componentStock: Object.fromEntries(stockMap) }
+    // Build itemTypes list with stock for the item view dropdown
+    const itemTypeList = itemTypes.map(t => ({
+        id: t.id,
+        name: t.name,
+        stock: stockMap.get(t.id) || 0
+    })).filter(t => t.stock > 0) // only show types that have stock
+
+    return { products, offlineOrders, onlineOrders, componentStock: Object.fromEntries(stockMap), itemTypes: itemTypeList }
 }
 
 type CalendarConfigRow = {

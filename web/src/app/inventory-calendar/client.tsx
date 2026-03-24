@@ -237,6 +237,12 @@ type InventoryItem = {
     componentName?: string
 }
 
+type ItemType = {
+    id: string
+    name: string
+    stock: number
+}
+
 interface InventoryCalendarClientProps {
     canManage: boolean
 }
@@ -245,6 +251,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const [currentMonth, setCurrentMonth] = useState(new Date())
     const [products, setProducts] = useState<Product[]>([])
     const [orders, setOrders] = useState<OrderSimple[]>([])
+    const [itemTypes, setItemTypes] = useState<ItemType[]>([])
     const [componentStock, setComponentStock] = useState<Record<string, number>>({})
     const [loading, setLoading] = useState(false)
     const [refreshKey, setRefreshKey] = useState(0)
@@ -264,8 +271,8 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const [activeTab, setActiveTab] = useState("item")
     
     // Selection state
-    const [selectedProductId, setSelectedProductId] = useState<string>("ALL")
-    const [selectedVariantId, setSelectedVariantId] = useState<string>("ALL") // Composite ID: productId:specName
+    const [selectedItemTypeId, setSelectedItemTypeId] = useState<string>("ALL")
+    const [selectedVariantId, setSelectedVariantId] = useState<string>("ALL") // spec id
     
     // Sheet state
     const [sheetOpen, setSheetOpen] = useState(false)
@@ -344,13 +351,14 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
                 setProducts(parsedProducts)
                 setComponentStock(res.componentStock || {})
+                setItemTypes((res.itemTypes || []) as ItemType[])
                 
                 // Set default selection if empty
-                if (parsedProducts.length > 0) {
-                     // Only set if not already set or invalid
-                     if ((!selectedProductId || selectedProductId === "ALL") && viewMode === 'calendar') {
-                         setSelectedProductId(parsedProducts[0].id)
-                     }
+                const fetchedItemTypes = (res.itemTypes || []) as ItemType[]
+                if (fetchedItemTypes.length > 0) {
+                    if ((!selectedItemTypeId || selectedItemTypeId === "ALL") && viewMode === 'calendar') {
+                        setSelectedItemTypeId(fetchedItemTypes[0].id)
+                    }
                 }
                 
                 const combinedOrders: OrderSimple[] = [
@@ -498,11 +506,11 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     // Enforce selection in Calendar view
     useEffect(() => {
         if (viewMode === 'calendar') {
-            if ((!selectedProductId || selectedProductId === 'ALL') && products.length > 0) {
-                setSelectedProductId(products[0].id)
+            if ((!selectedItemTypeId || selectedItemTypeId === 'ALL') && itemTypes.length > 0) {
+                setSelectedItemTypeId(itemTypes[0].id)
             }
         }
-    }, [viewMode, products, selectedProductId])
+    }, [viewMode, itemTypes, selectedItemTypeId])
 
     useEffect(() => {
         if (viewMode === 'calendar' && activeTab === 'spec') {
@@ -583,12 +591,14 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         let outCount = 0
         const occupiedComponents = new Map<string, number>()
 
-        // For BOM occupancy calculation, always use ALL orders for the product
-        // (not just the filtered spec orders), because all specs share the same physical inventory.
+        // For item view: use all orders whose spec BOM contains the selected itemType
+        // For spec view: use all orders for the same product (all specs share physical inventory)
         const productId = activeTab === 'spec'
             ? allVariants.find(v => v.id === selectedVariantId)?.productId
-            : selectedProductId
-        const allProductOrders = productId ? (productOrderMap.get(productId) || []) : relevantOrders
+            : undefined
+        const allProductOrders = activeTab === 'spec'
+            ? (productId ? (productOrderMap.get(productId) || []) : relevantOrders)
+            : relevantOrders // item view: relevantOrders already filtered by itemTypeId
 
         allProductOrders.forEach(o => {
             const range = getOrderOccupancyRange(o)
@@ -648,6 +658,20 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         }
     }
 
+    // Pre-compute: which specIds use a given itemTypeId (via BOM)
+    const specsByItemType = useMemo(() => {
+        const map = new Map<string, Set<string>>() // itemTypeId -> Set<specId>
+        products.forEach(p => {
+            p.specs?.forEach(s => {
+                s.bomItems?.forEach(b => {
+                    if (!map.has(b.itemTypeId)) map.set(b.itemTypeId, new Set())
+                    map.get(b.itemTypeId)!.add(s.id)
+                })
+            })
+        })
+        return map
+    }, [products])
+
     // Filtered orders — only orders with a matched spec (specId linked to a known ProductSpec with BOM)
     const filteredOrders = useMemo(() => {
         return orders.filter(o => {
@@ -655,8 +679,10 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             if (!specInfo) return false
 
             if (activeTab === "item") {
-                if (!selectedProductId) return false
-                return specInfo.product.id === selectedProductId
+                if (!selectedItemTypeId || selectedItemTypeId === "ALL") return true
+                // Include order if its spec's BOM contains the selected itemType
+                const specIds = specsByItemType.get(selectedItemTypeId)
+                return specIds ? specIds.has(specInfo.spec.id) : false
             } else {
                 if (!selectedVariantId) return false
                 const selectedVariant = allVariants.find(v => v.id === selectedVariantId)
@@ -664,7 +690,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 return specInfo.spec.id === selectedVariant.id
             }
         })
-    }, [orders, activeTab, selectedProductId, selectedVariantId, products, allVariants])
+    }, [orders, activeTab, selectedItemTypeId, selectedVariantId, products, allVariants, specsByItemType])
 
     // Generate Calendar Days
     const calendarDays = useMemo(() => {
@@ -676,13 +702,12 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     // Get current stock capacity
     const currentStock = useMemo(() => {
         if (activeTab === "item") {
-            const p = products.find(p => p.id === selectedProductId)
-            return p?.totalStock || 0
+            return componentStock[selectedItemTypeId] || 0
         } else {
             const v = allVariants.find(v => v.id === selectedVariantId)
             return v?.stock || 0
         }
-    }, [activeTab, selectedProductId, selectedVariantId, products, allVariants])
+    }, [activeTab, selectedItemTypeId, selectedVariantId, componentStock, allVariants])
 
     const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1))
     const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1))
@@ -697,14 +722,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             // For non-serialized items, we don't need to fetch inventory items
             // We'll show the summary + occupying orders directly
             const isSerializedView = (() => {
-                if (activeTab === 'item') {
-                    const p = products.find(p => p.id === selectedProductId)
-                    // Check if the product maps to a serialized item type
-                    // We determine this by checking if getInventoryItems would return items
-                    // We'll fetch and check
-                    return true // fetch and let the display logic handle it
-                }
-                return true
+                return true // fetch and let the display logic handle it
             })()
 
             setLoadingItems(true)
@@ -714,8 +732,8 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             let vName: string | undefined = undefined
             
             if (activeTab === 'item') {
-                const p = products.find(p => p.id === selectedProductId)
-                if (p) pName = p.name
+                const t = itemTypes.find(t => t.id === selectedItemTypeId)
+                if (t) pName = t.name
             } else {
                 const v = allVariants.find(v => v.id === selectedVariantId)
                 if (v) {
@@ -841,7 +859,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     )
 
 
-    // Pre-calculate orders per product/variant — only orders with a matched spec
+    // Pre-calculate orders per itemType (item view) and per spec/product (spec view)
     const productOrderMap = useMemo(() => {
         const map = new Map<string, OrderSimple[]>()
         
@@ -852,12 +870,16 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
         orders.forEach(o => {
             const specInfo = getOrderSpecInfo(o)
-            if (!specInfo) return // only orders with a matched spec count
+            if (!specInfo) return
 
-            // Key by productId (for item view BOM occupancy across all specs)
+            // Key by productId (for spec view BOM occupancy across all specs of same product)
             addToMap(specInfo.product.id, o)
             // Key by specId (for spec view)
             addToMap(specInfo.spec.id, o)
+            // Key by each itemTypeId in the spec's BOM (for item view)
+            specInfo.spec.bomItems?.forEach(b => {
+                addToMap(b.itemTypeId, o)
+            })
         })
         
         return map
@@ -931,11 +953,11 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         const end = addDays(start, 60) // Show next 60 days
 
         let rows = activeTab === "item" 
-            ? products.map(p => ({
-                id: p.id,
-                name: p.name,
-                stock: p.totalStock,
-                key: p.id
+            ? itemTypes.map(t => ({
+                id: t.id,
+                name: t.name,
+                stock: t.stock,
+                key: t.id
             }))
             : allVariants.map(v => ({
                 id: v.id,
@@ -945,23 +967,25 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             }))
 
         // Filter rows based on selection
-        if (activeTab === "item" && selectedProductId && selectedProductId !== "ALL") {
-            rows = rows.filter(r => r.id === selectedProductId)
+        if (activeTab === "item" && selectedItemTypeId && selectedItemTypeId !== "ALL") {
+            rows = rows.filter(r => r.id === selectedItemTypeId)
         } else if (activeTab === "spec" && selectedVariantId && selectedVariantId !== "ALL") {
             rows = rows.filter(r => r.id === selectedVariantId)
         }
 
         return rows.map(row => {
-            // For BOM occupancy, always use product-level orders (all specs share same physical inventory)
-            const productId = activeTab === 'spec'
-                ? allVariants.find(v => v.id === row.id)?.productId
-                : row.id
-            const allProductOrders = productId ? (productOrderMap.get(productId) || []) : []
+            // For item view: orders keyed by itemTypeId; for spec view: by productId (all specs share inventory)
+            const allProductOrders = activeTab === 'spec'
+                ? (() => {
+                    const productId = allVariants.find(v => v.id === row.id)?.productId
+                    return productId ? (productOrderMap.get(productId) || []) : []
+                  })()
+                : (productOrderMap.get(row.key) || [])
             const rowOrders = productOrderMap.get(row.key) || []
             const statsMap = getDailyStatsMap(rowOrders, row.stock, start, end, allProductOrders)
             return { ...row, statsMap }
         })
-    }, [viewMode, activeTab, products, allVariants, productOrderMap, selectedProductId, selectedVariantId])
+    }, [viewMode, activeTab, itemTypes, allVariants, productOrderMap, selectedItemTypeId, selectedVariantId])
 
     const renderTableView = () => {
         // Generate 60 days from today
@@ -1091,29 +1115,30 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                             <PopoverTrigger asChild>
                                 <Button variant="outline" role="combobox" className="w-full sm:w-[250px] justify-between font-normal">
                                     <span className="truncate">
-                                        {selectedProductId && selectedProductId !== 'ALL'
-                                            ? (products.find(p => p.id === selectedProductId)?.name ?? '选择商品')
-                                            : (viewMode === 'table' ? '全部商品' : '选择商品')}
+                                        {selectedItemTypeId && selectedItemTypeId !== 'ALL'
+                                            ? (itemTypes.find(t => t.id === selectedItemTypeId)?.name ?? '选择物品')
+                                            : (viewMode === 'table' ? '全部物品' : '选择物品')}
                                     </span>
                                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                 </Button>
                             </PopoverTrigger>
                             <PopoverContent className="w-[250px] p-0">
                                 <Command>
-                                    <CommandInput placeholder="搜索商品..." />
+                                    <CommandInput placeholder="搜索物品..." />
                                     <CommandList className="max-h-[200px]">
-                                        <CommandEmpty>未找到商品</CommandEmpty>
+                                        <CommandEmpty>未找到物品</CommandEmpty>
                                         <CommandGroup>
                                             {viewMode === 'table' && (
-                                                <CommandItem value="ALL" onSelect={() => setSelectedProductId('ALL')}>
-                                                    <Check className={`mr-2 h-4 w-4 ${selectedProductId === 'ALL' ? 'opacity-100' : 'opacity-0'}`} />
-                                                    全部商品
+                                                <CommandItem value="ALL" onSelect={() => setSelectedItemTypeId('ALL')}>
+                                                    <Check className={`mr-2 h-4 w-4 ${selectedItemTypeId === 'ALL' ? 'opacity-100' : 'opacity-0'}`} />
+                                                    全部物品
                                                 </CommandItem>
                                             )}
-                                            {products.map(p => (
-                                                <CommandItem key={p.id} value={p.name} onSelect={() => setSelectedProductId(p.id)}>
-                                                    <Check className={`mr-2 h-4 w-4 ${selectedProductId === p.id ? 'opacity-100' : 'opacity-0'}`} />
-                                                    {p.name}
+                                            {itemTypes.map(t => (
+                                                <CommandItem key={t.id} value={t.name} onSelect={() => setSelectedItemTypeId(t.id)}>
+                                                    <Check className={`mr-2 h-4 w-4 ${selectedItemTypeId === t.id ? 'opacity-100' : 'opacity-0'}`} />
+                                                    {t.name}
+                                                    <span className="ml-auto text-xs text-muted-foreground">{t.stock}</span>
                                                 </CommandItem>
                                             ))}
                                         </CommandGroup>
