@@ -249,10 +249,10 @@ export async function POST(req: NextRequest) {
         if (processedOrderNos.length > 0) {
           const unmatched = await prisma.onlineOrder.findMany({
             where: { orderNo: { in: processedOrderNos }, specId: null },
-            select: { id: true, itemTitle: true, itemSku: true },
+            select: { id: true, itemTitle: true, itemSku: true, productName: true, variantName: true },
           })
           for (const order of unmatched) {
-            const matched = await autoMatchSpecId(order.itemTitle, order.itemSku)
+            const matched = await autoMatchSpecId(order.itemTitle, order.itemSku, order.productName, order.variantName)
             if (matched) {
               await prisma.onlineOrder.update({
                 where: { id: order.id },

@@ -464,7 +464,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
         setDbLoading(false)
       }
     })()
-  }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct, filterSn, matchFilter, genericStatus?.status])
+  }, [activeTab, onlineOrderPage, onlineOrderPageSize, dbRefreshKey, zanchenStatus?.lastRunAt, filterStatus, filterOrderNo, filterRecipientName, filterProduct, filterSn, matchFilter, genericStatus?.status, filterPlatformSearch])
 
   useEffect(() => {
     const platformFilter = filterPlatformSearch || (hasSearchFilter ? undefined : getTabPlatform(activeTab))

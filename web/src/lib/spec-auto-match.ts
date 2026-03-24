@@ -1,37 +1,39 @@
 import { prisma } from "@/lib/db"
 
 /**
- * Auto-match specId by itemTitle + itemSku.
- * Looks up existing OnlineOrder and Order records that already have a specId set.
+ * Auto-match specId by productName+variantName (primary) or itemTitle+itemSku (fallback).
+ * Looks up existing OnlineOrder records that already have a specId set.
  * Returns the first matching specId, or null if none found.
  */
 export async function autoMatchSpecId(
   itemTitle: string | null | undefined,
-  itemSku: string | null | undefined
+  itemSku: string | null | undefined,
+  productName?: string | null,
+  variantName?: string | null,
 ): Promise<string | null> {
-  if (!itemTitle && !itemSku) return null
-
-  const where = {
-    itemTitle: itemTitle || undefined,
-    itemSku: itemSku || undefined,
-    specId: { not: null as null },
+  // Try productName+variantName first (more reliable, used by most platforms)
+  if (productName && variantName) {
+    const match = await prisma.onlineOrder.findFirst({
+      where: { productName, variantName, specId: { not: null as null } },
+      select: { specId: true },
+    })
+    if (match?.specId) return match.specId
   }
 
-  // Check OnlineOrder first
-  const onlineMatch = await prisma.onlineOrder.findFirst({
-    where,
-    select: { specId: true },
-  })
-  if (onlineMatch?.specId) return onlineMatch.specId
+  // Fallback: itemTitle+itemSku (used by zanchen)
+  if (itemTitle && itemSku) {
+    const match = await prisma.onlineOrder.findFirst({
+      where: { itemTitle, itemSku, specId: { not: null as null } },
+      select: { specId: true },
+    })
+    if (match?.specId) return match.specId
 
-  // Then check offline Order
-  const offlineMatch = await prisma.order.findFirst({
-    where: {
-      itemTitle: itemTitle || undefined,
-      itemSku: itemSku || undefined,
-      specId: { not: null as null },
-    },
-    select: { specId: true },
-  })
-  return offlineMatch?.specId ?? null
+    const offlineMatch = await prisma.order.findFirst({
+      where: { itemTitle, itemSku, specId: { not: null as null } },
+      select: { specId: true },
+    })
+    if (offlineMatch?.specId) return offlineMatch.specId
+  }
+
+  return null
 }

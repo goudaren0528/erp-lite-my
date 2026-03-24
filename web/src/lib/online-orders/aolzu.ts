@@ -439,9 +439,18 @@ async function login(page: Page, site: SiteConfig) {
   }
 
   const { username_input, password_input, login_button } = site.selectors
+
+  // Wait for the login form to render (SPA may take a moment after domcontentloaded)
+  if (username_input) {
+    await page.waitForSelector(username_input, { timeout: 10000 }).catch(() => null)
+  } else {
+    await page.waitForSelector("input[type='password']", { timeout: 10000 }).catch(() => null)
+  }
+
   if (username_input && site.username) {
      try {
-        if (await page.isVisible(username_input, { timeout: 2000 })) {
+        const el = await page.waitForSelector(username_input, { timeout: 5000 }).catch(() => null)
+        if (el) {
             appendLog("Filling username...")
             await page.fill(username_input, site.username)
         }
@@ -449,7 +458,8 @@ async function login(page: Page, site: SiteConfig) {
   }
   if (password_input && site.password) {
      try {
-        if (await page.isVisible(password_input, { timeout: 2000 })) {
+        const el = await page.waitForSelector(password_input, { timeout: 5000 }).catch(() => null)
+        if (el) {
             appendLog("Filling password...")
             await page.fill(password_input, site.password)
         }
@@ -457,7 +467,8 @@ async function login(page: Page, site: SiteConfig) {
   }
   if (login_button) {
      try {
-        if (await page.isVisible(login_button, { timeout: 2000 })) {
+        const el = await page.waitForSelector(login_button, { timeout: 5000 }).catch(() => null)
+        if (el) {
             appendLog("Clicking login button...")
             await page.click(login_button)
             await waitRandom(page, 1200, 2600)
@@ -690,6 +701,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
                     .replace(/发货时间[：:]\s*[\d\-: ]+/g, "")
                     .replace(/快递单号[：:]\s*\S+/g, "")
                     .replace(/【[^】]*(速运|快递|物流)[^】]*】/g, "")
+                    .replace(/下单机型[：:]\s*[^\n]+/g, "")
                     .replace(/\s+/g, " ")
                     .trim()
                 productName = raw
@@ -711,6 +723,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
                         .replace(/店铺名称[：:][^\n]+/g, "")
                         .replace(/下单时间[：:][^\n]+/g, "")
                         .replace(/订单号[：:][^\n]+/g, "")
+                        .replace(/下单机型[：:]\s*[^\n]+/g, "")
                         .replace(/支付宝[^\n]+/g, "")
                         .trim()
                     // Take the last non-empty segment
