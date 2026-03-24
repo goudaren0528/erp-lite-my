@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, addDays, subDays, startOfDay, isBefore } from "date-fns"
 import { zhCN } from "date-fns/locale"
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ChevronLeft, ChevronRight, Loader2, Settings, ExternalLink, Calendar as CalendarIcon, Table as TableIcon, Edit, Wand2 } from "lucide-react"
-import { getInventoryData, getInventoryCalendarConfig, saveInventoryCalendarConfig, getInventoryItems } from "./actions"
+import { getInventoryData, getInventoryCalendarConfig, saveInventoryCalendarConfig, getInventoryItems, type InventoryCalendarConfig, type RegionBufferConfig } from "./actions"
 import { batchAutoMatchOrderSpecs } from "@/app/actions"
 import { toast } from "sonner"
 import {
@@ -53,6 +53,25 @@ import {
     PaginationNext,
     PaginationPrevious,
   } from "@/components/ui/pagination"
+
+// 34 provinces list
+const PROVINCES = [
+    '北京', '天津', '上海', '重庆',
+    '河北', '山西', '辽宁', '吉林', '黑龙江',
+    '江苏', '浙江', '安徽', '福建', '江西', '山东',
+    '河南', '湖北', '湖南', '广东', '海南',
+    '四川', '贵州', '云南', '陕西', '甘肃', '青海',
+    '内蒙古', '广西', '西藏', '宁夏', '新疆',
+    '香港', '澳门', '台湾',
+]
+
+const extractProvince = (address?: string | null): string | null => {
+    if (!address) return null
+    for (const p of PROVINCES) {
+        if (address.includes(p)) return p
+    }
+    return null
+}
 
 // Status Translation Map
 const statusMap: Record<string, { label: string; color: string }> = {
@@ -153,32 +172,90 @@ const extractSignedAt = (raw?: string | null) => {
     return new Date(`${match[1]}T${match[2]}`)
 }
 
-const StatsCell = ({ available, inCount, outCount, compact = false, onInClick, onOutClick, onStockClick }: { available: number, inCount: number, outCount: number, compact?: boolean, onInClick?: () => void, onOutClick?: () => void, onStockClick?: () => void }) => {
+
+// RegionBufferRow component for config UI
+function RegionBufferRow({ rb, onChange, onDelete }: {
+    rb: { id: string; provinces: string[]; deliveryBufferDays: number; returnBufferDays: number }
+    onChange: (updated: typeof rb) => void
+    onDelete: () => void
+}) {
+    const [showProvinces, setShowProvinces] = useState(false)
+    const allSelected = PROVINCES.every(p => rb.provinces.includes(p))
+
+    const toggleProvince = (p: string) => {
+        const next = rb.provinces.includes(p)
+            ? rb.provinces.filter(x => x !== p)
+            : [...rb.provinces, p]
+        onChange({ ...rb, provinces: next })
+    }
+
+    const toggleAll = () => {
+        onChange({ ...rb, provinces: allSelected ? [] : [...PROVINCES] })
+    }
+
+    return (
+        <div className="border rounded-md p-2 space-y-2 text-xs">
+            <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 flex-1">
+                    <Label className="text-xs whitespace-nowrap">发货</Label>
+                    <Input type="number" className="h-6 w-12 text-xs px-1" value={rb.deliveryBufferDays} onChange={e => onChange({ ...rb, deliveryBufferDays: Number(e.target.value) })} />
+                    <span className="text-muted-foreground">天</span>
+                    <Label className="text-xs whitespace-nowrap ml-1">归还</Label>
+                    <Input type="number" className="h-6 w-12 text-xs px-1" value={rb.returnBufferDays} onChange={e => onChange({ ...rb, returnBufferDays: Number(e.target.value) })} />
+                    <span className="text-muted-foreground">天</span>
+                </div>
+                <Button size="sm" variant="ghost" className="h-6 text-xs px-1" onClick={() => setShowProvinces(v => !v)}>
+                    {rb.provinces.length === 0 ? '选省份' : rb.provinces.length + '省'} {showProvinces ? '▲' : '▼'}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-500 hover:text-red-700" onClick={onDelete}>✕</Button>
+            </div>
+            {showProvinces && (
+                <div className="space-y-1">
+                    <div className="flex items-center gap-1 pb-1 border-b">
+                        <input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-3 w-3" />
+                        <span className="text-muted-foreground">全选/反选</span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-x-2 gap-y-0.5">
+                        {PROVINCES.map(p => (
+                            <label key={p} className="flex items-center gap-
+0.5 cursor-pointer hover:text-primary">
+                                <input type="checkbox" checked={rb.provinces.includes(p)} onChange={() => toggleProvince(p)} className="h-3 w-3" />
+                                <span>{p}</span>
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+}
+
+
+const StatsCell = ({ available, inCount, outCount, rentCount, compact = false, onInClick, onOutClick, onStockClick, onRentClick }: { available: number, inCount: number, outCount: number, rentCount: number, compact?: boolean, onInClick?: () => void, onOutClick?: () => void, onStockClick?: () => void, onRentClick?: () => void }) => {
     const bgClass = available <= 0 ? 'bg-red-100/70' : available < 2 ? 'bg-yellow-100/70' : 'bg-emerald-50/70'
+    const stockColor = available < 0 ? 'text-red-600 font-bold' : ''
 
     const getClickableClass = (handler?: () => void) => 
         handler ? "cursor-pointer hover:underline underline-offset-2" : "cursor-default"
 
-    if (compact) {
-        return (
-            <div className={`flex flex-col justify-center h-full w-full ${bgClass} rounded-sm px-1 py-1`}>
-                <div className={`flex justify-center items-center leading-none ${getClickableClass(onStockClick)}`} onClick={onStockClick}>
-                    <span className="text-base font-semibold text-foreground tabular-nums">{available}</span>
-                </div>
-            </div>
-        )
-    }
-
+    // Vertical 4-row layout for both compact and normal
     return (
-        <div className={`flex flex-col justify-center h-full w-full text-xs gap-1 ${bgClass} rounded-sm`}>
-            <div className={`flex justify-center items-center text-foreground ${getClickableClass(onInClick)}`} onClick={onInClick}>
-                入库: {inCount}
+        <div className={`flex flex-col justify-center h-full w-full ${bgClass} rounded-sm px-1 py-0.5 gap-px`}>
+            <div className={`flex items-center justify-between text-[10px] leading-tight ${getClickableClass(onInClick)}`} onClick={onInClick}>
+                <span className="text-muted-foreground">到</span>
+                <span className="tabular-nums">{inCount}</span>
             </div>
-            <div className={`flex justify-center items-center text-foreground ${getClickableClass(onOutClick)}`} onClick={onOutClick}>
-                出库: {outCount}
+            <div className={`flex items-center justify-between text-[10px] leading-tight ${getClickableClass(onOutClick)}`} onClick={onOutClick}>
+                <span className="text-muted-foreground">发</span>
+                <span className="tabular-nums">{outCount}</span>
             </div>
-            <div className={`flex justify-center items-center text-foreground ${getClickableClass(onStockClick)}`} onClick={onStockClick}>
-                在库: {available}
+            <div className={`flex items-center justify-between text-[10px] leading-tight ${getClickableClass(onRentClick)}`} onClick={onRentClick}>
+                <span className="text-muted-foreground">租</span>
+                <span className="tabular-nums">{rentCount}</span>
+            </div>
+            <div className={`flex items-center justify-between text-[10px] leading-tight ${getClickableClass(onStockClick)}`} onClick={onStockClick}>
+                <span className="text-muted-foreground">库</span>
+                <span className={`tabular-nums ${stockColor}`}>{available}</span>
             </div>
         </div>
     )
@@ -227,6 +304,8 @@ type OrderSimple = {
     xianyuOrderNo?: string | null
     miniProgramOrderNo?: string | null
     sn?: string | null
+    address?: string | null
+    duration?: number | null
 }
 
 type InventoryItem = {
@@ -258,8 +337,11 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const [isMobile, setIsMobile] = useState(false)
     
     // Config state
-    const [deliveryBufferDays, setDeliveryBufferDays] = useState(2)
-    const [returnBufferDays, setReturnBufferDays] = useState(3)
+    const [calendarConfig, setCalendarConfig] = useState<InventoryCalendarConfig>({
+        defaultDeliveryBufferDays: 2,
+        defaultReturnBufferDays: 3,
+        regionBuffers: [],
+    })
     const [isSavingConfig, setIsSavingConfig] = useState(false)
     const [isConfigOpen, setIsConfigOpen] = useState(false)
     const [isBatchMatching, setIsBatchMatching] = useState(false)
@@ -283,24 +365,24 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const [loadingItems, setLoadingItems] = useState(false)
     const [selectedDayStats, setSelectedDayStats] = useState<{ occupied: number; available: number; totalStock: number } | null>(null)
     const [currentPage, setCurrentPage] = useState(1)
+    const [inventoryItemPage, setInventoryItemPage] = useState(1)
     const pageSize = 10
 
     // Fetch config
     useEffect(() => {
         getInventoryCalendarConfig().then(config => {
-            setDeliveryBufferDays(config.deliveryBufferDays)
-            setReturnBufferDays(config.returnBufferDays)
+            setCalendarConfig(config)
         })
     }, [])
 
     const handleSaveConfig = async () => {
         setIsSavingConfig(true)
         try {
-            const res = await saveInventoryCalendarConfig({ deliveryBufferDays, returnBufferDays })
+            const res = await saveInventoryCalendarConfig(calendarConfig)
             if (res.success) {
                 toast.success(res.message)
                 setIsConfigOpen(false)
-                setRefreshKey(v => v + 1) // Refresh to apply new calculation
+                setRefreshKey(v => v + 1)
             } else {
                 toast.error(res.message)
             }
@@ -369,7 +451,9 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                         returnDeadline: o.returnDeadline ? new Date(o.returnDeadline) : null,
                         deliveryTime: o.deliveryTime ? new Date(o.deliveryTime) : null,
                         actualDeliveryTime: o.actualDeliveryTime ? new Date(o.actualDeliveryTime) : null,
-                        completedAt: o.completedAt ? new Date(o.completedAt) : null
+                        completedAt: o.completedAt ? new Date(o.completedAt) : null,
+                        address: o.address ?? null,
+                        duration: o.duration ?? null,
                     })),
                     ...res.onlineOrders.map(o => {
                         const isCompleted = ['TRADE_SUCCESS', 'COMPLETED', 'FINISHED', '已完成'].includes(o.status)
@@ -380,7 +464,8 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                             isOnline: true, 
                             rentStartDate: o.rentStartDate ? new Date(o.rentStartDate) : null,
                             returnDeadline: o.returnDeadline ? new Date(o.returnDeadline) : null,
-                            completedAt
+                            completedAt,
+                            address: o.address ?? null,
                         }
                     })
                 ]
@@ -521,27 +606,41 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     }, [viewMode, activeTab, allVariants, selectedVariantId])
 
     // Occupancy calculation logic
-    const getOrderOccupancyRange = (o: OrderSimple) => {
-        // Skip canceled/closed orders explicitly (though server should filter them)
-        if (['CANCELED', 'CLOSED', 'REFUNDED', 'TRADE_CLOSED', '已关闭', '已取消'].includes(o.status)) return null
+    const getBufferDays = useCallback((address?: string | null) => {
+        const province = extractProvince(address)
+        if (province && calendarConfig.regionBuffers.length > 0) {
+            const normalize = (s: string) => s.replace(/[省市]$/, '').replace(/自治区$/, '').replace(/壮族自治区$/, '').replace(/回族自治区$/, '').replace(/维吾尔自治区$/, '').replace(/藏族自治区$/, '')
+            const normProvince = normalize(province)
+            const match = calendarConfig.regionBuffers.find(r =>
+                r.provinces.some(p => normalize(p) === normProvince)
+            )
+            if (match) return { deliveryBufferDays: match.deliveryBufferDays, returnBufferDays: match.returnBufferDays }
+        }
+        return { deliveryBufferDays: calendarConfig.defaultDeliveryBufferDays, returnBufferDays: calendarConfig.defaultReturnBufferDays }
+    }, [calendarConfig])
 
+    const getOrderOccupancyRange = useCallback((o: OrderSimple) => {
+        if (['CANCELED', 'CLOSED', 'REFUNDED', 'TRADE_CLOSED', '已关闭', '已取消'].includes(o.status)) return null
         if (!o.rentStartDate) return null
-        
+
+        const { deliveryBufferDays, returnBufferDays } = getBufferDays(o.address)
+
         let start = subDays(new Date(o.rentStartDate), deliveryBufferDays)
-        // Default end is return deadline + buffer
-        // If no return deadline (unlikely for valid order), use start + 30 days
-        let endRaw = o.returnDeadline ? new Date(o.returnDeadline) : addDays(new Date(o.rentStartDate), 30)
-        
-        // If order is completed/returned, stock is freed upon completion
-        // We use completedAt as the point where stock becomes available again.
-        // However, 'end' represents the LAST day of occupancy.
+        let endRaw: Date
+        if (!o.isOnline && o.rentStartDate && o.duration) {
+            // Offline order: returnDeadline is "须寄回日" (1 day after last rental day)
+            // Use rentStartDate + duration - 1 as the actual last rental day
+            endRaw = addDays(new Date(o.rentStartDate), o.duration - 1)
+        } else {
+            endRaw = o.returnDeadline ? new Date(o.returnDeadline) : addDays(new Date(o.rentStartDate), 30)
+        }
+
         if (o.completedAt) {
-            // Always use actual completion time if available, regardless of whether it's early or late
             endRaw = new Date(o.completedAt)
         }
 
         const end = addDays(endRaw, returnBufferDays)
-        
+
         let outDate = start
         if (o.actualDeliveryTime || o.deliveryTime) {
             const delivery = new Date(o.actualDeliveryTime || o.deliveryTime!)
@@ -553,9 +652,24 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
 
         start.setHours(0,0,0,0)
         end.setHours(23,59,59,999)
-        
+
         return { start, end, outDate }
-    }
+    }, [getBufferDays])
+
+    const getOrderRentRange = useCallback((o: OrderSimple) => {
+        if (['CANCELED', 'CLOSED', 'REFUNDED', 'TRADE_CLOSED', '已关闭', '已取消'].includes(o.status)) return null
+        if (!o.rentStartDate) return null
+        const start = new Date(o.rentStartDate)
+        let end: Date
+        if (!o.isOnline && o.duration) {
+            end = addDays(start, o.duration - 1)
+        } else {
+            end = o.returnDeadline ? new Date(o.returnDeadline) : addDays(start, 30)
+        }
+        start.setHours(0,0,0,0)
+        end.setHours(23,59,59,999)
+        return { start, end }
+    }, [])
 
     const aggregateBomItems = (items?: BomItem[]) => {
         if (!items || items.length === 0) return null
@@ -589,16 +703,15 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         let occupiedCount = 0
         let inCount = 0
         let outCount = 0
+        let rentCount = 0
         const occupiedComponents = new Map<string, number>()
 
-        // For item view: use all orders whose spec BOM contains the selected itemType
-        // For spec view: use all orders for the same product (all specs share physical inventory)
         const productId = activeTab === 'spec'
             ? allVariants.find(v => v.id === selectedVariantId)?.productId
             : undefined
         const allProductOrders = activeTab === 'spec'
             ? (productId ? (productOrderMap.get(productId) || []) : relevantOrders)
-            : relevantOrders // item view: relevantOrders already filtered by itemTypeId
+            : relevantOrders
 
         allProductOrders.forEach(o => {
             const range = getOrderOccupancyRange(o)
@@ -614,7 +727,6 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             }
         })
 
-        // in/out/occupiedCount are still based on filteredOrders (the selected spec/product view)
         relevantOrders.forEach(o => {
             const range = getOrderOccupancyRange(o)
             if (!range) return
@@ -631,22 +743,24 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             if (isSameDay(date, outDate)) {
                 outCount++
             }
+
+            const rentRange = getOrderRentRange(o)
+            if (rentRange && date >= rentRange.start && date <= rentRange.end) {
+                rentCount++
+            }
         })
 
         let available: number
         let occupied: number
 
         if (activeTab === 'spec') {
-            // Spec view: use BOM-based calculation (buildable from components)
             const selectedVariant = allVariants.find(v => v.id === selectedVariantId)
             const specInfo = selectedVariant ? specLookup.byId.get(selectedVariant.id) : null
             const buildable = computeBuildable(specInfo?.spec.bomItems, occupiedComponents)
-            available = buildable !== null ? buildable : Math.max(0, totalStock - occupiedCount)
+            available = buildable !== null ? buildable : (totalStock - occupiedCount)
             occupied = Math.max(0, totalStock - available)
         } else {
-            // Item view: simple calculation — totalStock is the fixed physical inventory count,
-            // occupied = number of orders occupying stock on this day
-            available = Math.max(0, totalStock - occupiedCount)
+            available = totalStock - occupiedCount
             occupied = occupiedCount
         }
 
@@ -654,7 +768,8 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             occupied,
             available,
             inCount,
-            outCount
+            outCount,
+            rentCount,
         }
     }
 
@@ -690,7 +805,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 return specInfo.spec.id === selectedVariant.id
             }
         })
-    }, [orders, activeTab, selectedItemTypeId, selectedVariantId, products, allVariants, specsByItemType])
+    }, [orders, activeTab, selectedItemTypeId, selectedVariantId, products, allVariants, specsByItemType, getOrderOccupancyRange])
 
     // Generate Calendar Days
     const calendarDays = useMemo(() => {
@@ -757,6 +872,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         }
 
         setCurrentPage(1) // Reset pagination
+        setInventoryItemPage(1)
         setSheetOpen(true)
     }
 
@@ -842,9 +958,11 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                 available={stats.available}
                                                 inCount={stats.inCount}
                                                 outCount={stats.outCount}
+                                                rentCount={stats.rentCount}
                                                 compact={isMobile}
                                                 onInClick={() => handleDayClick(day, dayInOrders, 'in')}
                                                 onOutClick={() => handleDayClick(day, dayOutOrders, 'out')}
+                                                onRentClick={() => handleDayClick(day, dayOccupancy, 'occupy')}
                                                 onStockClick={() => handleDayClick(day, dayOccupancy, 'stock', { occupied: stats.occupied, available: stats.available, totalStock: currentStock })}
                                             />
                                         </div>
@@ -883,25 +1001,15 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         })
         
         return map
-    }, [orders, products])
+    }, [orders, products, getOrderOccupancyRange])
 
     // Pre-calculate daily stats for a specific set of orders
     // Returns a Map<DayString, Stats>
     const getDailyStatsMap = (relevantOrders: OrderSimple[], totalStock: number, start: Date, end: Date, allProductOrders?: OrderSimple[]) => {
-        const statsMap = new Map<string, { occupied: number, available: number, inCount: number, outCount: number }>()
+        const statsMap = new Map<string, { occupied: number, available: number, inCount: number, outCount: number, rentCount: number }>()
         
-        // Use allProductOrders for BOM occupancy (all specs share same physical inventory)
-        // Fall back to relevantOrders if not provided
         const bomOrders = allProductOrders || relevantOrders
         
-        // Initialize map for the range? Or just compute on the fly?
-        // Computing on the fly for each day is slow.
-        // Better: Iterate orders and mark days.
-        
-        // But we need to support random access by day.
-        // Let's iterate orders and populate a map of days.
-        
-        // in/out counts from relevantOrders (the selected spec/product view)
         relevantOrders.forEach(o => {
             const range = getOrderOccupancyRange(o)
             if (!range) return
@@ -910,17 +1018,27 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             const outDate = range.outDate || range.start
             if (outDate >= start && outDate <= end) {
                 const k = outDate.toDateString()
-                if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0 })
+                if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0, rentCount: 0 })
                 statsMap.get(k)!.outCount++
             }
             if (range.end >= start && range.end <= end) {
                 const k = range.end.toDateString()
-                if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0 })
+                if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0, rentCount: 0 })
                 statsMap.get(k)!.inCount++
+            }
+            // rentCount
+            const rentRange = getOrderRentRange(o)
+            if (rentRange) {
+                const rStart = rentRange.start < start ? start : rentRange.start
+                const rEnd = rentRange.end > end ? end : rentRange.end
+                for (let d = new Date(rStart); d <= rEnd; d.setDate(d.getDate() + 1)) {
+                    const k = d.toDateString()
+                    if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0, rentCount: 0 })
+                    statsMap.get(k)!.rentCount++
+                }
             }
         })
 
-        // Occupancy from bomOrders (all specs of the product, to correctly reflect shared physical inventory)
         bomOrders.forEach(o => {
             const range = getOrderOccupancyRange(o)
             if (!range) return
@@ -930,15 +1048,13 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             const last = range.end > end ? end : range.end
             for (let d = new Date(current); d <= last; d.setDate(d.getDate() + 1)) {
                 const k = d.toDateString()
-                if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0 })
+                if (!statsMap.has(k)) statsMap.set(k, { occupied: 0, available: totalStock, inCount: 0, outCount: 0, rentCount: 0 })
                 statsMap.get(k)!.occupied++
             }
         })
         
-        // Post-process availability
-        // We initialized available = totalStock, now subtract occupied
         for (const val of statsMap.values()) {
-            val.available = Math.max(0, totalStock - val.occupied)
+            val.available = totalStock - val.occupied
         }
         
         return statsMap
@@ -985,7 +1101,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             const statsMap = getDailyStatsMap(rowOrders, row.stock, start, end, allProductOrders)
             return { ...row, statsMap }
         })
-    }, [viewMode, activeTab, itemTypes, allVariants, productOrderMap, selectedItemTypeId, selectedVariantId])
+    }, [viewMode, activeTab, itemTypes, allVariants, productOrderMap, selectedItemTypeId, selectedVariantId, getOrderOccupancyRange, getOrderRentRange])
 
     const renderTableView = () => {
         // Generate 60 days from today
@@ -1031,7 +1147,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                 </td>
                                                 {days.map(day => {
                                                     const dateKey = day.toDateString()
-                                                    const stats = statsMap.get(dateKey) || { occupied: 0, available: row.stock, inCount: 0, outCount: 0 }
+                                                    const stats = statsMap.get(dateKey) || { occupied: 0, available: row.stock, inCount: 0, outCount: 0, rentCount: 0 }
                                                     const dayInOrders = rowOrders.filter(o => {
                                                         const range = getOrderOccupancyRange(o)
                                                         return range && isSameDay(day, range.end)
@@ -1057,9 +1173,11 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                                     available={stats.available}
                                                                     inCount={stats.inCount}
                                                                     outCount={stats.outCount}
+                                                                    rentCount={stats.rentCount ?? 0}
                                                                     compact={true}
                                                                     onInClick={() => handleDayClick(day, dayInOrders, 'in')}
                                                                     onOutClick={() => handleDayClick(day, dayOutOrders, 'out')}
+                                                                    onRentClick={() => handleDayClick(day, dayOccupancy, 'occupy')}
                                                                     onStockClick={() => handleDayClick(day, dayOccupancy, 'stock', { occupied: stats.occupied, available: stats.available, totalStock: row.stock })}
                                                                 />
                                                             </div>
@@ -1207,45 +1325,40 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                     <Settings className="h-4 w-4" />
                                 </Button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-80">
+                            <PopoverContent className="w-[480px] max-h-[80vh] overflow-y-auto">
                                 <div className="grid gap-4">
-                                    <div className="space-y-2">
+                                    <div className="space-y-1">
                                         <h4 className="font-medium leading-none">占用计算配置</h4>
-                                        <p className="text-sm text-muted-foreground">
-                                            设置订单前后的库存占用缓冲时间
-                                        </p>
+                                        <p className="text-xs text-muted-foreground">按省份配置发货/归还缓冲天数，无匹配走默认</p>
                                     </div>
-                                    <div className="grid gap-2">
-                                        <div className="grid grid-cols-3 items-center gap-4">
-                                            <Label htmlFor="deliveryBuffer">发货缓冲</Label>
-                                            <div className="col-span-2 flex items-center gap-2">
-                                                <Input
-                                                    id="deliveryBuffer"
-                                                    type="number"
-                                                    value={deliveryBufferDays}
-                                                    onChange={(e) => setDeliveryBufferDays(Number(e.target.value))}
-                                                    className="h-8"
-                                                />
-                                                <span className="text-xs text-muted-foreground">天</span>
-                                            </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <Label className="text-xs whitespace-nowrap">默认发货缓冲</Label>
+                                            <Input type="number" className="h-7 w-16 text-xs" value={calendarConfig.defaultDeliveryBufferDays} onChange={e => setCalendarConfig(c => ({ ...c, defaultDeliveryBufferDays: Number(e.target.value) }))} />
+                                            <span className="text-xs text-muted-foreground">天</span>
                                         </div>
-                                        <div className="grid grid-cols-3 items-center gap-4">
-                                            <Label htmlFor="returnBuffer">归还缓冲</Label>
-                                            <div className="col-span-2 flex items-center gap-2">
-                                                <Input
-                                                    id="returnBuffer"
-                                                    type="number"
-                                                    value={returnBufferDays}
-                                                    onChange={(e) => setReturnBufferDays(Number(e.target.value))}
-                                                    className="h-8"
-                                                />
-                                                <span className="text-xs text-muted-foreground">天</span>
-                                            </div>
+                                        <div className="flex items-center gap-2">
+                                            <Label className="text-xs whitespace-nowrap">默认归还缓冲</Label>
+                                            <Input type="number" className="h-7 w-16 text-xs" value={calendarConfig.defaultReturnBufferDays} onChange={e => setCalendarConfig(c => ({ ...c, defaultReturnBufferDays: Number(e.target.value) }))} />
+                                            <span className="text-xs text-muted-foreground">天</span>
                                         </div>
                                     </div>
-                                    <Button onClick={handleSaveConfig} disabled={isSavingConfig}>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs font-medium">地区缓冲配置</span>
+                                            <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => setCalendarConfig(c => ({ ...c, regionBuffers: [...c.regionBuffers, { id: Date.now().toString(), provinces: [], deliveryBufferDays: 2, returnBufferDays: 3 }] }))}>+ 添加</Button>
+                                        </div>
+                                        {calendarConfig.regionBuffers.map((rb, idx) => (
+                                            <RegionBufferRow key={rb.id} rb={rb} onChange={updated => setCalendarConfig(c => ({ ...c, regionBuffers: c.regionBuffers.map((r, i) => i === idx ? updated : r) }))} onDelete={() => setCalendarConfig(c => ({ ...c, regionBuffers: c.regionBuffers.filter((_, i) => i !== idx) }))} />
+                                        ))}
+                                        {calendarConfig.regionBuffers.length === 0 && (
+                                            <p className="text-xs text-muted-foreground text-center py-2">暂无地区配置，所有订单使用默认缓冲</p>
+                                        )}
+                                    </div>
+                                    <Button onClick={handleSaveConfig} disabled={isSavingConfig} size="sm">
                                         {isSavingConfig && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                         保存配置
+                 
                                     </Button>
                                 </div>
                             </PopoverContent>
@@ -1305,6 +1418,12 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mb-3 px-1">
+                        <span><span className="font-medium text-foreground">到</span>：当天归还到库数量</span>
+                        <span><span className="font-medium text-foreground">发</span>：当天发货出库数量</span>
+                        <span><span className="font-medium text-foreground">租</span>：当天在租订单数量</span>
+                        <span><span className="font-medium text-foreground">库</span>：当天在库空闲数量（背景色：绿=充足 黄=紧张 红=缺货）</span>
+                    </div>
                     {loading ? (
                         <div className="flex justify-center py-20">
                             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -1454,8 +1573,10 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                         <TableHead>订单号</TableHead>
                                                     </TableRow>
                                                 </TableHeader>
+                                                {/* Inventory item pagination */}
+                                                {(() => { const _invTotal = inventoryItems.length; const _invPages = Math.ceil(_invTotal / 50); return null; })()}
                                                 <TableBody>
-                                                    {inventoryItems.map((item) => {
+                                                    {inventoryItems.slice((inventoryItemPage - 1) * 50, inventoryItemPage * 50).map((item) => {
                                                         // Exact SN match first, then count-based assignment
                                                         const occupyingOrder = (item.sn ? snOrderMap.get(item.sn) : undefined)
                                                             ?? itemOrderMap.get(item.id)
@@ -1511,6 +1632,15 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                 </TableBody>
                                             </Table>
                                             </div>
+                                                {Math.ceil(inventoryItems.length / 50) > 1 && (
+                                                    <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+                                                        <span>共 {inventoryItems.length} 条，第 {inventoryItemPage}/{Math.ceil(inventoryItems.length / 50)} 页</span>
+                                                        <div className="flex gap-1">
+                                                            <button className="px-2 py-0.5 border rounded disabled:opacity-40" disabled={inventoryItemPage <= 1} onClick={() => setInventoryItemPage(p => p - 1)}>上一页</button>
+                                                            <button className="px-2 py-0.5 border rounded disabled:opacity-40" disabled={inventoryItemPage >= Math.ceil(inventoryItems.length / 50)} onClick={() => setInventoryItemPage(p => p + 1)}>下一页</button>
+                                                        </div>
+                                                    </div>
+                                                )}
                                         </div>
                                     )
                                 })()

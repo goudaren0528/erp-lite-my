@@ -194,10 +194,12 @@ export async function getInventoryData(startStr: string, endStr: string) {
             status: true,
             productId: true,
             specId: true,
-            sn: true, // Include SN for occupancy matching
-            deliveryTime: true, // Actual delivery time
+            sn: true,
+            deliveryTime: true,
             actualDeliveryTime: true,
             completedAt: true,
+            address: true,
+            duration: true,
         }
     })
 
@@ -231,7 +233,8 @@ export async function getInventoryData(startStr: string, endStr: string) {
             specId: true,
             updatedAt: true,
             returnLatestLogisticsInfo: true,
-            latestLogisticsInfo: true
+            latestLogisticsInfo: true,
+            address: true,
         }
     })
 
@@ -260,18 +263,25 @@ const parseKeywords = (raw?: string | null) => {
         .filter(Boolean)
 }
 
-export async function getInventoryCalendarConfig() {
-    const user = await getCurrentUser()
-    const canManage = user?.role === 'ADMIN' || user?.permissions?.includes('inventory_manage')
-    
-    // Default values
-    const config = {
-        deliveryBufferDays: 2,
-        returnBufferDays: 3,
-        requireSnForOccupancy: false, // Default OFF: any matched order counts as occupied
+export type RegionBufferConfig = {
+    id: string
+    provinces: string[]
+    deliveryBufferDays: number
+    returnBufferDays: number
+}
+
+export type InventoryCalendarConfig = {
+    defaultDeliveryBufferDays: number
+    defaultReturnBufferDays: number
+    regionBuffers: RegionBufferConfig[]
+}
+
+export async function getInventoryCalendarConfig(): Promise<InventoryCalendarConfig> {
+    const defaultConfig: InventoryCalendarConfig = {
+        defaultDeliveryBufferDays: 2,
+        defaultReturnBufferDays: 3,
+        regionBuffers: [],
     }
-    
-    if (!canManage) return config
 
     const appConfig = await prisma.appConfig.findUnique({
         where: { key: 'inventory_calendar_config' }
@@ -280,14 +290,19 @@ export async function getInventoryCalendarConfig() {
     if (appConfig?.value) {
         try {
             const parsed = JSON.parse(appConfig.value)
-            return { ...config, ...parsed }
+            // Migrate legacy format (deliveryBufferDays / returnBufferDays)
+            if (parsed.deliveryBufferDays !== undefined && parsed.defaultDeliveryBufferDays === undefined) {
+                parsed.defaultDeliveryBufferDays = parsed.deliveryBufferDays
+                parsed.defaultReturnBufferDays = parsed.returnBufferDays
+            }
+            return { ...defaultConfig, ...parsed }
         } catch {}
     }
 
-    return config
+    return defaultConfig
 }
 
-export async function saveInventoryCalendarConfig(config: { deliveryBufferDays: number; returnBufferDays: number }) {
+export async function saveInventoryCalendarConfig(config: InventoryCalendarConfig) {
     const user = await getCurrentUser()
     const canManage = user?.role === 'ADMIN' || user?.permissions?.includes('inventory_manage')
     if (!canManage) return { success: false, message: "无权限操作" }
