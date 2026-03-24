@@ -409,6 +409,47 @@ export async function importData(formData: FormData) {
                             totalStock: p.totalStock || 100
                         }
                     });
+
+                    // Import specs and their BOM items, preserving original IDs
+                    if (Array.isArray(p.specs)) {
+                        for (const s of p.specs) {
+                            if (!s.id) continue
+                            await tx.productSpec.upsert({
+                                where: { id: s.id },
+                                update: {
+                                    name: s.name,
+                                    specId: s.specId,
+                                    accessories: s.accessories ?? '',
+                                    insurancePrice: s.insurancePrice ?? 0,
+                                    priceRules: typeof s.priceRules === 'string' ? s.priceRules : JSON.stringify(s.priceRules || []),
+                                    productId: p.id,
+                                },
+                                create: {
+                                    id: s.id,
+                                    name: s.name,
+                                    specId: s.specId,
+                                    accessories: s.accessories ?? '',
+                                    insurancePrice: s.insurancePrice ?? 0,
+                                    priceRules: typeof s.priceRules === 'string' ? s.priceRules : JSON.stringify(s.priceRules || []),
+                                    productId: p.id,
+                                }
+                            })
+                            if (Array.isArray(s.bomItems)) {
+                                for (const b of s.bomItems) {
+                                    if (!b.id || !b.itemTypeId) continue
+                                    // Only upsert if the itemType exists (inventory may not be imported)
+                                    const itemTypeExists = await tx.inventoryItemType.findUnique({ where: { id: b.itemTypeId } })
+                                    if (!itemTypeExists) continue
+                                    await tx.specBom.upsert({
+                                        where: { id: b.id },
+                                        update: { specId: s.id, itemTypeId: b.itemTypeId, quantity: b.quantity ?? 1 },
+                                        create: { id: b.id, specId: s.id, itemTypeId: b.itemTypeId, quantity: b.quantity ?? 1 }
+                                    })
+                                }
+                            }
+                        }
+                    }
+
                     count++;
                 }
                 importedTypes.push(`Products(${count})`);
