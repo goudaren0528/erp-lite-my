@@ -10,3 +10,4 @@ sync-tool/release/
 sync-tool/dist/
 sync-tool/dist-electron/
 sync-tool/node_modules/
+sync-tool/sync-tool-config.json

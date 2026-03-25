@@ -8,6 +8,10 @@ export async function getInventoryData(startStr: string, endStr: string) {
     const start = parseISO(startStr)
     const end = parseISO(endStr)
     
+    // Fetch configuration for merchant filtering
+    const config = await getInventoryCalendarConfig()
+    const zanchenFilteredMerchants = config.zanchenFilteredMerchants || []
+
     // Extend query range to cover pre/post buffer days (start-2, end+3)
     // We fetch a bit wider range (e.g., +/- 7 days) to be safe
     const queryStart = subDays(start, 7)
@@ -156,9 +160,19 @@ export async function getInventoryData(startStr: string, endStr: string) {
         }
     })
 
+    const merchantFilter = zanchenFilteredMerchants.length > 0 ? {
+        NOT: {
+            AND: [
+                { platform: { in: ['zanchen', 'ZANCHEN', '赞晨'] } },
+                { merchantName: { in: zanchenFilteredMerchants } }
+            ]
+        }
+    } : {}
+
     // Fetch offline orders that occupy stock
     const offlineOrders = await prisma.order.findMany({
         where: {
+            ...merchantFilter,
             OR: [
                 {
                     rentStartDate: { lte: queryEnd },
@@ -206,6 +220,7 @@ export async function getInventoryData(startStr: string, endStr: string) {
     // Fetch online orders that occupy stock
     const onlineOrders = await prisma.onlineOrder.findMany({
         where: {
+            ...merchantFilter,
             OR: [
                 {
                     rentStartDate: { lte: queryEnd },
@@ -274,6 +289,7 @@ export type InventoryCalendarConfig = {
     defaultDeliveryBufferDays: number
     defaultReturnBufferDays: number
     regionBuffers: RegionBufferConfig[]
+    zanchenFilteredMerchants?: string[]
 }
 
 export async function getInventoryCalendarConfig(): Promise<InventoryCalendarConfig> {
@@ -281,6 +297,7 @@ export async function getInventoryCalendarConfig(): Promise<InventoryCalendarCon
         defaultDeliveryBufferDays: 2,
         defaultReturnBufferDays: 3,
         regionBuffers: [],
+        zanchenFilteredMerchants: [],
     }
 
     const appConfig = await prisma.appConfig.findUnique({

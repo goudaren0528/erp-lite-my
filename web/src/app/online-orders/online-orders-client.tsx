@@ -425,17 +425,51 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
   // Derive platform filter: only apply when no search terms are active
   const hasSearchFilter = !!(filterOrderNo || filterRecipientName || filterProduct || filterSn || filterPlatformSearch)
 
+  const normalizeLoginUrl = (raw?: string) => {
+    const text = raw?.trim()
+    if (!text) return null
+    try {
+      const withProtocol = /^https?:\/\//i.test(text) ? text : `http://${text}`
+      const parsed = new URL(withProtocol)
+      const origin = parsed.origin.toLowerCase()
+      const pathname = (parsed.pathname || "/").replace(/\/+$/, "") || "/"
+      return { exact: `${origin}${pathname.toLowerCase()}`, origin }
+    } catch {
+      return null
+    }
+  }
+
+  const detectKnownPlatform = (siteId: string, siteName: string) => {
+    const lower = siteId.toLowerCase()
+    if (siteName.includes("零零享") || lower.includes("llxzu")) return "零零享"
+    if (siteName.includes("人人租") || lower.includes("rrz")) return "人人租"
+    if (siteName.includes("优品") || lower.includes("youpin")) return "优品租"
+    if (siteName.includes("奥租") || lower.includes("aolzu") || lower.includes("aozu")) return "奥租"
+    if (siteName.includes("诚赁") || lower.includes("chenglin") || lower.includes("chenlin")) return "诚赁"
+    if (lower === "zanchen" || siteName.includes("赞晨")) return "ZANCHEN"
+    return undefined
+  }
+
   const getTabPlatform = (tabId: string) => {
     const site = draft.sites.find(s => s.id === tabId)
-    const name = site?.name || ""
-    const lower = tabId.toLowerCase()
-    if (name.includes("零零享") || lower.includes("llxzu")) return "零零享"
-    if (name.includes("人人租") || lower.includes("rrz")) return "人人租"
-    if (name.includes("优品") || lower.includes("youpin")) return "优品租"
-    if (name.includes("奥租") || lower.includes("aolzu") || lower.includes("aozu")) return "奥租"
-    if (name.includes("诚赁") || lower.includes("chenglin") || lower.includes("chenlin")) return "诚赁"
-    if (lower === "zanchen" || name.includes("赞晨")) return "ZANCHEN"
-    return undefined
+    const explicit = detectKnownPlatform(tabId, site?.name || "")
+    if (explicit) return explicit
+    const current = normalizeLoginUrl(site?.loginUrl)
+    if (!current) return site?.name?.trim() || undefined
+
+    let sameOriginPlatform: string | undefined
+    for (const candidateSite of draft.sites) {
+      if (candidateSite.id === tabId) continue
+      const candidatePlatform = detectKnownPlatform(candidateSite.id, candidateSite.name || "")
+      if (!candidatePlatform) continue
+      const candidateUrl = normalizeLoginUrl(candidateSite.loginUrl)
+      if (!candidateUrl) continue
+      if (candidateUrl.exact === current.exact) return candidatePlatform
+      if (!sameOriginPlatform && candidateUrl.origin === current.origin) {
+        sameOriginPlatform = candidatePlatform
+      }
+    }
+    return sameOriginPlatform ?? (site?.name?.trim() || undefined)
   }
 
   useEffect(() => {
@@ -1275,16 +1309,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
               variant="outline"
               onClick={() => {
                 // Determine platform filter for current tab
-                const targetSite = config.sites.find(s => s.id === activeTab)
-                const tabLower = (activeTab || "").toLowerCase()
-                const siteName = targetSite?.name || ""
-                let platform = ""
-                if (siteName.includes("零零享") || tabLower.includes("llxzu")) platform = "零零享"
-                else if (siteName.includes("人人租") || tabLower.includes("rrz")) platform = "人人租"
-                else if (siteName.includes("优品") || tabLower.includes("youpin")) platform = "优品租"
-                else if (siteName.includes("奥租") || tabLower.includes("aolzu")) platform = "奥租"
-                else if (siteName.includes("诚赁") || tabLower.includes("chenglin")) platform = "诚赁"
-                else if (tabLower === "zanchen" || siteName.includes("赞晨")) platform = "ZANCHEN"
+                const platform = getTabPlatform(activeTab) || ""
                 const url = `/api/online-orders/export${platform ? `?platform=${encodeURIComponent(platform)}` : ""}`
                 window.open(url, "_blank")
               }}
@@ -1416,15 +1441,8 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
               className="text-destructive hover:text-destructive"
               onClick={async () => {
                 const targetSite = config.sites.find(s => s.id === activeTab)
-                const tabLower = (activeTab || "").toLowerCase()
                 const siteName = targetSite?.name || ""
-                let platform = ""
-                if (siteName.includes("零零享") || tabLower.includes("llxzu")) platform = "零零享"
-                else if (siteName.includes("人人租") || tabLower.includes("rrz")) platform = "人人租"
-                else if (siteName.includes("优品") || tabLower.includes("youpin")) platform = "优品租"
-                else if (siteName.includes("奥租") || tabLower.includes("aolzu")) platform = "奥租"
-                else if (siteName.includes("诚赁") || tabLower.includes("chenglin")) platform = "诚赁"
-                else if (tabLower === "zanchen" || siteName.includes("赞晨")) platform = "ZANCHEN"
+                const platform = getTabPlatform(activeTab) || ""
                 if (!platform) return
                 if (!confirm(`确定要清空 ${siteName || platform} 的所有订单吗？此操作不可撤销。`)) return
                 const res = await fetch("/api/online-orders/clear", {

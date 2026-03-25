@@ -11,6 +11,51 @@ import { notifyManualRun } from "@/lib/online-orders/scheduler"
 
 export const dynamic = "force-dynamic"
 
+function detectPlatformKeyByNameOrId(siteId: string, siteName: string): string {
+  const id = siteId.toLowerCase()
+  if (siteName.includes("诚赁") || id.includes("chenglin") || id.includes("chenlin")) return "chenglin"
+  if (siteName.includes("奥租") || id.includes("aolzu") || id.includes("aozu")) return "aolzu"
+  if (siteName.includes("优品") || id.includes("youpin")) return "youpin"
+  if (siteName.includes("零零享") || id.includes("llxzu")) return "llxzu"
+  if (siteName.includes("人人租") || id.includes("rrz")) return "rrz"
+  return "zanchen"
+}
+
+function normalizeLoginUrl(raw?: string): { exact: string; origin: string } | null {
+  const text = raw?.trim()
+  if (!text) return null
+  try {
+    const withProtocol = /^https?:\/\//i.test(text) ? text : `http://${text}`
+    const parsed = new URL(withProtocol)
+    const origin = parsed.origin.toLowerCase()
+    const pathname = (parsed.pathname || "/").replace(/\/+$/, "") || "/"
+    return { exact: `${origin}${pathname.toLowerCase()}`, origin }
+  } catch {
+    return null
+  }
+}
+
+function detectPlatformKey(siteId: string, siteName: string, loginUrl: string | undefined, sites: { id: string; name: string; loginUrl?: string }[]): string {
+  const explicitKey = detectPlatformKeyByNameOrId(siteId, siteName)
+  if (explicitKey !== "zanchen") return explicitKey
+  const current = normalizeLoginUrl(loginUrl)
+  if (!current) return explicitKey
+
+  let sameOriginKey: string | null = null
+  for (const candidate of sites) {
+    if (candidate.id === siteId) continue
+    const candidateKey = detectPlatformKeyByNameOrId(candidate.id, candidate.name || "")
+    if (candidateKey === "zanchen") continue
+    const candidateUrl = normalizeLoginUrl(candidate.loginUrl)
+    if (!candidateUrl) continue
+    if (candidateUrl.exact === current.exact) return candidateKey
+    if (!sameOriginKey && candidateUrl.origin === current.origin) {
+      sameOriginKey = candidateKey
+    }
+  }
+  return sameOriginKey ?? explicitKey
+}
+
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization")
   if (authHeader) {
@@ -28,65 +73,37 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   const siteId = typeof body?.siteId === "string" ? body.siteId : "zanchen"
   
-  // Resolve site to check name if ID is generic
   const config = await loadConfig()
   const site = config?.sites.find(s => s.id === siteId)
-  const isChenglin = 
-      siteId === "chenglin" || 
-      siteId === "chenlin" || 
-      siteId.toLowerCase().includes("chenglin") ||
-      siteId.toLowerCase().includes("chenlin") ||
-      (site && (site.name.includes("诚赁") || site.name.toLowerCase().includes("chenglin") || site.name.toLowerCase().includes("chenlin")))
-
-  const isAolzu = 
-      siteId === "aolzu" || 
-      siteId === "aozu" || 
-      siteId.toLowerCase().includes("aolzu") ||
-      siteId.toLowerCase().includes("aozu") ||
-      (site && (site.name.includes("奥租") || site.name.toLowerCase().includes("aolzu") || site.name.toLowerCase().includes("aozu")))
-
-  const isYoupin = 
-      siteId === "youpin" || 
-      siteId.toLowerCase().includes("youpin") ||
-      (site && (site.name.includes("优品") || site.name.toLowerCase().includes("youpin")))
-
-  const isLlxzu = 
-      siteId === "llxzu" || 
-      siteId.toLowerCase().includes("llxzu") ||
-      (site && (site.name.includes("零零享") || site.name.toLowerCase().includes("llxzu")))
-
-  const isRrz = 
-      siteId === "rrz" || 
-      siteId.toLowerCase().includes("rrz") ||
-      (site && (site.name.includes("人人租") || site.name.toLowerCase().includes("rrz")))
+  const sites = config?.sites ?? []
+  const platformKey = detectPlatformKey(siteId, site?.name || "", site?.loginUrl, sites)
 
   let status;
-  if (isChenglin) {
+  if (platformKey === "chenglin") {
       console.log(`[API] Triggering Chenglin sync for siteId: ${siteId}`)
-      // Don't await here, let it run in background so UI doesn't hang
       startChenglinSync(siteId).catch(err => {
           console.error(`[API] Chenglin sync failed to start:`, err)
       })
       status = { status: "running", message: "诚赁同步已启动" }
-  } else if (isAolzu) {
+  } else if (platformKey === "aolzu") {
       console.log(`[API] Triggering Aolzu sync for siteId: ${siteId}`)
       startAolzuSync(siteId).catch(err => {
           console.error(`[API] Aolzu sync failed to start:`, err)
       })
       status = { status: "running", message: "奥租同步已启动" }
-  } else if (isYoupin) {
+  } else if (platformKey === "youpin") {
       console.log(`[API] Triggering Youpin sync for siteId: ${siteId}`)
       startYoupinSync(siteId).catch(err => {
           console.error(`[API] Youpin sync failed to start:`, err)
       })
       status = { status: "running", message: "优品租同步已启动" }
-  } else if (isLlxzu) {
+  } else if (platformKey === "llxzu") {
       console.log(`[API] Triggering Llxzu sync for siteId: ${siteId}`)
       startLlxzuSync(siteId).catch(err => {
           console.error(`[API] Llxzu sync failed to start:`, err)
       })
-      status = { status: "running", message: "零零享同步已启动" }
-  } else if (isRrz) {
+      status = { status: "running", message: `${site?.name?.trim() || "零零享"}同步已启动` }
+  } else if (platformKey === "rrz") {
       console.log(`[API] Triggering Rrz sync for siteId: ${siteId}`)
       startRrzSync(siteId).catch(err => {
           console.error(`[API] Rrz sync failed to start:`, err)

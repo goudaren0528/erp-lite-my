@@ -438,10 +438,6 @@ async function login(page: Page, site: SiteConfig) {
   // 任何自动操作都可能导致 uuid 和验证码图片不一致
   appendLog("已打开登录页，等待人工完成登录（填账密+验证码+点登录）...")
   updateStatus({ status: "awaiting_user", message: "需要人工介入: 请在浏览器中填写账号、密码、验证码后点击登录", needsAttention: true })
-  const config = await loadConfig()
-  if (config?.webhookUrls && config.webhookUrls.length > 0) {
-    sendWebhookSimple(config, "优品租登录需要人工介入")
-  }
 
   const start = Date.now()
   while (Date.now() - start < 300_000) {

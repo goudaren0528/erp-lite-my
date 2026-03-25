@@ -1,4 +1,4 @@
-﻿import path from "path"
+import path from "path"
 import fs from "fs"
 import net from "net"
 import { chromium, type BrowserContext, type Page } from "playwright"
@@ -1436,7 +1436,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                 rentStartDate,
                 returnDeadline,
                 duration,
-                platform: "零零享", 
+                platform: site.name?.trim() || "零零享",
                 productName,
                 variantName,
                 itemTitle: productName,
@@ -1531,13 +1531,10 @@ export async function startLlxzuSync(siteId: string) {
         throw new Error("Online orders config not found")
     }
 
-    const site = config.sites.find(s => 
-        s.id === siteId || 
-        s.id.toLowerCase() === siteId.toLowerCase() ||
-        s.name.trim() === '零零享'
+    const targetSite = config.sites.find(s =>
+        s.id === siteId ||
+        s.id.toLowerCase() === siteId.toLowerCase()
     )
-    
-    const targetSite = site ?? config.sites.find(s => s.name.includes('零零享') || s.id.includes('llxzu'))
     if (!targetSite) {
         throw new Error(`Site ${siteId} not found in config`)
     }
@@ -1695,7 +1692,7 @@ export async function startLlxzuSync(siteId: string) {
                 const existingFinalOrders = await prisma.onlineOrder.findMany({
                     where: {
                         orderNo: { in: orderNos },
-                        platform: "零零享",
+                        platform: targetSite.name?.trim() || "零零享",
                         status: { in: finalStatuses }
                     },
                     select: { orderNo: true, status: true }

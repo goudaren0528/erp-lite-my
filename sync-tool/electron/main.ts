@@ -57,6 +57,11 @@ type PlatformMod = {
   [key: string]: unknown
 }
 
+type AttentionState = {
+  siteName: string
+  message: string
+}
+
 // ── Platform registry ─────────────────────────────────────────────────────────
 const platformModules: Record<string, PlatformMod> = {
   zanchen: zanchenMod as unknown as PlatformMod,
@@ -82,7 +87,7 @@ const getStatusFnNames: Record<string, string> = {
   llxzu: 'getLlxzuStatus', rrz: 'getRrzStatus',
 }
 
-function detectPlatformKey(siteId: string, siteName: string): string {
+function detectPlatformKeyByNameOrId(siteId: string, siteName: string): string {
   const id = siteId.toLowerCase()
   if (siteName.includes('诚赁') || id.includes('chenglin')) return 'chenglin'
   if (siteName.includes('奥租') || id.includes('aolzu')) return 'aolzu'
@@ -90,6 +95,41 @@ function detectPlatformKey(siteId: string, siteName: string): string {
   if (siteName.includes('零零享') || id.includes('llxzu')) return 'llxzu'
   if (siteName.includes('人人租') || id.includes('rrz')) return 'rrz'
   return 'zanchen'
+}
+
+function normalizeLoginUrl(raw?: string): { exact: string; origin: string } | null {
+  const text = raw?.trim()
+  if (!text) return null
+  try {
+    const withProtocol = /^https?:\/\//i.test(text) ? text : `http://${text}`
+    const parsed = new URL(withProtocol)
+    const origin = parsed.origin.toLowerCase()
+    const pathname = (parsed.pathname || '/').replace(/\/+$/, '') || '/'
+    return { exact: `${origin}${pathname.toLowerCase()}`, origin }
+  } catch {
+    return null
+  }
+}
+
+function detectPlatformKey(siteId: string, siteName: string, loginUrl?: string): string {
+  const explicitKey = detectPlatformKeyByNameOrId(siteId, siteName)
+  if (explicitKey !== 'zanchen') return explicitKey
+  const current = normalizeLoginUrl(loginUrl)
+  if (!current || !cachedErpConfig?.sites?.length) return explicitKey
+
+  let sameOriginKey: string | null = null
+  for (const site of cachedErpConfig.sites) {
+    if (site.id === siteId) continue
+    const candidateKey = detectPlatformKeyByNameOrId(site.id, site.name || '')
+    if (candidateKey === 'zanchen') continue
+    const candidateUrl = normalizeLoginUrl(site.loginUrl)
+    if (!candidateUrl) continue
+    if (candidateUrl.exact === current.exact) return candidateKey
+    if (!sameOriginKey && candidateUrl.origin === current.origin) {
+      sameOriginKey = candidateKey
+    }
+  }
+  return sameOriginKey ?? explicitKey
 }
 
 // ── Apply local site overrides onto a copy of erpConfig ───────────────────────
@@ -179,9 +219,9 @@ async function getContextForSite(siteId: string, platformKey: string, showBrowse
   return ctx
 }
 
-async function getPageForSite(siteId: string, showBrowser: boolean): Promise<Page> {
+async function getPageForSite(siteId: string, showBrowser: boolean, resolvedPlatformKey?: string): Promise<Page> {
   const site = cachedErpConfig?.sites?.find(s => s.id === siteId)
-  const platformKey = detectPlatformKey(siteId, site?.name || '')
+  const platformKey = resolvedPlatformKey ?? detectPlatformKey(siteId, site?.name || '', site?.loginUrl)
   const ctx = await getContextForSite(siteId, platformKey, showBrowser)
 
   const existing = platformPages.get(siteId)
@@ -195,29 +235,51 @@ async function getPageForSite(siteId: string, showBrowser: boolean): Promise<Pag
   return page
 }
 
+async function setPageWindowPosition(page: Page, left: number, top: number) {
+  const cdp = await page.context().newCDPSession(page)
+  try {
+    const { windowId } = await cdp.send('Browser.getWindowForTarget')
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left, top, windowState: 'normal' } })
+  } finally {
+    await cdp.detach().catch(() => void 0)
+  }
+}
+
+async function setSiteWindowVisibility(siteId: string, show: boolean) {
+  const left = show ? 80 : -4800
+  const top = show ? 80 : -4800
+  const page = platformPages.get(siteId)
+  if (page && !page.isClosed()) {
+    await setPageWindowPosition(page, left, top).catch(() => void 0)
+  } else {
+    const ctx = platformContexts.get(siteId)
+    const firstPage = ctx?.pages()[0]
+    if (firstPage) {
+      await setPageWindowPosition(firstPage, left, top).catch(() => void 0)
+    }
+  }
+
+  const site = cachedErpConfig?.sites?.find(s => s.id === siteId)
+  const platformKey = detectPlatformKey(siteId, site?.name || '', site?.loginUrl)
+  await platformModules[platformKey]?.moveWindow?.(left, top).catch(() => void 0)
+}
+
 // Move browser window on/off screen dynamically via CDP
 async function setBrowserVisibility(show: boolean) {
   currentShowBrowser = show
-  const x = show ? 100 : -4800
-  const y = show ? 100 : -4800
 
   // Move all per-platform context windows
-  for (const [siteId, ctx] of platformContexts) {
+  for (const siteId of platformContexts.keys()) {
     try {
-      const pages = ctx.pages()
-      const page = pages[0]
-      if (page) {
-        const cdp = await ctx.newCDPSession(page)
-        const { windowId } = await cdp.send('Browser.getWindowForTarget')
-        await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: x, top: y, windowState: 'normal' } })
-        await cdp.detach()
-      }
+      await setSiteWindowVisibility(siteId, show)
     } catch (e) {
       console.log(`[setBrowserVisibility] CDP error for ${siteId}:`, e)
     }
   }
 
   // Fallback: move via platform modules (legacy per-platform browser)
+  const x = show ? 80 : -4800
+  const y = show ? 80 : -4800
   for (const mod of Object.values(platformModules)) {
     await mod.moveWindow?.(x, y).catch(() => void 0)
   }
@@ -241,6 +303,7 @@ let cachedErpConfig: ErpConfig | null = null
 // ── Scheduler ─────────────────────────────────────────────────────────────────
 let schedulerInterval: NodeJS.Timeout | null = null
 const firedToday = new Map<string, Set<string>>() // siteId → Set<"HH:MM">
+const ENABLE_AUTO_SCHEDULER = false
 
 function getScheduledTimesForSite(siteId: string, localConfig: LocalConfig): string[] {
   // Local config takes priority over ERP config
@@ -250,7 +313,11 @@ function getScheduledTimesForSite(siteId: string, localConfig: LocalConfig): str
 }
 
 function startScheduler() {
-  if (schedulerInterval) clearInterval(schedulerInterval)
+  if (schedulerInterval) {
+    clearInterval(schedulerInterval)
+    schedulerInterval = null
+  }
+  if (!ENABLE_AUTO_SCHEDULER) return
   schedulerInterval = setInterval(() => {
     const now = new Date()
     const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
@@ -276,9 +343,10 @@ function startScheduler() {
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let forceQuit = false
+const attentionStates = new Map<string, AttentionState>()
 
 // Build a 32x32 RGBA tray icon programmatically: blue circle with white cross
-function buildTrayIcon(): Electron.NativeImage {
+function buildTrayIcon(hasAttention = false): Electron.NativeImage {
   const size = 32
   const buf = Buffer.alloc(size * size * 4)
   const cx = size / 2, cy = size / 2, r = size / 2 - 1
@@ -294,11 +362,30 @@ function buildTrayIcon(): Electron.NativeImage {
       } else if (inCross) {
         buf[i] = 255; buf[i+1] = 255; buf[i+2] = 255; buf[i+3] = 255 // white
       } else {
-        buf[i] = 0x3b; buf[i+1] = 0x82; buf[i+2] = 0xf6; buf[i+3] = 255 // #3b82f6 blue
+        if (hasAttention) {
+          buf[i] = 0xf5; buf[i+1] = 0x59; buf[i+2] = 0x0b; buf[i+3] = 255
+        } else {
+          buf[i] = 0x3b; buf[i+1] = 0x82; buf[i+2] = 0xf6; buf[i+3] = 255
+        }
       }
     }
   }
   return nativeImage.createFromBuffer(buf, { width: size, height: size })
+}
+
+function updateTrayAppearance() {
+  if (!tray) return
+  const entries = [...attentionStates.values()]
+  const hasAttention = entries.length > 0
+  tray.setImage(buildTrayIcon(hasAttention))
+  if (!hasAttention) {
+    tray.setToolTip('ERP 订单同步工具')
+    return
+  }
+  const summary = entries.length === 1
+    ? `${entries[0].siteName} 需要人工介入`
+    : `${entries.length} 个平台需要人工介入`
+  tray.setToolTip(`ERP 订单同步工具 - ${summary}`)
 }
 
 function createTray() {
@@ -312,6 +399,7 @@ function createTray() {
   ])
   tray.setContextMenu(menu)
   tray.on('double-click', () => { mainWindow?.show(); mainWindow?.focus() })
+  updateTrayAppearance()
 }
 
 function createWindow() {
@@ -554,33 +642,23 @@ ipcMain.handle('browser:setSiteVisibility', async (_e, siteId: string, show: boo
   if (!cfg.showBrowserPerSite) cfg.showBrowserPerSite = {}
   cfg.showBrowserPerSite[siteId] = show
   saveLocalConfig(cfg)
-
-  const x = show ? 100 : -4800
-  const y = show ? 100 : -4800
-  const ctx = platformContexts.get(siteId)
-  if (ctx) {
-    try {
-      const pages = ctx.pages()
-      const page = pages[0]
-      if (page) {
-        const cdp = await ctx.newCDPSession(page)
-        const { windowId } = await cdp.send('Browser.getWindowForTarget')
-        await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: x, top: y, windowState: 'normal' } })
-        await cdp.detach()
-      }
-    } catch (e) {
-      console.log(`[setSiteVisibility] CDP error for ${siteId}:`, e)
-    }
-  }
+  await setSiteWindowVisibility(siteId, show).catch((e) => {
+    console.log(`[setSiteVisibility] CDP error for ${siteId}:`, e)
+  })
   return true
 })
 
 // ── IPC: sync status ──────────────────────────────────────────────────────────
-ipcMain.handle('sync:getStatus', () => ({ syncing: [...syncingSet] }))
+ipcMain.handle('sync:getStatus', () => ({
+  syncing: [...syncingSet],
+  attention: Object.fromEntries(
+    [...attentionStates.entries()].map(([siteId, state]) => [siteId, state])
+  )
+}))
 ipcMain.handle('sync:restartScheduler', () => {
   if (cachedErpConfig) {
     startScheduler()
-    return { success: true, message: '调度器已重启' }
+    return { success: true, message: ENABLE_AUTO_SCHEDULER ? '调度器已重启' : '自动抓取已禁用（仅手动抓取）' }
   }
   return { success: false, message: '未连接 ERP，无法启动调度器' }
 })
@@ -662,25 +740,125 @@ function sendLog(siteId: string, msg: string) {
   mainWindow?.webContents.send('sync:log', { siteId, msg })
 }
 
+function normalizeDetectedSelectorValue(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1).trim()
+  }
+  return trimmed
+}
+
+function extractDetectedSelector(log: string): { key: string; value: string } | null {
+  const autoMatch = log.match(/^\[AutoSelector\]\s*([a-zA-Z0-9_:-]+)\s*=\s*(.+)$/)
+  if (autoMatch) {
+    const value = normalizeDetectedSelectorValue(autoMatch[2])
+    if (!value) return null
+    return { key: autoMatch[1], value }
+  }
+
+  const templateMatch = log.match(/^Using template selector:\s*(.+?)\s*\(start=/)
+  if (templateMatch) {
+    const value = normalizeDetectedSelectorValue(templateMatch[1])
+    if (!value) return null
+    return { key: 'order_row_selector_template', value }
+  }
+
+  const rowMatch = log.match(/^\[Debug\]\s*Using row selector:\s*(.+?)\s*\(count=/)
+  if (rowMatch) {
+    const value = normalizeDetectedSelectorValue(rowMatch[1])
+    if (!value) return null
+    return { key: 'order_row_selectors', value }
+  }
+
+  return null
+}
+
+function persistDetectedSelector(siteId: string, key: string, value: string): boolean {
+  const normalizedValue = normalizeDetectedSelectorValue(value)
+  if (!normalizedValue) return false
+
+  const cfg = loadLocalConfig()
+  if (!cfg.siteOverrides) cfg.siteOverrides = {}
+  if (!cfg.siteOverrides[siteId]) cfg.siteOverrides[siteId] = {}
+  const override = cfg.siteOverrides[siteId]
+  const selectors = { ...(override.selectors ?? {}) }
+
+  if (selectors[key] === normalizedValue) return false
+  selectors[key] = normalizedValue
+  override.selectors = selectors
+  cfg.siteOverrides[siteId] = override
+  saveLocalConfig(cfg)
+  return true
+}
+
+function tryPersistSelectorFromLog(siteId: string, log: string) {
+  const detected = extractDetectedSelector(log)
+  if (!detected) return
+  const updated = persistDetectedSelector(siteId, detected.key, detected.value)
+  if (updated) {
+    sendLog(siteId, `[System] 已保存本地选择器 ${detected.key}`)
+  }
+}
+
+function extractAttentionReasonFromLog(log: string): string | null {
+  const normalized = log.trim()
+  if (!normalized) return null
+  const patterns = [
+    /登录需验证[:：]\s*(.+)$/i,
+    /需要人工介入[:：]\s*(.+)$/i,
+    /(验证码)/i,
+    /(滑块)/i,
+    /(人机验证)/i,
+    /(风控)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern)
+    if (!match) continue
+    const reason = (match[1] || normalized).trim()
+    if (!reason) return normalized
+    return reason
+  }
+  return null
+}
+
 function sendSyncStatus(siteId: string, syncing: boolean) {
   mainWindow?.webContents.send('sync:status', { siteId, syncing })
 }
 
+function sendAttentionStatus(siteId: string, needsAttention: boolean, siteName: string, message = '') {
+  if (needsAttention) {
+    attentionStates.set(siteId, { siteName, message })
+  } else {
+    attentionStates.delete(siteId)
+  }
+  updateTrayAppearance()
+  mainWindow?.webContents.send('sync:attention', { siteId, needsAttention, siteName, message })
+}
+
+function clearAttentionState(siteId: string, siteName = '') {
+  sendAttentionStatus(siteId, false, siteName)
+}
+
 function notifyAttentionNeeded(siteName: string, siteId: string, reason: string) {
   console.log(`[notify] notifyAttentionNeeded called: ${siteName} - ${reason}`)
-  // System notification bubble
-  if (Notification.isSupported()) {
-    console.log('[notify] Notification.isSupported() = true, showing...')
+  if (tray && process.platform === 'win32') {
+    tray.displayBalloon({
+      title: `需要人工介入 — ${siteName}`,
+      content: reason,
+      iconType: 'warning',
+      largeIcon: true,
+    })
+  } else if (Notification.isSupported()) {
     new Notification({
       title: `需要人工介入 — ${siteName}`,
       body: reason,
       urgency: 'critical',
     }).show()
-  } else {
-    console.log('[notify] Notification.isSupported() = false')
   }
-  // Focus the browser tab for this site
-  focusPageForSite(siteId)
+  setSiteWindowVisibility(siteId, true)
+    .then(() => focusPageForSite(siteId))
+    .catch(() => focusPageForSite(siteId))
 }
 
 // ── Core sync runner ──────────────────────────────────────────────────────────
@@ -697,16 +875,17 @@ async function runPlatformSync(
   }
   syncingSet.add(siteId)
   sendSyncStatus(siteId, true)
+  let browserShownForAttention = false
 
   try {
-    const site = erpConfig.sites?.find(s => s.id === siteId)
-    const platformKey = detectPlatformKey(siteId, site?.name || '')
+    const localConfig = loadLocalConfig()
+    const mergedConfig = applyLocalOverrides(erpConfig, localConfig)
+    const site = mergedConfig.sites?.find(s => s.id === siteId)
+    const platformKey = detectPlatformKey(siteId, site?.name || '', site?.loginUrl)
     const mod = platformModules[platformKey]
     if (!mod) { sendLog(siteId, `未知平台: ${platformKey}`); return }
 
     sendLog(siteId, `[${site?.name ?? siteId}] 开始初始化...`)
-    const localConfig = loadLocalConfig()
-    const mergedConfig = applyLocalOverrides(erpConfig, localConfig)
     // Override headless based on per-site or global showBrowser setting from local config
     const effectiveShowBrowser = localConfig.showBrowserPerSite[siteId] ?? localConfig.showBrowser
     const configWithBrowser = { ...mergedConfig, headless: !effectiveShowBrowser, _showBrowser: effectiveShowBrowser }
@@ -721,7 +900,7 @@ async function runPlatformSync(
     if (!startFn) { sendLog(siteId, `找不到启动函数`); return }
 
     // Inject shared page so each platform gets its own Chromium context
-    const sharedPage = await getPageForSite(siteId, showBrowser)
+    const sharedPage = await getPageForSite(siteId, showBrowser, platformKey)
     const siteCtx = platformContexts.get(siteId)!
     mod.setSharedPage?.(sharedPage, siteCtx)
 
@@ -750,7 +929,6 @@ async function runPlatformSync(
     // Poll status, forward logs, detect attention needed
     let lastLogCount = 0
     let attentionNotified = false
-    let browserShownForAttention = false
     let totalUpserted = 0
     let totalFailed = 0
     const BATCH_SIZE = 200
@@ -778,27 +956,45 @@ async function runPlatformSync(
         const status = getStatusFn?.()
         if (status?.logs) {
           const newLogs = status.logs.slice(lastLogCount)
-          for (const log of newLogs) sendLog(siteId, log)
+          for (const log of newLogs) {
+            sendLog(siteId, log)
+            tryPersistSelectorFromLog(siteId, log)
+            if (!attentionNotified) {
+              const reason = extractAttentionReasonFromLog(log)
+              if (reason) {
+                const cfg = loadLocalConfig()
+                const preferredVisible = cfg.showBrowserPerSite[siteId] ?? cfg.showBrowser
+                attentionNotified = true
+                sendAttentionStatus(siteId, true, site?.name ?? siteId, reason)
+                if (!preferredVisible) {
+                  browserShownForAttention = true
+                }
+                notifyAttentionNeeded(site?.name ?? siteId, siteId, reason)
+              }
+            }
+          }
           lastLogCount = status.logs.length
         }
         if (status?.needsAttention && !attentionNotified) {
           attentionNotified = true
-          // Auto show browser when attention needed
-          if (!currentShowBrowser) {
+          const cfg = loadLocalConfig()
+          const preferredVisible = cfg.showBrowserPerSite[siteId] ?? cfg.showBrowser
+          sendAttentionStatus(siteId, true, site?.name ?? siteId, status.message ?? '需要人工介入')
+          if (!preferredVisible) {
             browserShownForAttention = true
-            await setBrowserVisibility(true)
           }
-          // Bring the platform's tab to front
-          const page = platformPages.get(siteId)
-          if (page && !page.isClosed()) await page.bringToFront().catch(() => void 0)
           notifyAttentionNeeded(site?.name ?? siteId, siteId, status.message ?? '需要人工介入')
         }
-        // When attention resolved (login succeeded), restore browser visibility
-        if (browserShownForAttention && !status?.needsAttention && status?.status === 'running') {
-          browserShownForAttention = false
-          attentionNotified = false // allow re-notify if needed again
-          const cfg = loadLocalConfig()
-          if (!cfg.showBrowser) await setBrowserVisibility(false)
+        if (status?.needsAttention && attentionNotified) {
+          sendAttentionStatus(siteId, true, site?.name ?? siteId, status.message ?? '需要人工介入')
+        }
+        if (!status?.needsAttention && attentionNotified) {
+          attentionNotified = false
+          clearAttentionState(siteId, site?.name ?? siteId)
+          if (browserShownForAttention) {
+            browserShownForAttention = false
+            await setSiteWindowVisibility(siteId, false)
+          }
         }
 
         // Incremental push: flush every BATCH_SIZE orders collected so far
@@ -839,6 +1035,10 @@ async function runPlatformSync(
       platformPages.delete(siteId)
     }
   } finally {
+    if (browserShownForAttention) {
+      await setSiteWindowVisibility(siteId, false).catch(() => void 0)
+    }
+    clearAttentionState(siteId, cachedErpConfig?.sites?.find(s => s.id === siteId)?.name ?? siteId)
     syncingSet.delete(siteId)
     sendSyncStatus(siteId, false)
   }
@@ -857,7 +1057,7 @@ ipcMain.handle('platform:sync', async (_e, { siteId, erpUrl, apiToken, erpConfig
 // ── IPC: stop sync ────────────────────────────────────────────────────────────
 ipcMain.handle('platform:stop', async (_e, siteId: string) => {
   const site = cachedErpConfig?.sites?.find(s => s.id === siteId)
-  const platformKey = detectPlatformKey(siteId, site?.name || '')
+  const platformKey = detectPlatformKey(siteId, site?.name || '', site?.loginUrl)
   const mod = platformModules[platformKey]
   if (!mod) return { success: false, error: 'unknown platform' }
   const stopFn = mod[stopFnNames[platformKey]] as (() => Promise<unknown>) | undefined
@@ -874,6 +1074,7 @@ ipcMain.handle('platform:stop', async (_e, siteId: string) => {
   if (page && !page.isClosed()) {
     page.goto('about:blank').catch(() => void 0)
   }
+  clearAttentionState(siteId, site?.name ?? siteId)
   return { success: true }
 })
 

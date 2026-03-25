@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "check-orders.js",
+    "check-orders2.js",
+    "get-token.js",
   ]),
 ]);
 

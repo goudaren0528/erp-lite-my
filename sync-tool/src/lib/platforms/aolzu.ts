@@ -515,11 +515,6 @@ async function login(page: Page, site: SiteConfig) {
   if (await isOnLoginPage(page, site)) {
       updateStatus({ status: "awaiting_user", message: "需要人工介入: 请在弹出的窗口完成登录", needsAttention: true })
       appendLog("需要人工介入: 检测到处于登录页")
-      
-      const config = await loadConfig()
-      if (config?.webhookUrls && config.webhookUrls.length > 0) {
-          sendWebhookSimple(config, "奥租平台需要登录验证")
-      }
   }
 
   const start = Date.now()

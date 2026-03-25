@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('sync:status', handler)
     return () => ipcRenderer.removeListener('sync:status', handler)
   },
+  onSyncAttention: (cb: (data: { siteId: string; needsAttention: boolean; siteName: string; message: string }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, data: { siteId: string; needsAttention: boolean; siteName: string; message: string }) => cb(data)
+    ipcRenderer.on('sync:attention', handler)
+    return () => ipcRenderer.removeListener('sync:attention', handler)
+  },
   stopSync: (siteId: string) => ipcRenderer.invoke('platform:stop', siteId),
   getSiteOverride: (siteId: string) => ipcRenderer.invoke('config:getSiteOverride', siteId),
   setSiteOverride: (siteId: string, override: Record<string, unknown> | null) => ipcRenderer.invoke('config:setSiteOverride', siteId, override),

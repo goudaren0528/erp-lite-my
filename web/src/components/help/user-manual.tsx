@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { BookOpen, ChevronRight, Loader2 } from "lucide-react"
@@ -8,8 +8,84 @@ import { cn } from "@/lib/utils"
 import ReactMarkdown from 'react-markdown'
 import { getEnabledManualChapters } from "@/app/system/manual/actions"
 
+type ManualChapter = { id: string; title: string; content: string }
+
+type ManualHeading = {
+    level: number
+    text: string
+    id: string
+}
+
+function stripCodeFences(markdown: string) {
+    let result = ""
+    const lines = markdown.split(/\r?\n/)
+    let inFence = false
+
+    for (const line of lines) {
+        if (/^\s*```/.test(line)) {
+            inFence = !inFence
+            continue
+        }
+        if (!inFence) result += `${line}\n`
+    }
+
+    return result
+}
+
+function slugifyHeading(text: string) {
+    const cleaned = text
+        .trim()
+        .toLowerCase()
+        .replace(/[^\w\u4e00-\u9fff]+/g, "-")
+        .replace(/^-+/, "")
+        .replace(/-+$/, "")
+
+    return cleaned || "section"
+}
+
+function extractHeadings(markdown: string): ManualHeading[] {
+    const lines = stripCodeFences(markdown).split(/\r?\n/)
+    const raw: Array<{ level: number; text: string }> = []
+
+    for (const line of lines) {
+        const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
+        if (!match) continue
+        const level = match[1].length
+        const text = match[2].trim()
+        if (!text) continue
+        raw.push({ level, text })
+    }
+
+    const minLevel = raw.reduce((acc, h) => Math.min(acc, h.level), Infinity)
+    const preferredMin = raw.some((h) => h.level >= 2) ? 2 : minLevel
+    const preferredMax = preferredMin + 2
+
+    const filtered = raw.filter((h) => h.level >= preferredMin && h.level <= preferredMax)
+
+    const used: Record<string, number> = {}
+    return filtered.map((h, index) => {
+        const base = slugifyHeading(h.text)
+        const count = (used[base] ?? 0) + 1
+        used[base] = count
+        const id = count === 1 ? base : `${base}-${count}`
+        return { ...h, id: id || `section-${index + 1}` }
+    })
+}
+
+function extractPlainText(value: unknown): string {
+    if (typeof value === "string") return value
+    if (typeof value === "number") return String(value)
+    if (value == null) return ""
+    if (Array.isArray(value)) return value.map(extractPlainText).join("")
+    if (typeof value === "object" && "props" in (value as { props?: unknown })) {
+        const props = (value as { props?: { children?: unknown } }).props
+        return extractPlainText(props?.children)
+    }
+    return ""
+}
+
 export function UserManual({ collapsed }: { collapsed?: boolean }) {
-    const [chapters, setChapters] = useState<Array<{ id: string; title: string; content: string }>>([])
+    const [chapters, setChapters] = useState<ManualChapter[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [activeChapterId, setActiveChapterId] = useState<string | null>(null)
     const [open, setOpen] = useState(false)
@@ -21,10 +97,7 @@ export function UserManual({ collapsed }: { collapsed?: boolean }) {
                 try {
                     const data = await getEnabledManualChapters()
                     setChapters(data)
-                    // If no active chapter is selected, select the first one
-                    if (data.length > 0 && !activeChapterId) {
-                        setActiveChapterId(data[0].id)
-                    }
+                    setActiveChapterId((prev) => prev ?? data[0]?.id ?? null)
                 } catch (error) {
                     console.error("Failed to load manual chapters", error)
                 } finally {
@@ -36,6 +109,7 @@ export function UserManual({ collapsed }: { collapsed?: boolean }) {
     }, [open])
 
     const activeChapter = chapters.find(c => c.id === activeChapterId) || (chapters.length > 0 ? chapters[0] : null)
+    const toc = useMemo(() => extractHeadings(activeChapter?.content ?? ""), [activeChapter?.content])
 
     return (
         <Sheet open={open} onOpenChange={setOpen}>
@@ -94,9 +168,98 @@ export function UserManual({ collapsed }: { collapsed?: boolean }) {
                     {/* Content */}
                     <div className="flex-1 overflow-y-auto p-8 bg-background">
                         {activeChapter ? (
-                            <div className="max-w-none prose prose-sm dark:prose-invert break-words prose-p:my-1 prose-ul:my-2 prose-li:my-0 prose-headings:mt-4 prose-headings:mb-2">
-                                <h2 className="mb-4 text-2xl font-bold">{activeChapter.title}</h2>
-                                <ReactMarkdown>{activeChapter.content}</ReactMarkdown>
+                            <div className="flex gap-8">
+                                <div className="min-w-0 flex-1 max-w-none prose prose-sm dark:prose-invert break-words prose-p:my-1 prose-ul:my-2 prose-li:my-0 prose-headings:mt-4 prose-headings:mb-2">
+                                    <h2 className="mb-4 text-2xl font-bold">{activeChapter.title}</h2>
+                                    {(() => {
+                                        const queues = new Map<string, string[]>()
+                                        for (const h of toc) {
+                                            const key = `${h.level}:${h.text}`
+                                            const existing = queues.get(key) ?? []
+                                            existing.push(h.id)
+                                            queues.set(key, existing)
+                                        }
+
+                                        const fallbackUsed: Record<string, number> = {}
+
+                                        const getId = (level: number, text: string) => {
+                                            const key = `${level}:${text}`
+                                            const queue = queues.get(key)
+                                            const next = queue?.shift()
+                                            if (next) return next
+                                            const base = slugifyHeading(text)
+                                            const count = (fallbackUsed[base] ?? 0) + 1
+                                            fallbackUsed[base] = count
+                                            return count === 1 ? base : `${base}-${count}`
+                                        }
+
+                                        return (
+                                            <ReactMarkdown
+                                                components={{
+                                                    h1: ({ children, ...props }) => {
+                                                        const text = extractPlainText(children).trim()
+                                                        const id = getId(1, text)
+                                                        return <h1 id={id} {...props}>{children}</h1>
+                                                    },
+                                                    h2: ({ children, ...props }) => {
+                                                        const text = extractPlainText(children).trim()
+                                                        const id = getId(2, text)
+                                                        return <h2 id={id} {...props}>{children}</h2>
+                                                    },
+                                                    h3: ({ children, ...props }) => {
+                                                        const text = extractPlainText(children).trim()
+                                                        const id = getId(3, text)
+                                                        return <h3 id={id} {...props}>{children}</h3>
+                                                    },
+                                                    h4: ({ children, ...props }) => {
+                                                        const text = extractPlainText(children).trim()
+                                                        const id = getId(4, text)
+                                                        return <h4 id={id} {...props}>{children}</h4>
+                                                    },
+                                                    h5: ({ children, ...props }) => {
+                                                        const text = extractPlainText(children).trim()
+                                                        const id = getId(5, text)
+                                                        return <h5 id={id} {...props}>{children}</h5>
+                                                    },
+                                                    h6: ({ children, ...props }) => {
+                                                        const text = extractPlainText(children).trim()
+                                                        const id = getId(6, text)
+                                                        return <h6 id={id} {...props}>{children}</h6>
+                                                    },
+                                                }}
+                                            >
+                                                {activeChapter.content}
+                                            </ReactMarkdown>
+                                        )
+                                    })()}
+                                </div>
+
+                                {toc.length > 0 && (
+                                    <div className="hidden lg:block w-60 shrink-0">
+                                        <div className="sticky top-8">
+                                            <div className="text-sm font-medium text-foreground mb-2">本章目录</div>
+                                            <div className="space-y-1 border-l pl-3">
+                                                {(() => {
+                                                    const baseLevel = toc.reduce((acc, h) => Math.min(acc, h.level), Infinity)
+                                                    return toc.map((h) => (
+                                                        <button
+                                                            key={h.id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const el = document.getElementById(h.id)
+                                                                el?.scrollIntoView({ behavior: "smooth", block: "start" })
+                                                            }}
+                                                            className="block w-full text-left text-sm text-muted-foreground hover:text-foreground"
+                                                            style={{ paddingLeft: Math.max(0, (h.level - baseLevel) * 12) }}
+                                                        >
+                                                            {h.text}
+                                                        </button>
+                                                    ))
+                                                })()}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             !isLoading && (

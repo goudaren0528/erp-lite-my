@@ -1,4 +1,4 @@
-﻿import path from "path"
+import path from "path"
 import fs from "fs"
 import { chromium, type BrowserContext, type Frame, type Page, type ElementHandle } from "playwright"
 
@@ -473,7 +473,6 @@ async function ensureNoRisk(page: Page, site: SiteConfig, timeoutMs = 5 * 60_000
         message: "登录需要人工验证或短信验证码",
         needsAttention: true
       })
-      void loadConfig().then(cfg => sendWebhook(cfg, "登录检测到需要人工验证"))
       await page.waitForTimeout(1200)
       continue
     }
@@ -2368,9 +2367,15 @@ async function runZanchenSync(siteId: string) {
 
       setStatus({ status: "running", message: "等待登录状态确认" })
       let loggedIn = await waitUntilLoggedIn(page, site, 8_000)
+      let stillOnLoginAfterFirstAttempt = false
+      let riskHintAfterFirstAttempt: Awaited<ReturnType<typeof detectRiskHint>> = null
+      if (!loggedIn) {
+        stillOnLoginAfterFirstAttempt = await isOnLoginPage(page, site)
+        riskHintAfterFirstAttempt = await detectRiskHint(page)
+      }
       
       // Retry logic: if failed, reload and try once more
-      if (!loggedIn && ((await isOnLoginPage(page, site)) || (await detectRiskHint(page)))) {
+      if (!loggedIn && stillOnLoginAfterFirstAttempt && !riskHintAfterFirstAttempt) {
           addLog("[System] First login attempt failed. Reloading page to retry...")
           setStatus({ status: "running", message: "登录失败，正在刷新重试..." })
           
@@ -2389,15 +2394,14 @@ async function runZanchenSync(siteId: string) {
           loggedIn = await waitUntilLoggedIn(page, site, 8_000)
       }
 
-      const riskHint = await detectRiskHint(page)
+      const riskHint = riskHintAfterFirstAttempt ?? await detectRiskHint(page)
 
-      if (!loggedIn && ((await isOnLoginPage(page, site)) || riskHint)) {
+      if (!loggedIn && (stillOnLoginAfterFirstAttempt || (await isOnLoginPage(page, site)) || riskHint)) {
         setStatus({
           status: "awaiting_user",
           message: riskHint ? `登录需验证: ${riskHint.reason}` : "登录需要人工验证或短信验证码",
           needsAttention: true
         })
-        void loadConfig().then(cfg => sendWebhook(cfg, "登录验证等待人工介入"))
 
         const solved = await waitUntilLoggedIn(page, site, 5 * 60_000)
         if (!solved) {
@@ -2973,5 +2977,3 @@ export async function restartZanchenBrowser() {
   runtime.status = { ...runtime.status, status: "idle", message: "浏览器已重启，可重新开始同步" }
   return { success: true }
 }
-
-

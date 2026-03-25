@@ -10,6 +10,51 @@ import { getRrzStatus } from "@/lib/online-orders/rrz"
 
 export const dynamic = "force-dynamic"
 
+function detectPlatformKeyByNameOrId(siteId: string, siteName: string): string {
+  const id = siteId.toLowerCase()
+  if (siteName.includes("诚赁") || id.includes("chenglin") || id.includes("chenlin")) return "chenglin"
+  if (siteName.includes("奥租") || id.includes("aolzu") || id.includes("aozu")) return "aolzu"
+  if (siteName.includes("优品") || id.includes("youpin")) return "youpin"
+  if (siteName.includes("零零享") || id.includes("llxzu")) return "llxzu"
+  if (siteName.includes("人人租") || id.includes("rrz")) return "rrz"
+  return "zanchen"
+}
+
+function normalizeLoginUrl(raw?: string): { exact: string; origin: string } | null {
+  const text = raw?.trim()
+  if (!text) return null
+  try {
+    const withProtocol = /^https?:\/\//i.test(text) ? text : `http://${text}`
+    const parsed = new URL(withProtocol)
+    const origin = parsed.origin.toLowerCase()
+    const pathname = (parsed.pathname || "/").replace(/\/+$/, "") || "/"
+    return { exact: `${origin}${pathname.toLowerCase()}`, origin }
+  } catch {
+    return null
+  }
+}
+
+function detectPlatformKey(siteId: string, siteName: string, loginUrl: string | undefined, sites: { id: string; name: string; loginUrl?: string }[]): string {
+  const explicitKey = detectPlatformKeyByNameOrId(siteId, siteName)
+  if (explicitKey !== "zanchen") return explicitKey
+  const current = normalizeLoginUrl(loginUrl)
+  if (!current) return explicitKey
+
+  let sameOriginKey: string | null = null
+  for (const candidate of sites) {
+    if (candidate.id === siteId) continue
+    const candidateKey = detectPlatformKeyByNameOrId(candidate.id, candidate.name || "")
+    if (candidateKey === "zanchen") continue
+    const candidateUrl = normalizeLoginUrl(candidate.loginUrl)
+    if (!candidateUrl) continue
+    if (candidateUrl.exact === current.exact) return candidateKey
+    if (!sameOriginKey && candidateUrl.origin === current.origin) {
+      sameOriginKey = candidateKey
+    }
+  }
+  return sameOriginKey ?? explicitKey
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization")
   if (authHeader) {
@@ -25,63 +70,27 @@ export async function GET(req: NextRequest) {
   }
   
   const siteId = req.nextUrl.searchParams.get("siteId")
-  
-  // Resolve site to check name if ID is generic
-  // We need to check if this site is intended to be handled by Chenglin or Aolzu logic
-  let isChenglin = false
-  let isAolzu = false
-  let isYoupin = false
-  let isLlxzu = false
-  let isRrz = false
-  
-  if (siteId) {
-      if (siteId === "chenglin" || siteId === "chenlin" || siteId.toLowerCase().includes("chenglin") || siteId.toLowerCase().includes("chenlin")) {
-          isChenglin = true
-      } else if (siteId === "aolzu" || siteId === "aozu" || siteId.toLowerCase().includes("aolzu") || siteId.toLowerCase().includes("aozu")) {
-          isAolzu = true
-      } else if (siteId === "youpin" || siteId.toLowerCase().includes("youpin")) {
-          isYoupin = true
-      } else if (siteId === "llxzu" || siteId.toLowerCase().includes("llxzu")) {
-          isLlxzu = true
-      } else if (siteId === "rrz" || siteId.toLowerCase().includes("rrz")) {
-          isRrz = true
-      } else {
-          // Check config by name
-          const config = await loadConfig()
-          const site = config?.sites.find(s => s.id === siteId)
-          if (site) {
-              if (site.name.includes("诚赁") || site.name.toLowerCase().includes("chenglin") || site.name.toLowerCase().includes("chenlin")) {
-                  isChenglin = true
-              } else if (site.name.includes("奥租") || site.name.toLowerCase().includes("aolzu") || site.name.toLowerCase().includes("aozu")) {
-                  isAolzu = true
-              } else if (site.name.includes("优品") || site.name.toLowerCase().includes("youpin")) {
-                  isYoupin = true
-              } else if (site.name.includes("零零享") || site.name.toLowerCase().includes("llxzu")) {
-                  isLlxzu = true
-              } else if (site.name.includes("人人租") || site.name.toLowerCase().includes("rrz")) {
-                  isRrz = true
-              }
-          }
-      }
-  }
+  const config = await loadConfig()
+  const site = siteId ? config?.sites.find(s => s.id === siteId) : undefined
+  const platformKey = siteId ? detectPlatformKey(siteId, site?.name || "", site?.loginUrl, config?.sites ?? []) : "zanchen"
 
-  if (isChenglin) {
+  if (platformKey === "chenglin") {
       return NextResponse.json(getChenglinStatus())
   }
   
-  if (isAolzu) {
+  if (platformKey === "aolzu") {
       return NextResponse.json(getAolzuStatus())
   }
   
-  if (isYoupin) {
+  if (platformKey === "youpin") {
       return NextResponse.json(getYoupinStatus())
   }
   
-  if (isLlxzu) {
+  if (platformKey === "llxzu") {
       return NextResponse.json(getLlxzuStatus())
   }
 
-  if (isRrz) {
+  if (platformKey === "rrz") {
       return NextResponse.json(getRrzStatus())
   }
   

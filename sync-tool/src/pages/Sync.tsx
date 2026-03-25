@@ -17,6 +17,7 @@ type SiteConfig = {
 }
 
 type LogEntry = { time: string; siteId: string; msg: string }
+type AttentionEntry = { siteName: string; message: string }
 
 type Props = {
   localConfig: LocalConfig
@@ -29,6 +30,7 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
   const [sites, setSites] = useState<SiteConfig[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [syncingSet, setSyncingSet] = useState<Set<string>>(new Set())
+  const [attentionMap, setAttentionMap] = useState<Record<string, AttentionEntry>>({})
   const [loading, setLoading] = useState(false)
   const [filterSite, setFilterSite] = useState<string | null>(null) // null = show all
   const [editingSchedule, setEditingSchedule] = useState<string | null>(null) // siteId being edited
@@ -70,6 +72,10 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
         }
       })
     }, 500)
+    window.electronAPI.getSyncStatus().then(({ syncing, attention }) => {
+      setSyncingSet(new Set(syncing))
+      setAttentionMap(attention)
+    }).catch(() => void 0)
 
     const unsubLog = window.electronAPI.onSyncLog(({ siteId, msg }) => {
       setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), siteId, msg }].slice(-1000))
@@ -82,7 +88,17 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
         return next
       })
     })
-    return () => { clearTimeout(t); unsubLog(); unsubStatus() }
+    const unsubAttention = window.electronAPI.onSyncAttention(({ siteId, needsAttention, siteName, message }) => {
+      setAttentionMap(prev => {
+        if (needsAttention) {
+          return { ...prev, [siteId]: { siteName, message } }
+        }
+        const next = { ...prev }
+        delete next[siteId]
+        return next
+      })
+    })
+    return () => { clearTimeout(t); unsubLog(); unsubStatus(); unsubAttention() }
   }, [])
 
   useEffect(() => {
@@ -178,22 +194,63 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
           )}
           {sites.map(site => {
             const isSyncing = syncingSet.has(site.id)
+            const attention = attentionMap[site.id]
+            const needsAttention = !!attention
             const effectiveTimes = getEffectiveTimes(site)
             const isLocalOverride = !!localConfig.scheduledTimes[site.id]?.length
             const showBrowser = localConfig.showBrowserPerSite[site.id] ?? localConfig.showBrowser
             return (
               <div key={site.id} style={{
-                border: `1px solid ${isSyncing ? '#3b82f6' : '#e5e7eb'}`,
+                border: `1px solid ${needsAttention ? '#f59e0b' : isSyncing ? '#3b82f6' : '#e5e7eb'}`,
                 borderRadius: 8, padding: 10, marginBottom: 8, background: '#fff',
-                boxShadow: isSyncing ? '0 0 0 2px #bfdbfe' : undefined
+                boxShadow: needsAttention ? '0 0 0 2px #fed7aa' : isSyncing ? '0 0 0 2px #bfdbfe' : undefined
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: siteColor[site.id] ?? '#888', flexShrink: 0, display: 'inline-block' }} />
                       <span style={{ fontWeight: 500, fontSize: 13 }}>{site.name}</span>
+                      {needsAttention && (
+                        <span
+                          title={attention.message}
+                          style={{
+                            minWidth: 18,
+                            height: 18,
+                            borderRadius: 999,
+                            background: '#fff7ed',
+                            border: '1px solid #fdba74',
+                            color: '#c2410c',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: 'help',
+                            flexShrink: 0,
+                          }}
+                        >
+                          !
+                        </span>
+                      )}
                       {isSyncing && <span style={{ fontSize: 11, color: '#3b82f6', animation: 'pulse 1s infinite' }}>抓取中...</span>}
                     </div>
+                    {needsAttention && (
+                      <div
+                        title={attention.message}
+                        style={{
+                          marginTop: 6,
+                          fontSize: 11,
+                          color: '#c2410c',
+                          background: '#fff7ed',
+                          border: '1px solid #fdba74',
+                          borderRadius: 6,
+                          padding: '4px 6px',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        需人工处理：{attention.message}
+                      </div>
+                    )}
                     {/* Schedule row */}
                     <div style={{ marginTop: 6, fontSize: 11 }}>
                       {editingSchedule === site.id ? (

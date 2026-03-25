@@ -349,10 +349,6 @@ function DayDetailSheet({
     const [inventoryItemPage, setInventoryItemPage] = useState(1)
     const pageSize = 10
 
-    // Reset pages when content changes
-    useEffect(() => { setCurrentPage(1) }, [selectedDayOrders, selectedDayType])
-    useEffect(() => { setInventoryItemPage(1) }, [inventoryItems])
-
     const totalPages = Math.ceil(selectedDayOrders.length / pageSize)
     const currentSheetOrders = selectedDayOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
     const dayTypeLabel = selectedDayType === 'in' ? '入库' : selectedDayType === 'out' ? '出库' : selectedDayType === 'stock' ? '在库' : '占用'
@@ -562,7 +558,7 @@ function DayDetailSheet({
                                             const windowSize = 10
                                             const half = Math.floor(windowSize / 2)
                                             let startPage = Math.max(1, inventoryItemPage - half)
-                                            let endPage = Math.min(invTotalPages, startPage + windowSize - 1)
+                                            const endPage = Math.min(invTotalPages, startPage + windowSize - 1)
                                             if (endPage - startPage + 1 < windowSize) startPage = Math.max(1, endPage - windowSize + 1)
                                             const pageNums = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i)
                                             return (
@@ -662,7 +658,7 @@ function DayDetailSheet({
                                 const windowSize = 10
                                 const half = Math.floor(windowSize / 2)
                                 let startPage = Math.max(1, currentPage - half)
-                                let endPage = Math.min(totalPages, startPage + windowSize - 1)
+                                const endPage = Math.min(totalPages, startPage + windowSize - 1)
                                 if (endPage - startPage + 1 < windowSize) {
                                     startPage = Math.max(1, endPage - windowSize + 1)
                                 }
@@ -1212,6 +1208,31 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         }
     }, [activeTab, selectedItemTypeId, selectedVariantId, componentStock, allVariants])
 
+    const todayAllItemsMovement = useMemo(() => {
+        if (activeTab !== "item") return null
+        const today = new Date()
+        let inTotal = 0
+        let outTotal = 0
+
+        orders.forEach((o) => {
+            const range = (orderRangeMap.get(o.id) ?? null)
+            if (!range) return
+            if (!o.specId) return
+
+            const hit = specLookup.byId.get(o.specId) || specLookup.bySpecId.get(o.specId)
+            if (!hit) return
+
+            const qtySum = hit.spec.bomItems?.reduce((acc, b) => acc + (Number.isFinite(b.quantity) ? b.quantity : 0), 0) ?? 0
+            if (qtySum <= 0) return
+
+            const outDate = range.outDate || range.start
+            if (isSameDay(today, outDate)) outTotal += qtySum
+            if (isSameDay(today, range.end)) inTotal += qtySum
+        })
+
+        return { inTotal, outTotal }
+    }, [activeTab, orders, orderRangeMap, specLookup])
+
     const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1))
     const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1))
 
@@ -1690,15 +1711,26 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                             </PopoverContent>
                         </Popover>
                     )}
+
+                    {activeTab === "item" && todayAllItemsMovement && (
+                        <div className="flex items-center gap-1">
+                            <Badge variant="secondary" className="h-8 text-xs font-normal">
+                                今日到货 {todayAllItemsMovement.inTotal}
+                            </Badge>
+                            <Badge variant="secondary" className="h-8 text-xs font-normal">
+                                今日发货 {todayAllItemsMovement.outTotal}
+                            </Badge>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-2">
-                    {canManage && (
+                    {/* {canManage && (
                         <Button variant="outline" size="sm" onClick={handleBatchMatch} disabled={isBatchMatching} title="按规格名称自动匹配订单">
                             {isBatchMatching ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Wand2 className="h-4 w-4 mr-1" />}
                             自动匹配
                         </Button>
-                    )}
+                    )} */}
                     {canManage && (
                         <Popover open={isConfigOpen} onOpenChange={setIsConfigOpen}>
                             <PopoverTrigger asChild>
@@ -1735,6 +1767,23 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                         {calendarConfig.regionBuffers.length === 0 && (
                                             <p className="text-xs text-muted-foreground text-center py-2">暂无地区配置，所有订单使用默认缓冲</p>
                                         )}
+                                    </div>
+                                    <div className="space-y-1 mt-2">
+                                        <h4 className="font-medium leading-none text-xs">过滤配置</h4>
+                                        <p className="text-xs text-muted-foreground">配置赞晨平台需要过滤的商家（不计入库存占用），多个商家用逗号分隔</p>
+                                        <Input 
+                                            placeholder="商家A,商家B" 
+                                            className="text-xs h-8"
+                                            defaultValue={calendarConfig.zanchenFilteredMerchants?.join(',') || ''}
+                                            onBlur={e => {
+                                                const val = e.target.value
+                                                const merchants = val
+                                                    .split(/[\n,，;；、|]+/g)
+                                                    .map(s => s.trim())
+                                                    .filter(Boolean)
+                                                setCalendarConfig(c => ({ ...c, zanchenFilteredMerchants: merchants }))
+                                            }}
+                                        />
                                     </div>
                                     <Button onClick={handleSaveConfig} disabled={isSavingConfig} size="sm">
                                         {isSavingConfig && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1816,6 +1865,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             </Card>
 
             <DayDetailSheet
+                key={`${selectedDate ? selectedDate.toISOString() : "none"}-${selectedDayType}-${activeTab}-${selectedDayOrders.length}-${inventoryItems.length}`}
                 open={sheetOpen}
                 onOpenChange={setSheetOpen}
                 selectedDate={selectedDate}

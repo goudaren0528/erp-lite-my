@@ -1,4 +1,4 @@
-﻿import path from "path"
+import path from "path"
 import fs from "fs"
 import net from "net"
 import { chromium, type BrowserContext, type Page } from "playwright"
@@ -696,11 +696,6 @@ async function login(page: Page, site: SiteConfig) {
     // NOTE: 零零享需要先通过图片验证码才能获取短信验证码，不能自动点击，需人工在 remote-auth 界面操作
     updateStatus({ status: "awaiting_user", message: "需要人工介入: 请在远程界面完成图片验证码后获取短信验证码并登录", needsAttention: true })
     appendLog("需要人工介入: 检测到处于登录页 (零零享需短信验证)")
-
-    const config = await loadConfig()
-    if (config?.webhookUrls && config.webhookUrls.length > 0) {
-      sendWebhookSimple(config, "零零享平台需要登录验证")
-    }
   }
 
   // Wait up to 5 minutes for user to complete login
@@ -1480,7 +1475,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<LlxzuParsedOrd
                 rentStartDate,
                 returnDeadline,
                 duration,
-                platform: "\u96f6\u96f6\u4eab", 
+                platform: site.name?.trim() || "\u96f6\u96f6\u4eab",
                 productName,
                 variantName,
                 itemTitle: productName,
@@ -1588,13 +1583,10 @@ export async function startLlxzuSync(siteId: string) {
         throw new Error("Online orders config not found")
     }
 
-    const site = config.sites.find(s => 
-        s.id === siteId || 
-        s.id.toLowerCase() === siteId.toLowerCase() ||
-        s.name.trim() === '零零享'
+    const targetSite = config.sites.find(s =>
+        s.id === siteId ||
+        s.id.toLowerCase() === siteId.toLowerCase()
     )
-    
-    const targetSite = site ?? config.sites.find(s => s.name.includes('零零享') || s.id.includes('llxzu'))
     if (!targetSite) {
         throw new Error(`Site ${siteId} not found in config`)
     }

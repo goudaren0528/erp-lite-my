@@ -44,9 +44,10 @@ declare global {
       importOrders: (params: { erpUrl: string; apiToken: string; csvContent: string }) => Promise<{ success: boolean; error?: string }>
       setBrowserVisibility: (show: boolean) => Promise<boolean>
       setSiteBrowserVisibility: (siteId: string, show: boolean) => Promise<boolean>
-      getSyncStatus: () => Promise<{ syncing: string[] }>
+      getSyncStatus: () => Promise<{ syncing: string[]; attention: Record<string, { siteName: string; message: string }> }>
       onSyncLog: (cb: (data: { siteId: string; msg: string }) => void) => () => void
       onSyncStatus: (cb: (data: { siteId: string; syncing: boolean }) => void) => () => void
+      onSyncAttention: (cb: (data: { siteId: string; needsAttention: boolean; siteName: string; message: string }) => void) => () => void
       stopSync: (siteId: string) => Promise<{ success: boolean; error?: string }>
       getSiteOverride: (siteId: string) => Promise<SiteOverride | null>
       setSiteOverride: (siteId: string, override: Record<string, unknown> | null) => Promise<boolean>

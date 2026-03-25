@@ -814,6 +814,9 @@ async function login(page: Page, site: SiteConfig) {
 
   const start = Date.now()
   while (Date.now() - start < 300_000) {
+      if (runtime.shouldStop) {
+          throw new Error("SYNC_STOPPED")
+      }
       if (!(await isOnLoginPage(page, site)) && page.url() !== "about:blank") {
           appendLog("Login appears successful.")
           updateStatus({ status: "running", message: "登录成功，继续执行...", needsAttention: false })
@@ -1233,6 +1236,69 @@ async function saveDebugScreenshot(page: Page, label: string) {
     }
 }
 
+function parseRrzCreatedAtFromApi(base: Record<string, unknown>): Date | undefined {
+    const candidates: unknown[] = [
+        base["created_at"],
+        base["createdAt"],
+        base["create_time"],
+        base["createTime"],
+        base["order_create_time"],
+        base["orderCreateTime"],
+        base["order_time"],
+        base["orderTime"],
+        base["add_time"],
+        base["ctime"]
+    ]
+    for (const raw of candidates) {
+        if (raw === null || raw === undefined || raw === "") continue
+        if (typeof raw === "number" && Number.isFinite(raw)) {
+            if (raw > 1_000_000_000_000 || raw > 1_000_000_000) {
+                const ms = raw > 1_000_000_000_000 ? raw : raw * 1000
+                const d = new Date(ms)
+                if (!Number.isNaN(d.getTime())) return d
+            }
+            continue
+        }
+        const text = String(raw).trim()
+        if (!text) continue
+        if (/^\d{13}$/.test(text)) {
+            const n = Number(text)
+            const d = new Date(n)
+            if (!Number.isNaN(d.getTime())) return d
+            continue
+        }
+        if (/^\d{10}$/.test(text)) {
+            const n = Number(text)
+            const d = new Date(n * 1000)
+            if (!Number.isNaN(d.getTime())) return d
+            continue
+        }
+        if (/^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?$/.test(text)) {
+            const d = new Date(text)
+            if (!Number.isNaN(d.getTime())) return d
+            continue
+        }
+        if (/^\d{4}-\d{2}-\d{2}T/.test(text)) {
+            const normalized = text.replace(/\.\d+Z$/, "Z")
+            const d = new Date(normalized)
+            if (!Number.isNaN(d.getTime())) return d
+            continue
+        }
+    }
+    return undefined
+}
+
+function toCompactJson(value: unknown, maxLen = 4000): string {
+    try {
+        const text = JSON.stringify(value)
+        if (!text) return ""
+        return text.length > maxLen ? `${text.slice(0, maxLen)}...(truncated)` : text
+    } catch {
+        const text = String(value ?? "")
+        return text.length > maxLen ? `${text.slice(0, maxLen)}...(truncated)` : text
+    }
+}
+
 async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expectedPage: number): Promise<RrzParsedOrder[]> {
     void root
     void site
@@ -1284,6 +1350,27 @@ async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expected
     const apiList = extracted
     const url = latestUrlFromMap || rt.latestOrderListUrl || ""
     appendLog(`[API Intercept] page=${expectedPage} orders=${apiList.length} url=${url}`)
+    try {
+        const samples = apiList.slice(0, 3).map((row, idx) => {
+            const record = isRecord(row) ? row : {}
+            const base = isRecord(record["base_info"]) ? record["base_info"] : {}
+            const baseRecord = base as Record<string, unknown>
+            return {
+                idx: idx + 1,
+                orderNo: String(baseRecord["order_id"] || ""),
+                orderStatus: baseRecord["order_status"],
+                createTime: baseRecord["create_time"] ?? baseRecord["created_at"] ?? baseRecord["order_create_time"] ?? baseRecord["order_time"] ?? baseRecord["add_time"] ?? "",
+                resolvedCreatedAt: parseRrzCreatedAtFromApi(baseRecord)?.toISOString() || "",
+                keys: Object.keys(record).slice(0, 30)
+            }
+        })
+        appendLog(`[API Raw Summary] page=${expectedPage} samples=${toCompactJson(samples, 3000)}`)
+        if (apiList.length > 0) {
+            appendLog(`[API Raw First] page=${expectedPage} data=${toCompactJson(apiList[0], 6000)}`)
+        }
+    } catch (e) {
+        appendLog(`[API Raw] page=${expectedPage} log_failed=${e}`)
+    }
 
     const apiUnknownStatusCounts = new Map<
       string,
@@ -1401,7 +1488,7 @@ async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expected
             returnLatestLogisticsInfo: "",
             itemTitle: spu.spu_name || "",
             itemSku: spu.sku_name || "",
-            createdAt: undefined as Date | undefined
+            createdAt: parseRrzCreatedAtFromApi(base as Record<string, unknown>)
         }
     })
 
@@ -2724,7 +2811,7 @@ export async function startRrzSync(siteId: string) {
     appendLog(`Max pages set to: ${MAX_PAGES}`)
     
     let hasMore = true
-    const stopThreshold = config?.stopThreshold ?? 20
+    const stopThreshold = (targetSite as unknown as { stopThreshold?: number }).stopThreshold ?? config?.stopThreshold ?? 20
     let consecutiveFinalStateCount = 0
     const finalStatuses = ["COMPLETED", "CLOSED", "BOUGHT_OUT", "CANCELED"]
     appendLog(`Incremental stop threshold: ${stopThreshold}`)
@@ -2736,12 +2823,17 @@ export async function startRrzSync(siteId: string) {
     const isCrashError = (e: unknown) => PAGE_CRASH_ERRORS.some(s => String(e).includes(s))
     let pageRetryCount = 0
     const MAX_PAGE_RETRIES = 3
+    let loginRetryCount = 0
+    const MAX_LOGIN_RETRIES = 1
 
-    const rebuildAndNavigate = async () => {
-        try { await runtime.context?.close() } catch {}
-        runtime.context = undefined
-        runtime.page = undefined
-        await new Promise(r => setTimeout(r, 3000))
+    const rebuildAndNavigate = async (opts?: { preserveContext?: boolean }) => {
+        const preserveContext = !!opts?.preserveContext
+        if (!preserveContext) {
+            try { await runtime.context?.close() } catch {}
+            runtime.context = undefined
+            runtime.page = undefined
+            await new Promise(r => setTimeout(r, 3000))
+        }
         page = await ensurePage(headless)
         await login(page, targetSite)
         await page.waitForLoadState("domcontentloaded")
@@ -2965,7 +3057,13 @@ export async function startRrzSync(siteId: string) {
             }
         }
         } catch (pageErr) {
-            if (isCrashError(pageErr) && pageRetryCount < MAX_PAGE_RETRIES) {
+            if (String(pageErr).includes("RRZ_LOGIN_REQUIRED") && loginRetryCount < MAX_LOGIN_RETRIES) {
+                loginRetryCount++
+                appendLog(`[Auth] 检测到登录态失效，正在尝试自动重登并续抓第 ${currentPage} 页 (${loginRetryCount}/${MAX_LOGIN_RETRIES})...`)
+                updateStatus({ status: "running", message: `登录态失效，正在自动重登并恢复第 ${currentPage} 页...`, needsAttention: false })
+                await rebuildAndNavigate({ preserveContext: true })
+                appendLog(`[Auth] 自动重登完成，继续抓取第 ${currentPage} 页。`)
+            } else if (isCrashError(pageErr) && pageRetryCount < MAX_PAGE_RETRIES) {
                 pageRetryCount++
                 appendLog(`[Crash] Page crash on page ${currentPage} (retry ${pageRetryCount}/${MAX_PAGE_RETRIES}): ${pageErr}`)
                 updateStatus({ message: `页面崩溃，正在重试第 ${currentPage} 页 (${pageRetryCount}/${MAX_PAGE_RETRIES})...` })
@@ -3004,6 +3102,11 @@ export async function startRrzSync(siteId: string) {
 
   } catch (e) {
     const msg = String(e)
+    if (msg.includes("SYNC_STOPPED")) {
+        appendLog("Sync stopped by user.")
+        updateStatus({ status: "idle", message: "已停止" })
+        return
+    }
     if (msg.includes("RRZ_LOGIN_REQUIRED")) {
         updateStatus({
             status: "awaiting_user",

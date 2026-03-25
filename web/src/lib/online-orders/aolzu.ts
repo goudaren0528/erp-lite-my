@@ -697,7 +697,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
             const titleMatch = fullText.match(/商品编号[：:]\s*\d+\s+([\s\S]+?)套餐[：:]/)
             if (titleMatch) {
                 // Strip known noise fields that appear between 商品编号 and the actual product name
-                let raw = titleMatch[1]
+                const raw = titleMatch[1]
                     .replace(/发货时间[：:]\s*[\d\-: ]+/g, "")
                     .replace(/快递单号[：:]\s*\S+/g, "")
                     .replace(/【[^】]*(速运|快递|物流)[^】]*】/g, "")
@@ -714,7 +714,7 @@ async function parseOrders(page: Page, site: SiteConfig): Promise<AolzuParsedOrd
                 const beforeSku = fullText.match(/([\s\S]+?)套餐[：:]/)
                 if (beforeSku) {
                     // Remove known noise: 发货时间, 快递单号, 物流公司 brackets, 商品编号
-                    let cleaned = beforeSku[1]
+                    const cleaned = beforeSku[1]
                         .replace(/发货时间[：:][^\n]+/g, "")
                         .replace(/快递单号[：:][^\n]+/g, "")
                         .replace(/【[^】]*速运[^】]*】/g, "")
