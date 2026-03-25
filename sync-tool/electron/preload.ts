@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   loadConfig: () => ipcRenderer.invoke('config:load'),
   saveConfig: (config: unknown) => ipcRenderer.invoke('config:save', config),
+  exportConfig: () => ipcRenderer.invoke('config:export'),
+  importConfig: () => ipcRenderer.invoke('config:import'),
   fetchErpConfig: (config: { erpUrl: string; apiToken: string }) => ipcRenderer.invoke('erp:fetchConfig', config),
   platformSync: (params: { siteId: string; erpUrl: string; apiToken: string; erpConfig: unknown; showBrowser: boolean }) =>
     ipcRenderer.invoke('platform:sync', params),

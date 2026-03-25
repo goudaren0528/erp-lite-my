@@ -37,6 +37,8 @@ declare global {
     electronAPI: {
       loadConfig: () => Promise<LocalConfig>
       saveConfig: (config: LocalConfig) => Promise<boolean>
+      exportConfig: () => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>
+      importConfig: () => Promise<{ success: boolean; config?: LocalConfig; canceled?: boolean; error?: string }>
       fetchErpConfig: (config: { erpUrl: string; apiToken: string }) => Promise<{ success: boolean; data?: unknown; error?: string }>
       platformSync: (params: { siteId: string; erpUrl: string; apiToken: string; erpConfig: unknown; showBrowser: boolean }) => Promise<{ success: boolean; error?: string }>
       importOrders: (params: { erpUrl: string; apiToken: string; csvContent: string }) => Promise<{ success: boolean; error?: string }>

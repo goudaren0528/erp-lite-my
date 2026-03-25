@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 
 type LocalConfig = {
   erpUrl: string
@@ -205,9 +205,36 @@ export default function SettingsPage({ initialConfig, onSaved }: Props) {
                 {connMsg}
               </div>
             )}
-            <button onClick={handleSave} disabled={testing} style={btnStyle}>
-              {testing ? '连接中...' : '保存'}
-            </button>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button onClick={handleSave} disabled={testing} style={btnStyle}>
+                {testing ? '连接中...' : '保存'}
+              </button>
+              <button onClick={async () => {
+                const res = await window.electronAPI.exportConfig();
+                if (res.success && res.filePath) {
+                  setConnMsg(`已导出配置到: ${res.filePath}`);
+                  setTimeout(() => setConnMsg(''), 3000);
+                } else if (res.error) {
+                  setError(`导出失败: ${res.error}`);
+                }
+              }} style={{ ...btnStyle, background: '#10b981' }}>
+                导出本地配置
+              </button>
+              <button onClick={async () => {
+                const res = await window.electronAPI.importConfig();
+                if (res.success && res.config) {
+                  setErpUrl(res.config.erpUrl || '');
+                  setApiToken(res.config.apiToken || '');
+                  setOverrides(res.config.siteOverrides ?? {});
+                  setConnMsg('导入配置成功，请重新保存连接');
+                  setTimeout(() => setConnMsg(''), 3000);
+                } else if (res.error) {
+                  setError(`导入失败: ${res.error}`);
+                }
+              }} style={{ ...btnStyle, background: '#f59e0b' }}>
+                导入本地配置
+              </button>
+            </div>
           </div>
         )}
 

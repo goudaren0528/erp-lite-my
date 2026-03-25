@@ -49,7 +49,7 @@ import {
 import { setAppConfigValue } from "@/app/actions"
 import { fetchOrders } from "@/app/actions"
 import { fetchOnlineOrders, getOnlineOrderCounts, getMatchProducts, syncOnlineOrderMatchSpec, updateOnlineOrderMatchSpec, updateOnlineOrderManualSn, getPlatformSyncMeta } from "./actions"
-import { ArrowUpDown, Plus, Settings2, Trash2, Truck, Play, Square, FileText, RefreshCw, Search, MonitorPlay, Pencil } from "lucide-react"
+import { ArrowUpDown, Plus, Settings2, Trash2, Truck, Play, Square, FileText, RefreshCw, Search, MonitorPlay, Pencil, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 import { Product, ProductVariant } from "@/types"
 import { Badge } from "@/components/ui/badge"
@@ -58,6 +58,7 @@ import { OfflineSyncCard, OfflineSyncConfig } from "@/components/settings/offlin
 import { ZanchenSyncCard } from "@/components/settings/zanchen-sync-card"
 import { GenericOnlineSyncCard } from "@/components/settings/generic-online-sync-card"
 import { SyncLogsDialog } from "@/components/orders/sync-logs-dialog"
+import { defaultConfig } from "@/lib/online-orders/default-config"
 
 const CONFIG_KEY = "online_orders_sync_config"
 
@@ -639,6 +640,25 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
     setActiveSiteId(nextSites[0]?.id || "")
   }
 
+  const handleResetConfig = () => {
+    if (!activeSite) return
+    if (!window.confirm(`确定要获取【${activeSite.name}】的初始配置吗？\n此操作将覆盖当前站点的登录URL和所有选择器配置。`)) return
+    if (!window.confirm("【二次确认】当前站点的现有配置将被彻底覆盖且无法撤销，是否确认执行？")) return
+
+    const defaultSite = defaultConfig.sites.find(s => s.id === activeSite.id)
+    if (!defaultSite) {
+      toast.error(`未找到【${activeSite.name}】的初始默认配置`)
+      return
+    }
+
+    updateSite(activeSite.id, site => ({
+      ...site,
+      loginUrl: defaultSite.loginUrl,
+      selectors: { ...defaultSite.selectors }
+    }))
+    toast.success(`已应用【${activeSite.name}】的初始配置，请点击底部保存生效`)
+  }
+
   const webhookText = draft.webhookUrls.join("\n")
   const normalizeDeviceText = (value?: string | null) => (value || "").trim()
   const isSameDeviceText = (a?: string | null, b?: string | null) => {
@@ -871,6 +891,15 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                     >
                       <Trash2 className="h-4 w-4 mr-1" />
                       删除平台
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleResetConfig}
+                      disabled={!activeSite || !defaultConfig.sites.find(s => s.id === activeSite.id)}
+                    >
+                      <RotateCcw className="h-4 w-4 mr-1" />
+                      获取初始配置
                     </Button>
                   </div>
                 </div>

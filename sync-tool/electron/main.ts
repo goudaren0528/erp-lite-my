@@ -445,6 +445,42 @@ ipcMain.handle('config:save', (_e, config: LocalConfig) => {
   if (cachedErpConfig) startScheduler()
   return true
 })
+ipcMain.handle('config:export', async () => {
+  if (!mainWindow) return { success: false, error: '无主窗口' }
+  const cfg = loadLocalConfig()
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: '导出本地配置',
+    defaultPath: 'sync-tool-config.json',
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  })
+  if (canceled || !filePath) return { success: true, canceled: true }
+  try {
+    writeFileSync(filePath, JSON.stringify(cfg, null, 2), 'utf-8')
+    return { success: true, filePath }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+})
+ipcMain.handle('config:import', async () => {
+  if (!mainWindow) return { success: false, error: '无主窗口' }
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: '导入本地配置',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile']
+  })
+  if (canceled || filePaths.length === 0) return { success: true, canceled: true }
+  try {
+    const content = readFileSync(filePaths[0], 'utf-8')
+    const parsed = JSON.parse(content)
+    // Simple validation
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('Invalid JSON format')
+    saveLocalConfig(parsed as LocalConfig)
+    if (cachedErpConfig) startScheduler()
+    return { success: true, config: parsed }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+})
 
 // ── IPC: site overrides ───────────────────────────────────────────────────────
 ipcMain.handle('config:getSiteOverride', (_e, siteId: string) => {
