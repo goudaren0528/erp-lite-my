@@ -10,6 +10,17 @@ import { getRunningPage as getRrzPage } from "./rrz"
 // Centralized session manager to retrieve the active page for a given site
 // This allows the remote interaction API to support multiple platforms
 
+// All registered platforms — single source of truth
+// Add new platforms here when adding a new crawler
+export const REGISTERED_PLATFORMS: { id: string; name: string }[] = [
+  { id: "zanchen", name: "赞晨" },
+  { id: "chenglin", name: "诚赁" },
+  { id: "youpin", name: "优品租" },
+  { id: "aolzu", name: "奥租" },
+  { id: "llxzu", name: "零零享" },
+  { id: "rrz", name: "人人租" },
+]
+
 export function getSessionPage(siteId: string): Page | undefined {
   if (siteId === "zanchen") {
     return getZanchenPage()

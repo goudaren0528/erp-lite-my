@@ -27,14 +27,21 @@ export default function RemoteAuthPage() {
   const trailClearTimerRef = useRef<number | null>(null)
 
   // Pre-defined sites list (could be fetched from API in future)
-  const sites = [
+  const [sites, setSites] = useState<{ id: string; name: string }[]>([
     { id: "zanchen", name: "赞晨" },
     { id: "chenglin", name: "诚赁" },
     { id: "aolzu", name: "奥租" },
     { id: "youpin", name: "优品租" },
     { id: "llxzu", name: "零零享" },
     { id: "rrz", name: "人人租" }
-  ]
+  ])
+
+  useEffect(() => {
+    fetch("/api/online-orders/platforms")
+      .then(r => r.json())
+      .then(data => { if (data.platforms?.length) setSites(data.platforms) })
+      .catch(() => {/* keep defaults */})
+  }, [])
 
   const [sessionActive, setSessionActive] = useState(true)
 
