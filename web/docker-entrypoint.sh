@@ -8,8 +8,8 @@ if echo "$DATABASE_URL" | grep -q "^postgresql://"; then
   
   # For mixed environments (SQLite local, Postgres prod), we must use db push
   # instead of migrate deploy because migrations are provider-specific.
-  echo "Running database push (skipping migrations for cross-provider compatibility)..."
-  npx prisma db push
+  echo "Running database push with accept-data-loss for cross-provider compatibility..."
+  npx prisma db push --accept-data-loss
 else
   # Default to standard migrations for SQLite (or matching provider)
   echo "Ensuring data directory exists and has correct permissions..."
