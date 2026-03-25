@@ -312,7 +312,7 @@ export default function RemoteAuthPage() {
                       setLoading(true)
                       setTimestamp((t) => t + 1)
                   }}
-                  className={`px-3 py-1 text-sm font-medium transition-colors ${
+                  className={`px-2 py-1 text-xs font-medium transition-colors ${
                     activeSite === site.id 
                       ? "bg-primary text-primary-foreground" 
                       : "bg-background hover:bg-muted"
@@ -328,7 +328,7 @@ export default function RemoteAuthPage() {
               onClick={() => setAutoRefresh(!autoRefresh)}
               className={autoRefresh ? "bg-green-50 text-green-600 border-green-200" : ""}
             >
-              {autoRefresh ? "自动刷新中" : "自动刷新已暂停"}
+              {autoRefresh ? "●" : "○"}
             </Button>
             <Button 
                 variant="secondary"

@@ -326,6 +326,379 @@ interface InventoryCalendarClientProps {
     canManage: boolean
 }
 
+
+// C: Extracted Sheet as separate component to isolate pagination re-renders
+function DayDetailSheet({
+    open, onOpenChange,
+    selectedDate, selectedDayType, selectedDayOrders, selectedDayStats,
+    inventoryItems, loadingItems, activeTab,
+    openOrder,
+}: {
+    open: boolean
+    onOpenChange: (v: boolean) => void
+    selectedDate: Date | null
+    selectedDayType: string
+    selectedDayOrders: OrderSimple[]
+    selectedDayStats: { occupied: number; available: number; totalStock: number } | null
+    inventoryItems: InventoryItem[]
+    loadingItems: boolean
+    activeTab: string
+    openOrder: (o: OrderSimple) => void
+}) {
+    const [currentPage, setCurrentPage] = useState(1)
+    const [inventoryItemPage, setInventoryItemPage] = useState(1)
+    const pageSize = 10
+
+    // Reset pages when content changes
+    useEffect(() => { setCurrentPage(1) }, [selectedDayOrders, selectedDayType])
+    useEffect(() => { setInventoryItemPage(1) }, [inventoryItems])
+
+    const totalPages = Math.ceil(selectedDayOrders.length / pageSize)
+    const currentSheetOrders = selectedDayOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+    const dayTypeLabel = selectedDayType === 'in' ? '入库' : selectedDayType === 'out' ? '出库' : selectedDayType === 'stock' ? '在库' : '占用'
+    const dayEmptyLabel = selectedDayType === 'in' ? '无入库记录' : selectedDayType === 'out' ? '无出库记录' : selectedDayType === 'stock' ? '无库存记录' : '无占用记录'
+
+    return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent className="w-full sm:w-[720px] sm:max-w-[720px] overflow-y-auto">
+            <SheetHeader>
+                <SheetTitle>
+                    {selectedDate && format(selectedDate, 'yyyy年MM月dd日', { locale: zhCN })} {dayTypeLabel}详情
+                </SheetTitle>
+                <SheetDescription>
+                    {selectedDayType === 'stock' ? (
+                        <span>显示当前库存详情 (共 {inventoryItems.length} 件)</span>
+                    ) : (
+                        <span>显示{dayTypeLabel}当日订单列表 (共 {selectedDayOrders.length} 条)</span>
+                    )}
+                </SheetDescription>
+            </SheetHeader>
+            <div className="mt-6 space-y-4">
+                {selectedDayType === 'stock' ? (
+                    loadingItems ? (
+                        <div className="flex justify-center py-8">
+                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                        </div>
+                    ) : inventoryItems.length === 0 ? (
+                        // Non-serialized item: show summary + occupying orders
+                        <div className="space-y-4">
+                            {selectedDayStats && (
+                                <div className="flex gap-4 p-3 rounded-md bg-muted/40 border text-sm">
+                                    <div className="flex flex-col items-center gap-0.5">
+                                        <span className="text-xs text-muted-foreground">总库存</span>
+                                        <span className="text-xl font-bold">{selectedDayStats.totalStock}</span>
+                                    </div>
+                                    <div className="flex flex-col items-center gap-0.5">
+                                        <span className="text-xs text-muted-foreground">当日占用</span>
+                                        <span className="text-xl font-bold text-red-600">{selectedDayStats.occupied}</span>
+                                    </div>
+                                    <div className="flex flex-col items-center gap-0.5">
+                                        <span className="text-xs text-muted-foreground">当日在库</span>
+                                        <span className="text-xl font-bold text-green-600">{selectedDayStats.available}</span>
+                                    </div>
+                                </div>
+                            )}
+                            {selectedDayOrders.length > 0 && (
+                                <div className="space-y-2">
+                                    <p className="text-xs text-muted-foreground font-medium">当日占用订单 ({selectedDayOrders.length} 条)</p>
+                                    <div className="overflow-x-auto">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>来源</TableHead>
+                                                <TableHead>订单号</TableHead>
+                                                <TableHead>规格</TableHead>
+                                                <TableHead>状态</TableHead>
+                                                <TableHead>租期</TableHead>
+                                                <TableHead className="text-right">操作</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {selectedDayOrders.map(o => {
+                                                const statusInfo = getStatusDisplay(o.status)
+                                                return (
+                                                    <TableRow key={o.id}>
+                                                        <TableCell>
+                                                            <Badge variant={o.isOnline ? "secondary" : "outline"}>
+                                                                {o.isOnline ? "线上" : "线下"}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell className="font-mono text-xs">{getDisplayOrderNo(o)}</TableCell>
+                                                        <TableCell className="text-xs">{o.variantName || o.productName || '-'}</TableCell>
+                                                        <TableCell>
+                                                            <Badge variant="outline" className={`${statusInfo.color} border-0`}>{statusInfo.label}</Badge>
+                                                        </TableCell>
+                                                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                                                            {o.rentStartDate ? format(new Date(o.rentStartDate), 'MM-dd') : '-'}
+                                                            {o.returnDeadline ? ` ~ ${format(new Date(o.returnDeadline), 'MM-dd')}` : ''}
+                                                        </TableCell>
+                                                        <TableCell className="text-right">
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openOrder(o)}>
+                                                                <ExternalLink className="h-4 w-4" />
+                                                            </Button>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )
+                                            })}
+                                        </TableBody>
+                                    </Table>
+                                    </div>
+                                </div>
+                            )}
+                            {selectedDayOrders.length === 0 && (
+                                <p className="text-center text-sm text-muted-foreground py-8">当日无占用订单，全部在库</p>
+                            )}
+                        </div>
+                    ) : (
+                        // Serialized item: show item list with occupancy
+                        (() => {
+                            // Step 1: SN-exact match (order.sn === item.sn)
+                            const snOrderMap = new Map<string, OrderSimple>()
+                            const unsnOrders: OrderSimple[] = []
+                            selectedDayOrders.forEach(o => {
+                                if (o.sn) snOrderMap.set(o.sn, o)
+                                else unsnOrders.push(o)
+                            })
+    
+                            // Step 2: For items not matched by SN, assign unsnOrders in order
+                            const unmatchedItems = inventoryItems.filter(item => !item.sn || !snOrderMap.has(item.sn))
+                            // Build item -> order map for count-based assignment
+                            const itemOrderMap = new Map<string, OrderSimple>()
+                            unmatchedItems.forEach((item, i) => {
+                                if (i < unsnOrders.length) itemOrderMap.set(item.id, unsnOrders[i])
+                            })
+    
+                            return (
+                                <div className="space-y-3">
+                                    {selectedDayStats && (
+                                        <div className="flex gap-4 p-3 rounded-md bg-muted/40 border text-sm">
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="text-xs text-muted-foreground">总库存</span>
+                                                <span className="text-xl font-bold">{selectedDayStats.totalStock}</span>
+                                            </div>
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="text-xs text-muted-foreground">当日占用</span>
+                                                <span className="text-xl font-bold text-red-600">{selectedDayStats.occupied}</span>
+                                            </div>
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="text-xs text-muted-foreground">当日在库</span>
+                                                <span className="text-xl font-bold text-green-600">{selectedDayStats.available}</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="overflow-x-auto">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>序列号</TableHead>
+                                                <TableHead>仓库</TableHead>
+                                                {activeTab === 'spec' && <TableHead>组件</TableHead>}
+                                                <TableHead>占用情况</TableHead>
+                                                <TableHead>平台</TableHead>
+                                                <TableHead>订单号</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        {/* Inventory item pagination */}
+                                        {(() => { const _invTotal = inventoryItems.length; const _invPages = Math.ceil(_invTotal / 50); return null; })()}
+                                        <TableBody>
+                                            {inventoryItems.slice((inventoryItemPage - 1) * 50, inventoryItemPage * 50).map((item) => {
+                                                // Exact SN match first, then count-based assignment
+                                                const occupyingOrder = (item.sn ? snOrderMap.get(item.sn) : undefined)
+                                                    ?? itemOrderMap.get(item.id)
+                                                const orderNo = occupyingOrder ? getDisplayOrderNo(occupyingOrder) : null
+    
+                                                return (
+                                                    <TableRow key={item.id}>
+                                                        <TableCell className="font-mono text-xs font-medium">
+                                                            {item.sn || '-'}
+                                                        </TableCell>
+                                                        <TableCell>{item.warehouse?.name || '-'}</TableCell>
+                                                        {activeTab === 'spec' && (
+                                                            <TableCell className="text-xs text-muted-foreground">
+                                                                {item.componentName}
+                                                            </TableCell>
+                                                        )}
+                                                        <TableCell>
+                                                            {occupyingOrder ? (
+                                                                <Badge variant="secondary" className="bg-red-50 text-red-700 border-red-200">
+                                                                    占用中
+                                                                </Badge>
+                                                            ) : (
+                                                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                                                    可用
+                                                                </Badge>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell className="text-xs">
+                                                            {occupyingOrder
+                                                                ? occupyingOrder.isOnline
+                                                                    ? (platformMap[occupyingOrder.platform || ''] || occupyingOrder.platform || '-')
+                                                                    : '线下'
+                                                                : '-'}
+                                                        </TableCell>
+                                                        <TableCell className="font-mono text-xs">
+                                                            {orderNo ? (
+                                                                <a
+                                                                    href={occupyingOrder!.isOnline
+                                                                        ? buildOnlineOrderUrl(orderNo, occupyingOrder!.platform)
+                                                                        : `/orders?q=${encodeURIComponent(orderNo)}`
+                                                                    }
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="text-blue-600 underline underline-offset-2 hover:text-blue-800"
+                                                                >
+                                                                    {orderNo}
+                                                                </a>
+                                                            ) : '-'}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )
+                                            })}
+                                        </TableBody>
+                                    </Table>
+                                    </div>
+                                        {Math.ceil(inventoryItems.length / 50) > 1 && (() => {
+                                            const invTotalPages = Math.ceil(inventoryItems.length / 50)
+                                            const windowSize = 10
+                                            const half = Math.floor(windowSize / 2)
+                                            let startPage = Math.max(1, inventoryItemPage - half)
+                                            let endPage = Math.min(invTotalPages, startPage + windowSize - 1)
+                                            if (endPage - startPage + 1 < windowSize) startPage = Math.max(1, endPage - windowSize + 1)
+                                            const pageNums = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i)
+                                            return (
+                                                <div className="flex items-center justify-center gap-1 mt-2 flex-wrap">
+                                                    <button className="px-2 py-0.5 border rounded text-xs disabled:opacity-40" disabled={inventoryItemPage <= 1} onClick={() => setInventoryItemPage(p => p - 1)}>‹</button>
+                                                    {pageNums.map(page => (
+                                                        <button key={page} className={`px-2 py-0.5 border rounded text-xs ${inventoryItemPage === page ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`} onClick={() => setInventoryItemPage(page)}>{page}</button>
+                                                    ))}
+                                                    <button className="px-2 py-0.5 border rounded text-xs disabled:opacity-40" disabled={inventoryItemPage >= invTotalPages} onClick={() => setInventoryItemPage(p => p + 1)}>›</button>
+                                                </div>
+                                            )
+                                        })()}
+                                </div>
+                            )
+                        })()
+                    )
+                ) : (
+                <>
+                <div className="overflow-x-auto">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>来源</TableHead>
+                            <TableHead>平台</TableHead>
+                            <TableHead>商品/规格</TableHead>
+                            <TableHead>订单号</TableHead>
+                            <TableHead>状态</TableHead>
+                            <TableHead className="text-right">操作</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {currentSheetOrders.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={5} className="text-center text-muted-foreground h-24">
+                                    {dayEmptyLabel}
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            currentSheetOrders.map((order) => {
+                                const statusInfo = getStatusDisplay(order.status)
+                                return (
+                                    <TableRow key={order.id}>
+                                        <TableCell>
+                                            <Badge variant={order.isOnline ? "secondary" : "outline"}>
+                                                {order.isOnline ? "线上" : "线下"}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell>
+                                            {order.isOnline ? getPlatformDisplay(order.platform) : "-"}
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex flex-col max-w-[180px]">
+                                                <span className="text-sm font-medium truncate" title={order.productName || ''}>{order.productName || '-'}</span>
+                                                <span className="text-xs text-muted-foreground truncate" title={order.variantName || ''}>{order.variantName || '-'}</span>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="font-medium font-mono text-xs">
+                                            {getDisplayOrderNo(order)}
+                                        </TableCell>
+                                        <TableCell>
+                                            <Badge variant="outline" className={`${statusInfo.color} border-0`}>
+                                                {statusInfo.label}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                className="h-8 w-8"
+                                                onClick={() => openOrder(order)}
+                                            >
+                                                <ExternalLink className="h-4 w-4" />
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                )
+                            })
+                        )}
+                    </TableBody>
+                </Table>
+                </div>
+    
+                {totalPages > 1 && (
+                    <Pagination>
+                        <PaginationContent>
+                            <PaginationItem>
+                                <PaginationPrevious 
+                                    href="#" 
+                                    onClick={(e) => {
+                                        e.preventDefault()
+                                        if (currentPage > 1) setCurrentPage(p => p - 1)
+                                    }}
+                                    className={currentPage <= 1 ? "pointer-events-none opacity-50" : ""}
+                                />
+                            </PaginationItem>
+                            {(() => {
+                                const windowSize = 10
+                                const half = Math.floor(windowSize / 2)
+                                let startPage = Math.max(1, currentPage - half)
+                                let endPage = Math.min(totalPages, startPage + windowSize - 1)
+                                if (endPage - startPage + 1 < windowSize) {
+                                    startPage = Math.max(1, endPage - windowSize + 1)
+                                }
+                                return Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
+                                    <PaginationItem key={page}>
+                                        <PaginationLink
+                                            href="#"
+                                            onClick={(e) => { e.preventDefault(); setCurrentPage(page) }}
+                                            isActive={currentPage === page}
+                                        >
+                                            {page}
+                                        </PaginationLink>
+                                    </PaginationItem>
+                                ))
+                            })()}
+                            <PaginationItem>
+                                <PaginationNext 
+                                    href="#" 
+                                    onClick={(e) => {
+                                        e.preventDefault()
+                                        if (currentPage < totalPages) setCurrentPage(p => p + 1)
+                                    }}
+                                    className={currentPage >= totalPages ? "pointer-events-none opacity-50" : ""}
+                                />
+                            </PaginationItem>
+                        </PaginationContent>
+                    </Pagination>
+                )}
+                </>
+            )}
+            </div>
+        </SheetContent>
+    </Sheet>
+    )
+}
+
 export function InventoryCalendarClient({ canManage }: InventoryCalendarClientProps) {
     const [currentMonth, setCurrentMonth] = useState(new Date())
     const [products, setProducts] = useState<Product[]>([])
@@ -364,9 +737,6 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
     const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
     const [loadingItems, setLoadingItems] = useState(false)
     const [selectedDayStats, setSelectedDayStats] = useState<{ occupied: number; available: number; totalStock: number } | null>(null)
-    const [currentPage, setCurrentPage] = useState(1)
-    const [inventoryItemPage, setInventoryItemPage] = useState(1)
-    const pageSize = 10
 
     // Fetch config
     useEffect(() => {
@@ -671,6 +1041,24 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         return { start, end }
     }, [])
 
+    // B: Pre-compute occupancy range for every order once
+    // All callers use this map instead of calling getOrderOccupancyRange per-render
+    const orderRangeMap = useMemo(() => {
+        const map = new Map<string, { start: Date; end: Date; outDate: Date } | null>()
+        orders.forEach(o => {
+            map.set(o.id, getOrderOccupancyRange(o))
+        })
+        return map
+    }, [orders, getOrderOccupancyRange])
+
+    const orderRentRangeMap = useMemo(() => {
+        const map = new Map<string, { start: Date; end: Date } | null>()
+        orders.forEach(o => {
+            map.set(o.id, getOrderRentRange(o))
+        })
+        return map
+    }, [orders, getOrderRentRange])
+
     const aggregateBomItems = (items?: BomItem[]) => {
         if (!items || items.length === 0) return null
         const map = new Map<string, number>()
@@ -714,7 +1102,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             : relevantOrders
 
         allProductOrders.forEach(o => {
-            const range = getOrderOccupancyRange(o)
+            const range = (orderRangeMap.get(o.id) ?? null)
             if (!range) return
             if (date >= range.start && date <= range.end) {
                 const specInfo = getOrderSpecInfo(o)
@@ -728,7 +1116,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         })
 
         relevantOrders.forEach(o => {
-            const range = getOrderOccupancyRange(o)
+            const range = (orderRangeMap.get(o.id) ?? null)
             if (!range) return
 
             if (date >= range.start && date <= range.end) {
@@ -744,7 +1132,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 outCount++
             }
 
-            const rentRange = getOrderRentRange(o)
+            const rentRange = (orderRentRangeMap.get(o.id) ?? null)
             if (rentRange && date >= rentRange.start && date <= rentRange.end) {
                 rentCount++
             }
@@ -871,8 +1259,6 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             }
         }
 
-        setCurrentPage(1) // Reset pagination
-        setInventoryItemPage(1)
         setSheetOpen(true)
     }
 
@@ -884,11 +1270,6 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         }
     }
 
-    // Pagination logic
-    const totalPages = Math.ceil(selectedDayOrders.length / pageSize)
-    const currentSheetOrders = selectedDayOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
-    const dayTypeLabel = selectedDayType === 'in' ? '入库' : selectedDayType === 'out' ? '出库' : selectedDayType === 'stock' ? '在库' : '占用'
-    const dayEmptyLabel = selectedDayType === 'in' ? '无入库记录' : selectedDayType === 'out' ? '无出库记录' : selectedDayType === 'stock' ? '无库存记录' : '无占用记录'
 
     // Calendar view render
     const renderCalendarView = () => (
@@ -920,17 +1301,17 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                             {days.map(day => {
                                 const stats = calculateDailyStats(day, filteredOrders, currentStock)
                                 const dayInOrders = filteredOrders.filter(o => {
-                                    const range = getOrderOccupancyRange(o)
+                                    const range = (orderRangeMap.get(o.id) ?? null)
                                     return range && isSameDay(day, range.end)
                                 })
                                 const dayOutOrders = filteredOrders.filter(o => {
-                                    const range = getOrderOccupancyRange(o)
+                                    const range = (orderRangeMap.get(o.id) ?? null)
                                     if (!range) return false
                                     const outDate = range.outDate || range.start
                                     return isSameDay(day, outDate)
                                 })
                                 const dayOccupancy = filteredOrders.filter(o => {
-                                    const range = getOrderOccupancyRange(o)
+                                    const range = (orderRangeMap.get(o.id) ?? null)
                                     return range && day >= range.start && day <= range.end
                                 })
                                 
@@ -1011,7 +1392,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         const bomOrders = allProductOrders || relevantOrders
         
         relevantOrders.forEach(o => {
-            const range = getOrderOccupancyRange(o)
+            const range = (orderRangeMap.get(o.id) ?? null)
             if (!range) return
             if (range.end < start || range.start > end) return
 
@@ -1027,7 +1408,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 statsMap.get(k)!.inCount++
             }
             // rentCount
-            const rentRange = getOrderRentRange(o)
+            const rentRange = (orderRentRangeMap.get(o.id) ?? null)
             if (rentRange) {
                 const rStart = rentRange.start < start ? start : rentRange.start
                 const rEnd = rentRange.end > end ? end : rentRange.end
@@ -1040,7 +1421,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         })
 
         bomOrders.forEach(o => {
-            const range = getOrderOccupancyRange(o)
+            const range = (orderRangeMap.get(o.id) ?? null)
             if (!range) return
             if (range.end < start || range.start > end) return
 
@@ -1149,17 +1530,17 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                     const dateKey = day.toDateString()
                                                     const stats = statsMap.get(dateKey) || { occupied: 0, available: row.stock, inCount: 0, outCount: 0, rentCount: 0 }
                                                     const dayInOrders = rowOrders.filter(o => {
-                                                        const range = getOrderOccupancyRange(o)
+                                                        const range = (orderRangeMap.get(o.id) ?? null)
                                                         return range && isSameDay(day, range.end)
                                                     })
                                                     const dayOutOrders = rowOrders.filter(o => {
-                                                        const range = getOrderOccupancyRange(o)
+                                                        const range = (orderRangeMap.get(o.id) ?? null)
                                                         if (!range) return false
                                                         const outDate = range.outDate || range.start
                                                         return isSameDay(day, outDate)
                                                     })
                                                     const dayOccupancy = rowOrders.filter(o => {
-                                                        const range = getOrderOccupancyRange(o)
+                                                        const range = (orderRangeMap.get(o.id) ?? null)
                                                         return range && day >= range.start && day <= range.end
                                                     })
 
@@ -1434,328 +1815,18 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                 </CardContent>
             </Card>
 
-            <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-                <SheetContent className="w-full sm:w-[720px] sm:max-w-[720px] overflow-y-auto">
-                    <SheetHeader>
-                        <SheetTitle>
-                            {selectedDate && format(selectedDate, 'yyyy年MM月dd日', { locale: zhCN })} {dayTypeLabel}详情
-                        </SheetTitle>
-                        <SheetDescription>
-                            {selectedDayType === 'stock' ? (
-                                <span>显示当前库存详情 (共 {inventoryItems.length} 件)</span>
-                            ) : (
-                                <span>显示{dayTypeLabel}当日订单列表 (共 {selectedDayOrders.length} 条)</span>
-                            )}
-                        </SheetDescription>
-                    </SheetHeader>
-                    <div className="mt-6 space-y-4">
-                        {selectedDayType === 'stock' ? (
-                            loadingItems ? (
-                                <div className="flex justify-center py-8">
-                                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                                </div>
-                            ) : inventoryItems.length === 0 ? (
-                                // Non-serialized item: show summary + occupying orders
-                                <div className="space-y-4">
-                                    {selectedDayStats && (
-                                        <div className="flex gap-4 p-3 rounded-md bg-muted/40 border text-sm">
-                                            <div className="flex flex-col items-center gap-0.5">
-                                                <span className="text-xs text-muted-foreground">总库存</span>
-                                                <span className="text-xl font-bold">{selectedDayStats.totalStock}</span>
-                                            </div>
-                                            <div className="flex flex-col items-center gap-0.5">
-                                                <span className="text-xs text-muted-foreground">当日占用</span>
-                                                <span className="text-xl font-bold text-red-600">{selectedDayStats.occupied}</span>
-                                            </div>
-                                            <div className="flex flex-col items-center gap-0.5">
-                                                <span className="text-xs text-muted-foreground">当日在库</span>
-                                                <span className="text-xl font-bold text-green-600">{selectedDayStats.available}</span>
-                                            </div>
-                                        </div>
-                                    )}
-                                    {selectedDayOrders.length > 0 && (
-                                        <div className="space-y-2">
-                                            <p className="text-xs text-muted-foreground font-medium">当日占用订单 ({selectedDayOrders.length} 条)</p>
-                                            <div className="overflow-x-auto">
-                                            <Table>
-                                                <TableHeader>
-                                                    <TableRow>
-                                                        <TableHead>来源</TableHead>
-                                                        <TableHead>订单号</TableHead>
-                                                        <TableHead>规格</TableHead>
-                                                        <TableHead>状态</TableHead>
-                                                        <TableHead>租期</TableHead>
-                                                        <TableHead className="text-right">操作</TableHead>
-                                                    </TableRow>
-                                                </TableHeader>
-                                                <TableBody>
-                                                    {selectedDayOrders.map(o => {
-                                                        const statusInfo = getStatusDisplay(o.status)
-                                                        return (
-                                                            <TableRow key={o.id}>
-                                                                <TableCell>
-                                                                    <Badge variant={o.isOnline ? "secondary" : "outline"}>
-                                                                        {o.isOnline ? "线上" : "线下"}
-                                                                    </Badge>
-                                                                </TableCell>
-                                                                <TableCell className="font-mono text-xs">{getDisplayOrderNo(o)}</TableCell>
-                                                                <TableCell className="text-xs">{o.variantName || o.productName || '-'}</TableCell>
-                                                                <TableCell>
-                                                                    <Badge variant="outline" className={`${statusInfo.color} border-0`}>{statusInfo.label}</Badge>
-                                                                </TableCell>
-                                                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                                                    {o.rentStartDate ? format(new Date(o.rentStartDate), 'MM-dd') : '-'}
-                                                                    {o.returnDeadline ? ` ~ ${format(new Date(o.returnDeadline), 'MM-dd')}` : ''}
-                                                                </TableCell>
-                                                                <TableCell className="text-right">
-                                                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openOrder(o)}>
-                                                                        <ExternalLink className="h-4 w-4" />
-                                                                    </Button>
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        )
-                                                    })}
-                                                </TableBody>
-                                            </Table>
-                                            </div>
-                                        </div>
-                                    )}
-                                    {selectedDayOrders.length === 0 && (
-                                        <p className="text-center text-sm text-muted-foreground py-8">当日无占用订单，全部在库</p>
-                                    )}
-                                </div>
-                            ) : (
-                                // Serialized item: show item list with occupancy
-                                (() => {
-                                    // Step 1: SN-exact match (order.sn === item.sn)
-                                    const snOrderMap = new Map<string, OrderSimple>()
-                                    const unsnOrders: OrderSimple[] = []
-                                    selectedDayOrders.forEach(o => {
-                                        if (o.sn) snOrderMap.set(o.sn, o)
-                                        else unsnOrders.push(o)
-                                    })
-
-                                    // Step 2: For items not matched by SN, assign unsnOrders in order
-                                    const unmatchedItems = inventoryItems.filter(item => !item.sn || !snOrderMap.has(item.sn))
-                                    // Build item -> order map for count-based assignment
-                                    const itemOrderMap = new Map<string, OrderSimple>()
-                                    unmatchedItems.forEach((item, i) => {
-                                        if (i < unsnOrders.length) itemOrderMap.set(item.id, unsnOrders[i])
-                                    })
-
-                                    return (
-                                        <div className="space-y-3">
-                                            {selectedDayStats && (
-                                                <div className="flex gap-4 p-3 rounded-md bg-muted/40 border text-sm">
-                                                    <div className="flex flex-col items-center gap-0.5">
-                                                        <span className="text-xs text-muted-foreground">总库存</span>
-                                                        <span className="text-xl font-bold">{selectedDayStats.totalStock}</span>
-                                                    </div>
-                                                    <div className="flex flex-col items-center gap-0.5">
-                                                        <span className="text-xs text-muted-foreground">当日占用</span>
-                                                        <span className="text-xl font-bold text-red-600">{selectedDayStats.occupied}</span>
-                                                    </div>
-                                                    <div className="flex flex-col items-center gap-0.5">
-                                                        <span className="text-xs text-muted-foreground">当日在库</span>
-                                                        <span className="text-xl font-bold text-green-600">{selectedDayStats.available}</span>
-                                                    </div>
-                                                </div>
-                                            )}
-                                            <div className="overflow-x-auto">
-                                            <Table>
-                                                <TableHeader>
-                                                    <TableRow>
-                                                        <TableHead>序列号</TableHead>
-                                                        <TableHead>仓库</TableHead>
-                                                        {activeTab === 'spec' && <TableHead>组件</TableHead>}
-                                                        <TableHead>占用情况</TableHead>
-                                                        <TableHead>平台</TableHead>
-                                                        <TableHead>订单号</TableHead>
-                                                    </TableRow>
-                                                </TableHeader>
-                                                {/* Inventory item pagination */}
-                                                {(() => { const _invTotal = inventoryItems.length; const _invPages = Math.ceil(_invTotal / 50); return null; })()}
-                                                <TableBody>
-                                                    {inventoryItems.slice((inventoryItemPage - 1) * 50, inventoryItemPage * 50).map((item) => {
-                                                        // Exact SN match first, then count-based assignment
-                                                        const occupyingOrder = (item.sn ? snOrderMap.get(item.sn) : undefined)
-                                                            ?? itemOrderMap.get(item.id)
-                                                        const orderNo = occupyingOrder ? getDisplayOrderNo(occupyingOrder) : null
-
-                                                        return (
-                                                            <TableRow key={item.id}>
-                                                                <TableCell className="font-mono text-xs font-medium">
-                                                                    {item.sn || '-'}
-                                                                </TableCell>
-                                                                <TableCell>{item.warehouse?.name || '-'}</TableCell>
-                                                                {activeTab === 'spec' && (
-                                                                    <TableCell className="text-xs text-muted-foreground">
-                                                                        {item.componentName}
-                                                                    </TableCell>
-                                                                )}
-                                                                <TableCell>
-                                                                    {occupyingOrder ? (
-                                                                        <Badge variant="secondary" className="bg-red-50 text-red-700 border-red-200">
-                                                                            占用中
-                                                                        </Badge>
-                                                                    ) : (
-                                                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                                                            可用
-                                                                        </Badge>
-                                                                    )}
-                                                                </TableCell>
-                                                                <TableCell className="text-xs">
-                                                                    {occupyingOrder
-                                                                        ? occupyingOrder.isOnline
-                                                                            ? (platformMap[occupyingOrder.platform || ''] || occupyingOrder.platform || '-')
-                                                                            : '线下'
-                                                                        : '-'}
-                                                                </TableCell>
-                                                                <TableCell className="font-mono text-xs">
-                                                                    {orderNo ? (
-                                                                        <a
-                                                                            href={occupyingOrder!.isOnline
-                                                                                ? buildOnlineOrderUrl(orderNo, occupyingOrder!.platform)
-                                                                                : `/orders?q=${encodeURIComponent(orderNo)}`
-                                                                            }
-                                                                            target="_blank"
-                                                                            rel="noreferrer"
-                                                                            className="text-blue-600 underline underline-offset-2 hover:text-blue-800"
-                                                                        >
-                                                                            {orderNo}
-                                                                        </a>
-                                                                    ) : '-'}
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        )
-                                                    })}
-                                                </TableBody>
-                                            </Table>
-                                            </div>
-                                                {Math.ceil(inventoryItems.length / 50) > 1 && (
-                                                    <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-                                                        <span>共 {inventoryItems.length} 条，第 {inventoryItemPage}/{Math.ceil(inventoryItems.length / 50)} 页</span>
-                                                        <div className="flex gap-1">
-                                                            <button className="px-2 py-0.5 border rounded disabled:opacity-40" disabled={inventoryItemPage <= 1} onClick={() => setInventoryItemPage(p => p - 1)}>上一页</button>
-                                                            <button className="px-2 py-0.5 border rounded disabled:opacity-40" disabled={inventoryItemPage >= Math.ceil(inventoryItems.length / 50)} onClick={() => setInventoryItemPage(p => p + 1)}>下一页</button>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                        </div>
-                                    )
-                                })()
-                            )
-                        ) : (
-                        <>
-                        <div className="overflow-x-auto">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>来源</TableHead>
-                                    <TableHead>平台</TableHead>
-                                    <TableHead>商品/规格</TableHead>
-                                    <TableHead>订单号</TableHead>
-                                    <TableHead>状态</TableHead>
-                                    <TableHead className="text-right">操作</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {currentSheetOrders.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={5} className="text-center text-muted-foreground h-24">
-                                            {dayEmptyLabel}
-                                        </TableCell>
-                                    </TableRow>
-                                ) : (
-                                    currentSheetOrders.map((order) => {
-                                        const statusInfo = getStatusDisplay(order.status)
-                                        return (
-                                            <TableRow key={order.id}>
-                                                <TableCell>
-                                                    <Badge variant={order.isOnline ? "secondary" : "outline"}>
-                                                        {order.isOnline ? "线上" : "线下"}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell>
-                                                    {order.isOnline ? getPlatformDisplay(order.platform) : "-"}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <div className="flex flex-col max-w-[180px]">
-                                                        <span className="text-sm font-medium truncate" title={order.productName || ''}>{order.productName || '-'}</span>
-                                                        <span className="text-xs text-muted-foreground truncate" title={order.variantName || ''}>{order.variantName || '-'}</span>
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="font-medium font-mono text-xs">
-                                                    {getDisplayOrderNo(order)}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant="outline" className={`${statusInfo.color} border-0`}>
-                                                        {statusInfo.label}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    <Button 
-                                                        variant="ghost" 
-                                                        size="icon" 
-                                                        className="h-8 w-8"
-                                                        onClick={() => openOrder(order)}
-                                                    >
-                                                        <ExternalLink className="h-4 w-4" />
-                                                    </Button>
-                                                </TableCell>
-                                            </TableRow>
-                                        )
-                                    })
-                                )}
-                            </TableBody>
-                        </Table>
-                        </div>
-
-                        {totalPages > 1 && (
-                            <Pagination>
-                                <PaginationContent>
-                                    <PaginationItem>
-                                        <PaginationPrevious 
-                                            href="#" 
-                                            onClick={(e) => {
-                                                e.preventDefault()
-                                                if (currentPage > 1) setCurrentPage(p => p - 1)
-                                            }}
-                                            className={currentPage <= 1 ? "pointer-events-none opacity-50" : ""}
-                                        />
-                                    </PaginationItem>
-                                    {Array.from({ length: totalPages }).map((_, i) => (
-                                        <PaginationItem key={i}>
-                                            <PaginationLink 
-                                                href="#" 
-                                                onClick={(e) => {
-                                                    e.preventDefault()
-                                                    setCurrentPage(i + 1)
-                                                }}
-                                                isActive={currentPage === i + 1}
-                                            >
-                                                {i + 1}
-                                            </PaginationLink>
-                                        </PaginationItem>
-                                    ))}
-                                    <PaginationItem>
-                                        <PaginationNext 
-                                            href="#" 
-                                            onClick={(e) => {
-                                                e.preventDefault()
-                                                if (currentPage < totalPages) setCurrentPage(p => p + 1)
-                                            }}
-                                            className={currentPage >= totalPages ? "pointer-events-none opacity-50" : ""}
-                                        />
-                                    </PaginationItem>
-                                </PaginationContent>
-                            </Pagination>
-                        )}
-                        </>
-                    )}
-                    </div>
-                </SheetContent>
-            </Sheet>
+            <DayDetailSheet
+                open={sheetOpen}
+                onOpenChange={setSheetOpen}
+                selectedDate={selectedDate}
+                selectedDayType={selectedDayType}
+                selectedDayOrders={selectedDayOrders}
+                selectedDayStats={selectedDayStats}
+                inventoryItems={inventoryItems}
+                loadingItems={loadingItems}
+                activeTab={activeTab}
+                openOrder={openOrder}
+            />
         </div>
     )
 }
