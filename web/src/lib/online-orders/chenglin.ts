@@ -393,21 +393,32 @@ async function login(page: Page, site: SiteConfig) {
   // Wait for login success (timeout 5 mins for manual intervention)
   appendLog("Waiting for login to complete (check url change or manual intervention)...")
   
+  // Give SPA a moment to render
+  await page.waitForTimeout(3000)
+  
+  const isDashboard = async () => {
+      try {
+          return await page.isVisible('.sidebar-container', { timeout: 1000 })
+      } catch {
+          return false
+      }
+  }
+
   // NEW: Notify user for intervention if stuck on login page
-  if (await isOnLoginPage(page, site)) {
+  if (await isOnLoginPage(page, site) && !(await isDashboard())) {
       updateStatus({ status: "awaiting_user", message: "需要人工介入: 请在弹出的窗口完成登录", needsAttention: true })
       appendLog("需要人工介入: 检测到处于登录页")
       
       // Try to notify webhook if configured
       const config = await loadConfig()
       if (config?.webhookUrls && config.webhookUrls.length > 0) {
-          sendWebhookSimple(config, "诚赁平台需要登录验证")
+          sendWebhookSimple(config, "诚赁平台需要登录验证", site.id)
       }
   }
 
   const start = Date.now()
   while (Date.now() - start < 300_000) {
-      if (!(await isOnLoginPage(page, site)) && page.url() !== "about:blank") {
+      if (await isDashboard()) {
           appendLog("Login appears successful.")
           updateStatus({ status: "running", message: "登录成功，继续执行...", needsAttention: false })
           return true
@@ -416,7 +427,6 @@ async function login(page: Page, site: SiteConfig) {
       // Update status periodically to keep UI informed
       if (Date.now() - start > 10000 && runtime.status.status === "awaiting_user") {
            // Keep status as awaiting_user
-           // Maybe update message?
       }
       
       await page.waitForTimeout(1000)
@@ -425,12 +435,15 @@ async function login(page: Page, site: SiteConfig) {
   throw new Error("Login timeout")
 }
 
-async function sendWebhookSimple(config: OnlineOrdersConfig, message: string) {
+async function sendWebhookSimple(config: OnlineOrdersConfig, message: string, siteId?: string) {
     if (!config?.webhookUrls || config.webhookUrls.length === 0) return
     
     let baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim()
     baseUrl = baseUrl.replace(/\/$/, "").replace(/^(https?:\/\/)+/, (m) => m.slice(0, m.indexOf('://') + 3))
-    const remoteLink = baseUrl ? `${baseUrl}/online-orders/remote-auth` : "(未配置APP_URL)"
+    const remotePath = siteId
+        ? `/online-orders/remote-auth?siteId=${encodeURIComponent(siteId)}`
+        : "/online-orders/remote-auth"
+    const remoteLink = baseUrl ? `${baseUrl}${remotePath}` : "(未配置APP_URL)"
         
     const payload = {
         msgtype: "text" as const,
