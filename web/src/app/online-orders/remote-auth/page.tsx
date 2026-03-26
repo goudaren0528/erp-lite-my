@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -8,12 +9,15 @@ import { Loader2, RefreshCw, MousePointer2, Keyboard, MonitorPlay } from "lucide
 import { toast } from "sonner"
 
 export default function RemoteAuthPage() {
+  const searchParams = useSearchParams()
+  const requestedSiteId = searchParams.get("siteId")?.trim() || ""
   const [timestamp, setTimestamp] = useState(1)
   const [loading, setLoading] = useState(false)
   const [inputText, setInputText] = useState("")
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [isInteracting, setIsInteracting] = useState(false)
-  const [activeSite, setActiveSite] = useState("zanchen")
+  const [activeSite, setActiveSite] = useState(requestedSiteId || "zanchen")
+  const [sessionActive, setSessionActive] = useState(true)
   const imgRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const lastDownPos = useRef<{ x: number; y: number } | null>(null)
@@ -42,8 +46,6 @@ export default function RemoteAuthPage() {
       .then(data => { if (data.platforms?.length) setSites(data.platforms) })
       .catch(() => {/* keep defaults */})
   }, [])
-
-  const [sessionActive, setSessionActive] = useState(true)
 
   const triggerSync = async () => {
     try {

@@ -1,20 +1,30 @@
 "use client"
 
-import { useActionState } from "react"
+import { useActionState, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { login } from "@/lib/auth"
+import { getSystemNameAction } from "@/app/actions"
 
 export default function LoginPage() {
   const [state, formAction, isPending] = useActionState(login, null)
+  const [systemName, setSystemName] = useState("米奇租赁erp")
+
+  useEffect(() => {
+    getSystemNameAction().then(res => {
+      if (res.success && res.name) {
+        setSystemName(res.name)
+      }
+    })
+  }, [])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-100">
       <Card className="w-[400px]">
         <CardHeader>
-          <CardTitle className="text-2xl text-center">米奇租赁 - 登录</CardTitle>
+          <CardTitle className="text-2xl text-center">{systemName} - 登录</CardTitle>
         </CardHeader>
         <CardContent>
           <form action={formAction} className="space-y-4">

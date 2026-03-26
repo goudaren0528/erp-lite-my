@@ -2223,3 +2223,21 @@ export async function generateApiTokenAction() {
     const token = await generateApiToken()
     return { success: true, token }
 }
+
+export async function getSystemNameAction() {
+    const config = await prisma.appConfig.findUnique({ where: { key: 'system_name' } })
+    return { success: true, name: config?.value || '米奇租赁erp' }
+}
+
+export async function updateSystemNameAction(name: string) {
+    const currentUser = await getCurrentUser()
+    if (currentUser?.role !== 'ADMIN') return { success: false, message: '无权限' }
+    
+    await prisma.appConfig.upsert({
+        where: { key: 'system_name' },
+        update: { value: name },
+        create: { key: 'system_name', value: name }
+    })
+    revalidatePath('/')
+    return { success: true }
+}

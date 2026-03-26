@@ -1641,7 +1641,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                                 size="sm" 
                                 variant="secondary" 
                                 className="bg-white border hover:bg-blue-100"
-                                onClick={() => window.open("/online-orders/remote-auth", "_blank")}
+                                onClick={() => window.open(`/online-orders/remote-auth?siteId=${encodeURIComponent(activeTab)}`, "_blank")}
                             >
                                 <MonitorPlay className="w-4 h-4 mr-2" />
                                 打开远程操作

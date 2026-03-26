@@ -136,7 +136,7 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
   }
 
   const getEffectiveTimes = (site: SiteConfig): string[] => {
-    if (localConfig.scheduledTimes[site.id]?.length) return localConfig.scheduledTimes[site.id]
+    if (localConfig.scheduledTimes[site.id] !== undefined) return localConfig.scheduledTimes[site.id]
     return site.autoSync?.scheduledTimes ?? []
   }
 
@@ -147,6 +147,31 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
 
   const saveSchedule = (siteId: string) => {
     const times = scheduleInput.split(/[,，\s]+/).map(s => s.trim()).filter(s => /^\d{2}:\d{2}$/.test(s))
+    
+    if (times.length > 1) {
+      const minutes = times.map(t => {
+        const [h, m] = t.split(':').map(Number)
+        return h * 60 + m
+      })
+      let valid = true
+      for (let i = 0; i < minutes.length; i++) {
+        for (let j = i + 1; j < minutes.length; j++) {
+          let diff = Math.abs(minutes[i] - minutes[j])
+          if (diff > 12 * 60) {
+            diff = 24 * 60 - diff
+          }
+          if (diff < 8 * 60) {
+            valid = false
+            break
+          }
+        }
+      }
+      if (!valid) {
+        alert("保存失败：多个定时之间必须至少间隔 8 小时！")
+        return
+      }
+    }
+
     onLocalConfigChange({
       ...localConfig,
       scheduledTimes: { ...localConfig.scheduledTimes, [siteId]: times }
@@ -197,7 +222,7 @@ export default function SyncPage({ localConfig, erpConfig, onNeedConfig, onLocal
             const attention = attentionMap[site.id]
             const needsAttention = !!attention
             const effectiveTimes = getEffectiveTimes(site)
-            const isLocalOverride = !!localConfig.scheduledTimes[site.id]?.length
+            const isLocalOverride = localConfig.scheduledTimes[site.id] !== undefined
             const showBrowser = localConfig.showBrowserPerSite[site.id] ?? localConfig.showBrowser
             return (
               <div key={site.id} style={{

@@ -59,8 +59,4 @@ networks:
   dokploy-network:
     external: true
   erp-lite-network:
-    name: erp-lite-network${PROJECT_SUFFIX:-}
-    driver: bridge
-    ipam:
-      config:
-        - subnet: ${DOCKER_SUBNET:-10.99.0.0/24}
+    external: true

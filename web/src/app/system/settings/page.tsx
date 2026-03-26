@@ -4,21 +4,42 @@ import { useState, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
-import { Copy, RefreshCw, Eye, EyeOff } from "lucide-react"
-import { getApiTokenAction, generateApiTokenAction } from "@/app/actions"
+import { Copy, RefreshCw, Eye, EyeOff, Save } from "lucide-react"
+import { getApiTokenAction, generateApiTokenAction, getSystemNameAction, updateSystemNameAction } from "@/app/actions"
 
 export default function SystemSettingsPage() {
   const [token, setToken] = useState<string | null>(null)
+  const [systemName, setSystemName] = useState("米奇租赁erp")
   const [visible, setVisible] = useState(false)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [savingName, setSavingName] = useState(false)
 
   useEffect(() => {
-    getApiTokenAction().then(res => {
-      setToken(res.token)
+    Promise.all([
+      getApiTokenAction(),
+      getSystemNameAction()
+    ]).then(([tokenRes, nameRes]) => {
+      if (tokenRes.success) setToken(tokenRes.token)
+      if (nameRes.success) setSystemName(nameRes.name)
       setLoading(false)
     })
   }, [])
+
+  const handleSaveSystemName = async () => {
+    if (!systemName.trim()) {
+      toast.error("系统名称不能为空")
+      return
+    }
+    setSavingName(true)
+    const res = await updateSystemNameAction(systemName.trim())
+    if (res.success) {
+      toast.success("系统名称已更新")
+    } else {
+      toast.error(res.message || "更新失败")
+    }
+    setSavingName(false)
+  }
 
   const handleGenerate = async () => {
     if (!confirm("重新生成后旧 Token 立即失效，桌面工具需要重新填写新 Token，确认继续？")) return
@@ -46,6 +67,34 @@ export default function SystemSettingsPage() {
   return (
     <div className="space-y-6 p-8 max-w-2xl">
       <h2 className="text-2xl font-bold">系统设置</h2>
+
+      <div className="border rounded-lg p-6 space-y-4">
+        <div>
+          <h3 className="font-semibold text-base mb-1">基本设置</h3>
+          <p className="text-sm text-muted-foreground">
+            配置系统的基本信息。
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <label className="text-sm font-medium">系统名称</label>
+          <div className="flex items-center gap-2">
+            <Input
+              value={systemName}
+              onChange={(e) => setSystemName(e.target.value)}
+              placeholder="例如：米奇租赁erp"
+              className="max-w-md"
+            />
+            <Button onClick={handleSaveSystemName} disabled={savingName || loading}>
+              {savingName ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+              保存
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            显示在左上角导航栏的系统名称，默认：米奇租赁erp
+          </p>
+        </div>
+      </div>
 
       <div className="border rounded-lg p-6 space-y-4">
         <div>

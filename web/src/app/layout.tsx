@@ -8,11 +8,13 @@ import { MobileNav } from "@/components/mobile-nav";
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 
+import { prisma } from "@/lib/db";
+
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "米奇租赁管理后台",
-  description: "Internal ERP for Miqi Rental",
+  title: "租赁管理后台",
+  description: "Internal ERP for Rental",
 };
 
 export default async function RootLayout({
@@ -21,6 +23,8 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const user = await getCurrentUser()
+  const config = await prisma.appConfig.findUnique({ where: { key: "system_name" } })
+  const systemName = config?.value || "米奇租赁erp"
 
   return (
     <html lang="zh-CN" suppressHydrationWarning>
@@ -34,13 +38,13 @@ export default async function RootLayout({
             <div className="flex h-screen overflow-hidden">
               {user && (
                 <aside className="hidden md:flex">
-                  <MainNav user={user} />
+                  <MainNav user={user} systemName={systemName} />
                 </aside>
               )}
               <main className="flex-1 overflow-y-auto p-4 sm:p-8 bg-background">
                 {user && (
                   <div className="md:hidden mb-4 flex items-center">
-                    <MobileNav user={user} />
+                    <MobileNav user={user} systemName={systemName} />
                   </div>
                 )}
                 {children}

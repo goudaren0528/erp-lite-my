@@ -33,7 +33,33 @@ export function GenericOnlineSyncCard({ config, status, onConfigChange }: Props)
   const addTime = () => {
     if (!newTime) return
     if (scheduledTimes.includes(newTime)) return
-    const sorted = [...scheduledTimes, newTime].sort()
+    
+    const newTimes = [...scheduledTimes, newTime]
+    if (newTimes.length > 1) {
+      const minutes = newTimes.map(t => {
+        const [h, m] = t.split(':').map(Number)
+        return h * 60 + m
+      })
+      let valid = true
+      for (let i = 0; i < minutes.length; i++) {
+        for (let j = i + 1; j < minutes.length; j++) {
+          let diff = Math.abs(minutes[i] - minutes[j])
+          if (diff > 12 * 60) {
+            diff = 24 * 60 - diff
+          }
+          if (diff < 8 * 60) {
+            valid = false
+            break
+          }
+        }
+      }
+      if (!valid) {
+        alert("定时时间设置失败：多个定时之间必须至少间隔 8 小时！")
+        return
+      }
+    }
+
+    const sorted = newTimes.sort()
     update({ scheduledTimes: sorted })
   }
 

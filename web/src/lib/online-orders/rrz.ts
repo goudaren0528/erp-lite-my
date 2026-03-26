@@ -29,6 +29,7 @@ type RrzRuntimeWithApi = RrzRuntime & {
   latestOrderListData?: unknown
   latestOrderListUrl?: string
   latestOrderListText?: string
+  latestApiHeaders?: Record<string, string>
   orderListDataByPage?: Map<number, unknown>
   orderListUrlByPage?: Map<number, string>
   orderListTextByPage?: Map<number, string>
@@ -555,6 +556,7 @@ async function ensurePage(headless: boolean): Promise<Page> {
 
               try {
                   ensurePageMaps(rt)
+                  rt.latestApiHeaders = request.headers()
                   const prevUrl = rt.orderListUrlByPage?.get(pageNo)
                   const hasCached = rt.orderListDataByPage?.has(pageNo)
                   const expected = rt.expectedApiPage
@@ -3041,9 +3043,36 @@ export async function startRrzSync(siteId: string) {
                             rt.orderListDataByPage?.delete(nextPage)
                             rt.orderListUrlByPage?.delete(nextPage)
                             rt.orderListTextByPage?.delete(nextPage)
-                            await page.evaluate((url: string) => {
-                                return fetch(url, { credentials: "include" }).catch(() => null)
-                            }, nextUrl)
+                            
+                            const reqHeaders = rt.latestApiHeaders || {}
+                            const safeHeaders: Record<string, string> = {}
+                            for (const [k, v] of Object.entries(reqHeaders)) {
+                                if (k.startsWith(":")) continue
+                                if (["host", "content-length", "accept-encoding", "connection", "cookie"].includes(k.toLowerCase())) continue
+                                safeHeaders[k] = v
+                            }
+
+                            try {
+                                const apiRes = await page.context().request.get(nextUrl, {
+                                    headers: safeHeaders,
+                                    timeout: 15000
+                                })
+                                if (apiRes.ok()) {
+                                    const jsonObj = await apiRes.json().catch(() => null)
+                                    if (jsonObj) {
+                                        rt.latestOrderListUrl = nextUrl
+                                        rt.orderListDataByPage?.set(nextPage, jsonObj)
+                                        rt.orderListUrlByPage?.set(nextPage, nextUrl)
+                                        const msg = getStringFromUnknown(jsonObj["msg"] || jsonObj["message"])
+                                        if (msg) rt.orderListTextByPage?.set(nextPage, msg)
+                                    }
+                                } else {
+                                    appendLog(`[API Pagination] API response not ok: ${apiRes.status()} ${apiRes.statusText()}`)
+                                }
+                            } catch (apiReqErr) {
+                                appendLog(`[API Pagination] API request failed: ${apiReqErr}`)
+                            }
+
                             await waitRandom(page, 2000, 3500)
                             currentPage = nextPage
                         }

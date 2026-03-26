@@ -2,6 +2,8 @@
 
 import { prisma } from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import fs from "fs";
+import path from "path";
 
 export type ManualChapterInput = {
   id?: string;
@@ -11,13 +13,37 @@ export type ManualChapterInput = {
   isEnabled: boolean;
 };
 
+async function ensureManualSeeded() {
+  const count = await prisma.manualChapter.count();
+  if (count === 0) {
+    try {
+      const filePath = path.join(process.cwd(), 'USER_MANUAL.md');
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        await prisma.manualChapter.create({
+          data: {
+            title: '系统操作指南',
+            content: content,
+            order: 0,
+            isEnabled: true
+          }
+        });
+      }
+    } catch (e) {
+      console.error('Failed to seed manual:', e);
+    }
+  }
+}
+
 export async function getManualChapters() {
+  await ensureManualSeeded();
   return await prisma.manualChapter.findMany({
     orderBy: { order: 'asc' }
   });
 }
 
 export async function getEnabledManualChapters() {
+  await ensureManualSeeded();
   return await prisma.manualChapter.findMany({
     where: { isEnabled: true },
     orderBy: { order: 'asc' }

@@ -13,9 +13,10 @@ import { UserManual } from "@/components/help/user-manual"
 
 interface MainNavProps {
   user?: User | null
+  systemName?: string
 }
 
-export function MainNav({ user }: MainNavProps) {
+export function MainNav({ user, systemName = "米奇租赁erp" }: MainNavProps) {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [openGroups, setOpenGroups] = useState<string[]>(["order", "promotion"])
@@ -199,11 +200,11 @@ export function MainNav({ user }: MainNavProps) {
       <div className={cn("p-4 border-b flex items-center h-[69px] overflow-hidden")}>
         <div 
             className={cn(
-                "transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap",
+                "transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap flex flex-col justify-center",
                 isCollapsed ? "w-0 opacity-0" : "w-40 opacity-100"
             )}
         >
-            <div className="text-xl font-bold mb-1">米奇租赁</div>
+            <div className="text-xl font-bold mb-1 truncate" title={systemName}>{systemName}</div>
             <div className="text-xs text-muted-foreground">ERP Lite</div>
         </div>
         <Button

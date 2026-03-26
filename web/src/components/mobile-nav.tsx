@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { MainNav } from "@/components/main-nav"
 import type { User } from "@/types"
 
-export function MobileNav({ user }: { user: User }) {
+export function MobileNav({ user, systemName }: { user: User, systemName?: string }) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -25,7 +25,7 @@ export function MobileNav({ user }: { user: User }) {
             if (target.closest("a")) setOpen(false)
           }}
         >
-          <MainNav user={user} />
+          <MainNav user={user} systemName={systemName} />
         </div>
       </SheetContent>
     </Sheet>

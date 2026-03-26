@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getSessionPage } from "@/lib/online-orders/session-manager"
+import { getSessionPage, resolveSessionSiteId } from "@/lib/online-orders/session-manager"
 import { getCurrentUser } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
@@ -13,8 +13,9 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const siteId = searchParams.get("siteId") || "auto"
+  const resolvedSiteId = await resolveSessionSiteId(siteId)
 
-  const page = getSessionPage(siteId)
+  const page = getSessionPage(resolvedSiteId)
   if (!page || page.isClosed()) {
     // Return a placeholder or 404
     return NextResponse.json({ error: "No active session" }, { status: 404 })
