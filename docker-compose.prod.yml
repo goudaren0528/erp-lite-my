@@ -24,7 +24,7 @@ services:
     # Ports and Environment are usually managed by Dokploy, 
     # but we map the internal port 3000 just in case.
     ports:
-      - "3006:3000"
+      - "${HOST_PORT:-3006}:3000"
     
     environment:
       - DATABASE_URL=${DATABASE_URL:-file:/app/data/erp-lite.db}
@@ -41,25 +41,25 @@ services:
     
     # Mount uploads directory for persistence
     volumes:
-      - ./public/uploads:/app/public/uploads
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - ./public/uploads${PROJECT_SUFFIX:-}:/app/public/uploads
+      - ./data${PROJECT_SUFFIX:-}:/app/data
+      - ./logs${PROJECT_SUFFIX:-}:/app/logs
     networks:
       - erp-lite-network
       - dokploy-network
     
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.erp-lite-web.rule=Host(`${DOMAIN_NAME}`)"
-      - "traefik.http.routers.erp-lite-web.entrypoints=web,websecure"
-      - "traefik.http.routers.erp-lite-web.tls.certresolver=letsencrypt"
-      - "traefik.http.services.erp-lite-web.loadbalancer.server.port=3000"
+      - "traefik.http.routers.erp-lite-web${PROJECT_SUFFIX:-}.rule=Host(`${DOMAIN_NAME}`)"
+      - "traefik.http.routers.erp-lite-web${PROJECT_SUFFIX:-}.entrypoints=web,websecure"
+      - "traefik.http.routers.erp-lite-web${PROJECT_SUFFIX:-}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.erp-lite-web${PROJECT_SUFFIX:-}.loadbalancer.server.port=3000"
 
 networks:
   dokploy-network:
     external: true
   erp-lite-network:
-    name: erp-lite-network
+    name: erp-lite-network${PROJECT_SUFFIX:-}
     driver: bridge
     ipam:
       config:
