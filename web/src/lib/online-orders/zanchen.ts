@@ -19,6 +19,7 @@ export type SiteConfig = {
   id: string
   name: string
   enabled: boolean
+  hidden?: boolean
   loginUrl: string
   username: string
   password: string

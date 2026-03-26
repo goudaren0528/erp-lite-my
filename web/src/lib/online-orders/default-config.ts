@@ -18,18 +18,19 @@ export const defaultConfig = {
       maxPages: 0,
       selectors: {
         login_button: "#form1 > button",
-        order_menu_link: "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=order.list.status1",
+        order_menu_link: "https://szguokuai.zlj.xyzulin.top/web/index.php?status=1&st=status1&ordersn=&goodstitle=&channel=&mobile=&member=&perm_user=&order_status=&start_time=&end_time=&merch_user=&source_from=&phoneLockStatus=undefined&address=&deviceSn=&package_type=&ip=&order_tag=&page=1&searchtime=createtime&remarksaler=&expresssn=&bad_debt=null&c=site&a=entry&m=ewei_shopv2&do=web&r=order.list.main",
         password_input: "#form1 > div > div:nth-child(4) > input",
         pending_count_element: "",
         pending_tab_selector: "#myTab > li:nth-child(3) > a",
         username_input: "#form1 > div > div:nth-child(3) > input",
-        order_list_container: "#table > div > div > div",
+        order_list_container: "#table > div > div",
         order_row_selectors: "",
         order_row_selector_template: "#table > div > div > div > div:nth-child({i})",
         order_row_index_start: "4",
         order_row_index_step: "2",
-        order_row_index_end: "",
-        pagination_next_selector: ""
+        order_row_index_end: "42",
+        pagination_next_selector: "#foreach_page > li:nth-child(11) > a",
+        all_orders_tab_selector: ""
       }
     },
     {
@@ -47,13 +48,14 @@ export const defaultConfig = {
         pending_count_element: "#pane-审核中 > div.flex-c.jc-s > div:nth-child(2) > div > span.el-pagination__total",
         pending_tab_selector: "#tab-审核中",
         username_input: "#app > div > form > div:nth-child(2) > div > div > input",
-        order_list_container: "",
+        order_list_container: "#app > div > div.main-container.hasTagsView > section > div > div.tab-container > div > div.el-tabs__content",
         order_row_selectors: "",
-        order_row_selector_template: "",
-        order_row_index_start: "",
-        order_row_index_step: "",
-        order_row_index_end: "",
-        pagination_next_selector: ""
+        order_row_selector_template: "#pane-全部订单 > div.el-table.table-mg.table-back.el-table--fit.el-table--striped.el-table--border.el-table--enable-row-hover.el-table--medium > div.el-table__body-wrapper.is-scrolling-none > table > tbody > tr:nth-child({i})",
+        order_row_index_start: "1",
+        order_row_index_step: "2",
+        order_row_index_end: "199",
+        pagination_next_selector: "#pane-全部订单 > div.flex-c.jc-s > div:nth-child(2) > div > button.btn-next",
+        all_orders_tab_selector: "#tab-全部订单"
       }
     },
     {
@@ -71,13 +73,14 @@ export const defaultConfig = {
         pending_count_element: "#main > div > div.single-page-con > div > div > div > div > div:nth-child(6) > ul > span",
         pending_tab_selector: "#main > div > div.single-page-con > div > div > div > div > ul > li:nth-child(3)",
         username_input: "#main > div > div > div > div.ivu-row > form > div.ivu-form-item.ivu-form-item-required > div > div.ivu-input-wrapper.ivu-input-wrapper-large.ivu-input-type-text > input",
-        order_list_container: "",
+        order_list_container: "#main > div > div.single-page-con > div > div > div > div",
         order_row_selectors: "",
-        order_row_selector_template: "",
-        order_row_index_start: "",
-        order_row_index_step: "",
-        order_row_index_end: "",
-        pagination_next_selector: ""
+        order_row_selector_template: "#main > div > div.single-page-con > div > div > div > div > div:nth-child({i})",
+        order_row_index_start: "6",
+        order_row_index_step: "1",
+        order_row_index_end: "55",
+        pagination_next_selector: "#main > div > div.single-page-con > div > div > div > div > div.mt_10.ivu-row-flex.ivu-row-flex-middle.ivu-row-flex-space-between > ul > li.ivu-page-next",
+        all_orders_tab_selector: "#main > div > div.single-page-con > div > div > div > div > ul > li:nth-child(1)"
       }
     },
     {
@@ -90,18 +93,19 @@ export const defaultConfig = {
       maxPages: 0,
       selectors: {
         login_button: "#app > div.login > form > div:nth-child(6) > div > button",
-        order_menu_link: "https://merchant.qnvipmall.com/order/audit",
+        order_menu_link: "https://merchant.qnvipmall.com/order/order-list",
         password_input: "#app > div.login > form > div:nth-child(3) > div > div > input",
         pending_count_element: "#app > div.app-wrapper.openSidebar > div.main-container.hasTagsView > div:nth-child(2) > section > div > div.app-pager > div > span.el-pagination__total",
         pending_tab_selector: "#tags-view-container > div > div.el-scrollbar__wrap > div > span.tags-view-item.router-link-exact-active.router-link-active.active",
         username_input: "#app > div.login > form > div:nth-child(2) > div > div > input",
-        order_list_container: "",
+        order_list_container: "#app > div.app-wrapper.openSidebar > div.main-container.hasTagsView > div:nth-child(2) > section > div > div.el-table.el-table--fit.el-table--border.el-table--enable-row-hover.el-table--enable-row-transition.el-table--medium",
         order_row_selectors: "",
-        order_row_selector_template: "",
-        order_row_index_start: "",
-        order_row_index_step: "",
-        order_row_index_end: "",
-        pagination_next_selector: ""
+        order_row_selector_template: "#app > div.app-wrapper.openSidebar > div.main-container.hasTagsView > div:nth-child(2) > section > div > div.el-table.el-table--fit.el-table--border.el-table--enable-row-hover.el-table--enable-row-transition.el-table--medium > div.el-table__body-wrapper.is-scrolling-none > table > tbody > tr:nth-child({i})",
+        order_row_index_start: "1",
+        order_row_index_step: "1",
+        order_row_index_end: "15",
+        pagination_next_selector: "#app > div.app-wrapper.openSidebar > div.main-container.hasTagsView > div:nth-child(2) > section > div > div.app-pager > div > button.btn-next",
+        all_orders_tab_selector: ""
       }
     },
     {
@@ -114,24 +118,51 @@ export const defaultConfig = {
       maxPages: 0,
       selectors: {
         login_button: "#root > div > div > div.ant-spin-nested-loading.css-1x0dypw > div > div > div > div.ant-pro-form-login-main.css-1x0dypw > form > button",
-        order_menu_link: "https://www.llxzu.com/businessNew/#/Order/OrderManage/OrderList",
+        order_menu_link: "https://b.llxzu.com/#/Order/OrderManage/OrderList",
         password_input: "#smsLoginVerifyCode",
         pending_count_element: "#root > div > div.ant-layout.ant-layout-has-sider.css-dag3b9 > div.ant-pro-layout-container.css-dag3b9 > main > div.ant-pro-page-container.css-dag3b9 > div.ant-pro-grid-content.css-dag3b9 > div > div > div.css-dag3b9.ant-pro-page-container-children-container > div.orderListStyle > div:nth-child(3) > div > ul > li.ant-pagination-total-text",
         pending_tab_selector: "#root > div > div.ant-layout.ant-layout-has-sider.css-dag3b9 > div.ant-pro-layout-container.css-dag3b9 > main > div.ant-pro-page-container.css-dag3b9 > div.ant-pro-grid-content.css-dag3b9 > div > div > div.css-dag3b9.ant-pro-page-container-children-container > div.orderListStyle > div:nth-child(2) > div > div.order_tabs > div.ant-tabs.ant-tabs-top.css-dag3b9 > div.ant-tabs-nav > div.ant-tabs-nav-wrap.ant-tabs-nav-wrap-ping-right > div > div:nth-child(3)",
         username_input: "#mobile",
+        order_list_container: "#root > div > div.ant-layout.ant-layout-has-sider.css-d1kefi > div.ant-pro-layout-container.css-d1kefi > main > div.ant-pro-page-container.css-d1kefi > div.ant-pro-grid-content.css-d1kefi > div > div > div.css-d1kefi.ant-pro-page-container-children-container > div.orderListStyle > div:nth-child(2) > div > div.order_list",
+        order_row_selectors: "",
+        order_row_selector_template: "#orderScreenshot{i}",
+        order_row_index_start: "0",
+        order_row_index_step: "1",
+        order_row_index_end: "9",
+        pagination_next_selector: "#root > div > div.ant-layout.ant-layout-has-sider.css-d1kefi > div.ant-pro-layout-container.css-d1kefi > main > div.ant-pro-page-container.css-d1kefi > div.ant-pro-grid-content.css-d1kefi > div > div > div.css-d1kefi.ant-pro-page-container-children-container > div.orderListStyle > div:nth-child(3) > div > ul > li.ant-pagination-next > button",
+        all_orders_tab_selector: ""
+      }
+    },
+    {
+      id: "rrz",
+      name: "人人租",
+      enabled: true,
+      loginUrl: "https://admin.rrzu.com/",
+      username: "",
+      password: "",
+      maxPages: 0,
+      selectors: {
+        login_button: "#server-login-wrap > div.ivu-row > div.col-content.ivu-col.ivu-col-span-sm-11.ivu-col-span-lg-11 > div > div:nth-child(2) > button",
+        order_menu_link: "https://admin.rrzu.com/order/v4-order-index?page_id=69c3a6f8618964902",
+        password_input: "",
+        pending_count_element: "",
+        pending_tab_selector: "",
+        username_input: "#server-login-wrap > div.ivu-row > div.col-content.ivu-col.ivu-col-span-sm-11.ivu-col-span-lg-11 > div > div:nth-child(2) > form > div:nth-child(1) > div > div > input",
         order_list_container: "",
         order_row_selectors: "",
         order_row_selector_template: "",
         order_row_index_start: "",
         order_row_index_step: "",
         order_row_index_end: "",
-        pagination_next_selector: ""
+        pagination_next_selector: "#app > div > div > div.page-content > div > div.page-foot.pagination > div > div > div:nth-child(2) > ul > li.ant-pagination-next > button",
+        all_orders_tab_selector: ""
       }
     },
     {
       id: "doulaizu",
       name: "兜来租",
       enabled: true,
+      hidden: true,
       loginUrl: "https://dlz.doulaizu.com.cn",
       username: "",
       password: "",
@@ -149,7 +180,8 @@ export const defaultConfig = {
         order_row_index_start: "",
         order_row_index_step: "",
         order_row_index_end: "",
-        pagination_next_selector: ""
+        pagination_next_selector: "",
+        all_orders_tab_selector: ""
       }
     }
   ]

@@ -1073,7 +1073,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             if (requiredQty <= 0) return
             const base = componentStock[itemTypeId] || 0
             const used = occupied?.get(itemTypeId) || 0
-            const available = Math.max(0, base - used)
+            const available = base - used
             const buildable = Math.floor(available / requiredQty)
             if (buildable < minBuildable) minBuildable = buildable
         })
@@ -1142,7 +1142,7 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             const specInfo = selectedVariant ? specLookup.byId.get(selectedVariant.id) : null
             const buildable = computeBuildable(specInfo?.spec.bomItems, occupiedComponents)
             available = buildable !== null ? buildable : (totalStock - occupiedCount)
-            occupied = Math.max(0, totalStock - available)
+            occupied = totalStock - available
         } else {
             available = totalStock - occupiedCount
             occupied = occupiedCount
@@ -1208,9 +1208,9 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
         }
     }, [activeTab, selectedItemTypeId, selectedVariantId, componentStock, allVariants])
 
-    const todayAllItemsMovement = useMemo(() => {
+    const allItemsMovement = useMemo(() => {
         if (activeTab !== "item") return null
-        const today = new Date()
+        const targetDate = selectedDate || new Date()
         let inTotal = 0
         let outTotal = 0
 
@@ -1226,12 +1226,12 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
             if (qtySum <= 0) return
 
             const outDate = range.outDate || range.start
-            if (isSameDay(today, outDate)) outTotal += qtySum
-            if (isSameDay(today, range.end)) inTotal += qtySum
+            if (isSameDay(targetDate, outDate)) outTotal += qtySum
+            if (isSameDay(targetDate, range.end)) inTotal += qtySum
         })
 
-        return { inTotal, outTotal }
-    }, [activeTab, orders, orderRangeMap, specLookup])
+        return { inTotal, outTotal, date: targetDate }
+    }, [activeTab, orders, orderRangeMap, specLookup, selectedDate])
 
     const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1))
     const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1))
@@ -1346,9 +1346,11 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                 return (
                                     <div 
                                         key={day.toString()} 
-                                        className={`min-h-[88px] sm:min-h-[120px] p-1.5 sm:p-2 rounded-md border hover:shadow-sm transition-all flex flex-col justify-between
+                                        onClick={() => setSelectedDate(day)}
+                                        className={`min-h-[88px] sm:min-h-[120px] p-1.5 sm:p-2 rounded-md border hover:shadow-sm transition-all flex flex-col justify-between cursor-pointer
                                             ${isToday ? 'ring-2 ring-primary ring-offset-1' : 'border-border'}
                                             ${isPast ? 'bg-gray-100 text-muted-foreground grayscale' : ''}
+                                            ${selectedDate && isSameDay(day, selectedDate) && !isToday ? 'ring-1 ring-primary/50' : ''}
                                         `}
                                     >
                                         <div className="flex justify-between items-start mb-1 sm:mb-2">
@@ -1524,8 +1526,16 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                         </th>
                                         {days.map(day => {
                                             const isToday = isSameDay(day, new Date())
+                                            const isSelected = selectedDate && isSameDay(day, selectedDate)
                                             return (
-                                                <th key={day.toString()} className={`px-2 py-3 text-center text-xs font-medium text-muted-foreground min-w-[50px] border-l border-b ${isToday ? 'bg-primary/5 text-primary' : ''}`}>
+                                                <th 
+                                                    key={day.toString()} 
+                                                    onClick={() => setSelectedDate(day)}
+                                                    className={`px-2 py-3 text-center text-xs font-medium text-muted-foreground min-w-[50px] border-l border-b cursor-pointer hover:bg-muted/50 transition-colors
+                                                        ${isToday ? 'bg-primary/5 text-primary' : ''}
+                                                        ${isSelected && !isToday ? 'bg-primary/5' : ''}
+                                                    `}
+                                                >
                                                     <div className="whitespace-nowrap">{format(day, 'MM-dd')}</div>
                                                     <div className="text-[10px] font-normal">{format(day, 'EE', { locale: zhCN })}</div>
                                                 </th>
@@ -1568,7 +1578,10 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                                                     return (
                                                         <td 
                                                             key={day.toString()} 
-                                                            className={`px-1 py-1 text-center border-l hover:brightness-95 transition-all p-0`}
+                                                            onClick={() => setSelectedDate(day)}
+                                                            className={`px-1 py-1 text-center border-l hover:brightness-95 transition-all p-0 cursor-pointer
+                                                                ${selectedDate && isSameDay(day, selectedDate) && !isSameDay(day, new Date()) ? 'bg-primary/5' : ''}
+                                                            `}
                                                         >
                                                             <div className="h-full min-h-[40px]">
                                                                 <StatsCell 
@@ -1712,13 +1725,13 @@ export function InventoryCalendarClient({ canManage }: InventoryCalendarClientPr
                         </Popover>
                     )}
 
-                    {activeTab === "item" && todayAllItemsMovement && (
+                    {activeTab === "item" && allItemsMovement && (
                         <div className="flex items-center gap-1">
                             <Badge variant="secondary" className="h-8 text-xs font-normal">
-                                今日到货 {todayAllItemsMovement.inTotal}
+                                {isSameDay(allItemsMovement.date, new Date()) ? '今日' : format(allItemsMovement.date, 'MM-dd')} 到货 {allItemsMovement.inTotal}
                             </Badge>
                             <Badge variant="secondary" className="h-8 text-xs font-normal">
-                                今日发货 {todayAllItemsMovement.outTotal}
+                                {isSameDay(allItemsMovement.date, new Date()) ? '今日' : format(allItemsMovement.date, 'MM-dd')} 发货 {allItemsMovement.outTotal}
                             </Badge>
                         </div>
                     )}

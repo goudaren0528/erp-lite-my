@@ -73,6 +73,7 @@ type SiteConfig = {
   id: string
   name: string
   enabled: boolean
+  hidden?: boolean
   loginUrl: string
   username: string
   password: string
@@ -265,7 +266,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
       s.id.toLowerCase().includes(tabLower) ||
       tabLower.includes(s.id.toLowerCase()) ||
       s.name.includes(tab) ||
-      (tabLower === "chenglin" && (s.name.includes("诚赁") || s.id.toLowerCase().includes("chenglin"))) ||
+      (tabLower === "chenlin" && (s.name.includes("诚赁") || s.id.toLowerCase().includes("chenlin"))) ||
       (tabLower === "aolzu" && (s.name.includes("奥租") || s.id.toLowerCase().includes("aolzu"))) ||
       (tabLower === "zanchen" && (s.name.includes("赞晨") || s.id.toLowerCase().includes("zanchen"))) ||
       (tabLower === "llxzu" && (s.name.includes("零零享") || s.id.toLowerCase().includes("llxzu"))) ||
@@ -277,7 +278,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
 
   const defaultSiteId = initialTab
     ? (resolveTabToSiteId(initialTab) ?? initialTab)
-    : (zanchenSite ? zanchenSite.id : (initialConfig.sites[0]?.id || ""))
+    : (zanchenSite ? zanchenSite.id : (initialConfig.sites.find(s => !s.hidden)?.id || ""))
 
   const [activeSiteId, setActiveSiteId] = useState(defaultSiteId)
 
@@ -652,7 +653,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
     if (!activeSite) return
 
     // Protect core platforms
-    const corePlatforms = ["zanchen", "chenglin", "aolzu", "youpin", "llxzu", "rrz"]
+    const corePlatforms = ["zanchen", "chenlin", "aolzu", "youpin", "llxzu", "rrz"]
     const isCore = corePlatforms.some(id => 
         activeSite.id === id || 
         activeSite.id.toLowerCase().includes(id) ||
@@ -660,7 +661,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
         (id === "rrz" && activeSite.name.includes("人人租")) ||
         (id === "youpin" && activeSite.name.includes("优品")) ||
         (id === "aolzu" && activeSite.name.includes("奥租")) ||
-        (id === "chenglin" && activeSite.name.includes("诚赁")) ||
+        (id === "chenlin" && activeSite.name.includes("诚赁")) ||
         (id === "zanchen" && activeSite.name.includes("赞晨"))
     )
 
@@ -690,6 +691,12 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
       loginUrl: defaultSite.loginUrl,
       selectors: { ...defaultSite.selectors }
     }))
+    
+    // Ensure JSON editor gets updated if in JSON mode
+    if (selectorMode === "json") {
+      setSelectorsJson(JSON.stringify(defaultSite.selectors || {}, null, 2))
+    }
+    
     toast.success(`已应用【${activeSite.name}】的初始配置，请点击底部保存生效`)
   }
 
@@ -904,7 +911,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                         <SelectValue placeholder="选择站点" />
                       </SelectTrigger>
                       <SelectContent>
-                        {draft.sites.map(site => (
+                        {draft.sites.filter(s => !s.hidden).map(site => (
                           <SelectItem key={site.id} value={site.id}>
                             {site.name} ({site.id})
                           </SelectItem>
@@ -1042,7 +1049,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                         <SelectValue placeholder="选择站点" />
                       </SelectTrigger>
                       <SelectContent>
-                        {draft.sites.map(site => (
+                        {draft.sites.filter(s => !s.hidden).map(site => (
                           <SelectItem key={site.id} value={site.id}>
                             {site.name}
                           </SelectItem>
@@ -1547,7 +1554,7 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ALL">全部平台</SelectItem>
-                    {config.sites.map(site => {
+                    {config.sites.filter(s => !s.hidden).map(site => {
                       const platform = getTabPlatform(site.id)
                       if (!platform) return null
                       return <SelectItem key={site.id} value={platform}>{site.name}</SelectItem>
@@ -1583,15 +1590,15 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
             </div>
           </div>
           <TabsList className="flex flex-wrap">
-            {config.sites.map(site => (
+            {config.sites.filter(s => !s.hidden).map(site => (
               <TabsTrigger key={site.id} value={site.id}>
                 {site.name}
               </TabsTrigger>
             ))}
           </TabsList>
-          {config.sites.map(site => (
+          {config.sites.filter(s => !s.hidden).map(site => (
             <TabsContent key={site.id} value={site.id}>
-              {site.id === "zanchen" || site.id === "chenglin" || site.id === "aolzu" || site.id === "youpin" || site.id === "llxzu" || site.id === "rrz" || site.name.includes("诚赁") || site.name.includes("奥租") || site.name.includes("优品") || site.name.includes("零零享") || site.name.includes("人人租") ? (
+              {site.id === "zanchen" || site.id === "chenlin" || site.id === "aolzu" || site.id === "youpin" || site.id === "llxzu" || site.id === "rrz" || site.name.includes("诚赁") || site.name.includes("奥租") || site.name.includes("优品") || site.name.includes("零零享") || site.name.includes("人人租") ? (
                 <div className="space-y-4">
                   {site.id === "zanchen" && !site.selectors.order_list_container?.trim() ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -1601,11 +1608,11 @@ export function OnlineOrdersClient({ initialConfig, canClearOrders = false }: { 
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-muted-foreground">
                       {site.enabled ? (
-                          (site.id === "zanchen" || site.id === "chenglin" || site.id === "aolzu" || site.id === "youpin" || site.id === "llxzu" || site.id === "rrz" || site.name.includes("诚赁") || site.name.includes("奥租") || site.name.includes("优品") || site.name.includes("零零享") || site.name.includes("人人租"))
+                          (site.id === "zanchen" || site.id === "chenlin" || site.id === "aolzu" || site.id === "youpin" || site.id === "llxzu" || site.id === "rrz" || site.name.includes("诚赁") || site.name.includes("奥租") || site.name.includes("优品") || site.name.includes("零零享") || site.name.includes("人人租"))
                             ? (
                                 <>
                                 {currentStatus?.status === "running" ? "正在同步中..." : (() => {
-                                  const siteIdToMetaKey: Record<string, string> = { zanchen: "ZANCHEN", chenglin: "诚赁", aolzu: "奥租", youpin: "优品租", llxzu: "零零享", rrz: "人人租" }
+                                  const siteIdToMetaKey: Record<string, string> = { zanchen: "ZANCHEN", chenlin: "诚赁", aolzu: "奥租", youpin: "优品租", llxzu: "零零享", rrz: "人人租" }
                                   const metaKey = siteIdToMetaKey[site.id] ?? site.name
                                   const lastAt = currentStatus?.lastRunAt || syncMeta[metaKey]?.lastSyncAt
                                   return lastAt ? `最近抓取: ${new Date(lastAt).toLocaleString()}` : "等待启动"

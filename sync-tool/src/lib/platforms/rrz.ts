@@ -28,6 +28,8 @@ type RrzRuntime = {
   page?: Page
   headless?: boolean
   shouldStop?: boolean
+  lastSuccessfulPage?: number
+  lastSiteId?: string
 }
 
 type RrzRuntimeWithApi = RrzRuntime & {
@@ -1376,9 +1378,9 @@ async function parseOrders(page: Page, root: RrzRoot, site: SiteConfig, expected
                 keys: Object.keys(record).slice(0, 30)
             }
         })
-        appendLog(`[API Raw Summary] page=${expectedPage} samples=${toCompactJson(samples, 3000)}`)
+        // appendLog(`[API Raw Summary] page=${expectedPage} samples=${toCompactJson(samples, 3000)}`)
         if (apiList.length > 0) {
-            appendLog(`[API Raw First] page=${expectedPage} data=${toCompactJson(apiList[0], 6000)}`)
+            // appendLog(`[API Raw First] page=${expectedPage} data=${toCompactJson(apiList[0], 6000)}`)
         }
     } catch (e) {
         appendLog(`[API Raw] page=${expectedPage} log_failed=${e}`)
@@ -2676,7 +2678,7 @@ async function saveOrdersBatch(orders: RrzParsedOrder[]) {
   if (false) {
     let savedCount = 0
     try {
-        appendLog(`[Database] Preparing to save ${orders.length} orders. Sample: ${JSON.stringify(orders[0] || {}, null, 2)}`)
+        appendLog(`[Database] Preparing to save ${orders.length} orders.`)
         
         // Auto-match specId for orders that don't have one yet
         for (const order of orders) {
@@ -2746,6 +2748,15 @@ export async function startRrzSync(siteId: string) {
     updateStatus({ status: "running", message: "Starting...", logs: previousLogs, lastRunAt: new Date().toISOString() })
     appendLog(`Starting sync for ${targetSite.name} (ID: ${targetSite.id})`)
 
+    let startingPage = 1
+    if (runtime.lastSiteId === targetSite.id && runtime.lastSuccessfulPage && runtime.lastSuccessfulPage > 0) {
+        startingPage = runtime.lastSuccessfulPage
+        appendLog(`Resuming from previously successful page: ${startingPage}`)
+    } else {
+        runtime.lastSuccessfulPage = undefined
+    }
+    runtime.lastSiteId = targetSite.id
+
     const headless = config?.headless ?? false 
     appendLog(`Using headless mode: ${headless}`)
     
@@ -2814,33 +2825,58 @@ export async function startRrzSync(siteId: string) {
         await logOrderDomStats(orderRoot, "after_switch_tab")
     }
 
-    // Reset pagination to page 1
-    try {
-        await handlePopup(page)
-        const page1Btn = (await orderRoot.$(".ant-pagination-item-1").catch(() => null)) || (await orderRoot.$("li[title='1']").catch(() => null)) || (await orderRoot.$("text=1").catch(() => null))
-        if (page1Btn) {
-            const isActive = await page1Btn.getAttribute("class").then(c => c?.includes("active"))
-            if (!isActive) {
-                appendLog("Resetting pagination to page 1...")
-                await page1Btn.click({ force: true })
-                await waitRandom(page, 2500, 4000)
+    // Reset pagination to page 1 only if startingPage is 1
+    if (startingPage === 1) {
+        try {
+            await handlePopup(page)
+            const page1Btn = (await orderRoot.$(".ant-pagination-item-1").catch(() => null)) || (await orderRoot.$("li[title='1']").catch(() => null)) || (await orderRoot.$("text=1").catch(() => null))
+            if (page1Btn) {
+                const isActive = await page1Btn.getAttribute("class").then(c => c?.includes("active"))
+                if (!isActive) {
+                    appendLog("Resetting pagination to page 1...")
+                    await page1Btn.click({ force: true })
+                    await waitRandom(page, 2500, 4000)
+                }
+            }
+        } catch (e) {
+            appendLog(`Failed to reset pagination: ${e}`)
+        }
+
+        {
+            orderRoot = await pickOrderRoot(page, "after_pagination_reset")
+            const ok = await waitForOrderListReady(page, orderRoot, 25000)
+            if (!ok) {
+                appendLog("[Warning] Order list not ready after pagination reset.")
+                await saveDebugScreenshot(page, "after_pagination_reset")
+            }
+            await logOrderDomStats(orderRoot, "after_pagination_reset")
+        }
+    } else {
+        appendLog(`Skipping pagination reset, need to navigate to page ${startingPage}...`)
+    }
+
+    let currentPage = startingPage
+    if (currentPage > 1) {
+        appendLog(`Advancing to start page ${currentPage}...`)
+        for (let p = 1; p < currentPage; p++) {
+            appendLog(`Initialization: Advancing to page ${p + 1}...`)
+            if (targetSite.selectors.pagination_next_selector) {
+                const currentRoot = await pickOrderRoot(page, `init_step_${p}`)
+                const nb = await currentRoot.$(targetSite.selectors.pagination_next_selector).catch((e) => {
+                    appendLog(`Failed to find next button: ${e}`)
+                    return null
+                })
+                if (nb) { 
+                    await nb.click({ force: true }).catch(e => appendLog(`Failed to click next: ${e}`))
+                    await waitRandom(page, 2000, 3500) 
+                } else {
+                    appendLog(`Next button not found during initialization step ${p}.`)
+                }
             }
         }
-    } catch (e) {
-        appendLog(`Failed to reset pagination: ${e}`)
+        orderRoot = await pickOrderRoot(page, `init_page_${currentPage}`)
     }
 
-    {
-        orderRoot = await pickOrderRoot(page, "after_pagination_reset")
-        const ok = await waitForOrderListReady(page, orderRoot, 25000)
-        if (!ok) {
-            appendLog("[Warning] Order list not ready after pagination reset.")
-            await saveDebugScreenshot(page, "after_pagination_reset")
-        }
-        await logOrderDomStats(orderRoot, "after_pagination_reset")
-    }
-
-    let currentPage = 1
     const configMaxPages = Number(targetSite.maxPages ?? (targetSite as unknown as { max_pages?: number }).max_pages)
     const MAX_PAGES = !isNaN(configMaxPages) && configMaxPages > 0 ? configMaxPages : 50
     
@@ -2863,12 +2899,16 @@ export async function startRrzSync(siteId: string) {
     const MAX_LOGIN_RETRIES = 1
 
     const rebuildAndNavigate = async (opts?: { preserveContext?: boolean }) => {
-        const preserveContext = !!opts?.preserveContext
+        const preserveContext = !!opts?.preserveContext || (runtime as Record<string, unknown>)._isShared
         if (!preserveContext) {
             try { await runtime.context?.close() } catch {}
             runtime.context = undefined
             runtime.page = undefined
             await new Promise(r => setTimeout(r, 3000))
+        } else {
+            try { await runtime.page?.close() } catch {}
+            runtime.page = undefined
+            await new Promise(r => setTimeout(r, 1000))
         }
         page = await ensurePage(headless)
         await login(page, targetSite)
@@ -2889,10 +2929,29 @@ export async function startRrzSync(siteId: string) {
         }
         if (currentPage > 1) {
             appendLog(`Re-navigating to page ${currentPage} after crash recovery...`)
-            for (let p = 1; p < currentPage; p++) {
-                if (targetSite.selectors.pagination_next_selector) {
-                    const nb = await orderRoot.$(targetSite.selectors.pagination_next_selector).catch(() => null)
-                    if (nb) { await nb.click({ force: true }); await waitRandom(page, 2000, 3500) }
+            const jumperInput = await orderRoot.$('.ant-pagination-options-quick-jumper input').catch(() => null)
+            if (jumperInput) {
+                appendLog(`Found quick jumper, jumping directly to page ${currentPage}...`)
+                await jumperInput.fill(currentPage.toString())
+                await jumperInput.press('Enter')
+                await waitRandom(page, 2000, 3500)
+            } else {
+                for (let p = 1; p < currentPage; p++) {
+                    appendLog(`Crash recovery: Advancing to page ${p + 1}...`)
+                    if (targetSite.selectors.pagination_next_selector) {
+                        // Re-fetch orderRoot to avoid stale element
+                        const currentRoot = await pickOrderRoot(page, `crash_recovery_step_${p}`)
+                        const nb = await currentRoot.$(targetSite.selectors.pagination_next_selector).catch((e) => {
+                            appendLog(`Failed to find next button: ${e}`)
+                            return null
+                        })
+                        if (nb) { 
+                            await nb.click({ force: true }).catch(e => appendLog(`Failed to click next: ${e}`))
+                            await waitRandom(page, 2000, 3500) 
+                        } else {
+                            appendLog(`Next button not found during recovery step ${p}.`)
+                        }
+                    }
                 }
             }
             orderRoot = await pickOrderRoot(page, `crash_recovery_page_${currentPage}`)
@@ -2911,7 +2970,7 @@ export async function startRrzSync(siteId: string) {
 
         if (page.isClosed()) throw new Error("Target page, context or browser has been closed")
 
-        const PAGE_TIMEOUT_MS = 5 * 60 * 1000
+        const PAGE_TIMEOUT_MS = 90 * 1000
         let pageTimeoutHandle: ReturnType<typeof setTimeout> | undefined
         const pageTimeoutPromise = new Promise<never>((_, reject) => {
             pageTimeoutHandle = setTimeout(() => reject(new Error("Target page, context or browser has been closed")), PAGE_TIMEOUT_MS)
@@ -2991,6 +3050,9 @@ export async function startRrzSync(siteId: string) {
         updateStatus({
             message: progressMsg
         });
+
+        // Record successful page
+        runtime.lastSuccessfulPage = currentPage;
 
         if (currentPage >= MAX_PAGES) {
             appendLog(`Reached max pages limit (${MAX_PAGES}). Stopping.`)
