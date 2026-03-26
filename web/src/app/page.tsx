@@ -1,5 +1,6 @@
 
 import Link from "next/link"
+import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { prisma } from "@/lib/db"
@@ -34,6 +35,10 @@ const statusMap: Record<string, { label: string; color: string; order: number }>
 export default async function Home() {
   const user = await getCurrentUser()
   
+  if (!user) {
+    redirect('/login')
+  }
+
   const isAdmin = user?.role === 'ADMIN'
   const canViewAllOrders = isAdmin || user?.permissions?.includes('view_all_orders')
 

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db"
 import { PromoterList } from "@/components/promoters/promoter-list"
 import { getCurrentUser } from "@/lib/auth"
+import { redirect } from "next/navigation"
 import { OrderSource, Role, Promoter } from "@/types"
 
 type UserRaw = {
@@ -14,6 +15,9 @@ type UserRaw = {
 
 export default async function PromotersPage() {
     const currentUser = await getCurrentUser()
+    if (!currentUser) {
+        redirect('/login')
+    }
 
     const isAdmin = currentUser?.role === 'ADMIN'
     const canViewAll = isAdmin || currentUser?.permissions?.includes('view_all_promoters')
